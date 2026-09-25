@@ -1,10 +1,14 @@
-# Performance — the consolidated numbers, and what they're worth
+# LLM benchmarks: Apple Silicon eGPU vs native — tokens per second
 
-Every number on this page carries its gate context: what workload, what
-context length, what exactness tier, and which campaign journal paid for it.
-The honesty is a feature — the walls and the workload-dependence are
-measured and published, not footnoted away. Deep dives:
-[history/CAMPAIGN.md](history/CAMPAIGN.md) (the condensed ladder),
+LLM tokens-per-second benchmarks for Qwen3.8-27B running on a Mac: an RTX
+3090 eGPU in a Thunderbolt 4 enclosure on a MacBook Air M2, driven through
+the custom DriverKit dext — with a clearly labeled native-Linux reference on
+the same GPU class for the "Apple Silicon vs NVIDIA for LLM inference"
+comparison. Every number on this page carries its gate context: what
+workload, what context length, what exactness tier, and which campaign
+journal paid for it. The honesty is a feature — the walls and the
+workload-dependence are measured and published, not footnoted away. Deep
+dives: [history/CAMPAIGN.md](history/CAMPAIGN.md) (the condensed ladder),
 [history/PREFILL.md](history/PREFILL.md) (prefill),
 [history/R8_DECODE.md](history/R8_DECODE.md) (the 75-cross),
 [history/PERFLOG.md](history/PERFLOG.md) (the running log).
@@ -37,7 +41,7 @@ from the FIRST clean run (timing reps advance model state).
 **Tier-2** = the one authorized numerics change (see below). Everything else
 in every table is bit-identical to the path it replaced.
 
-## Decode @100k context
+## Decode @100k context (RTX 3090, tokens per second)
 
 ### Headline
 
@@ -99,7 +103,7 @@ fairness: two streams at ~57-80% each instead of 100%/queued) — not an
 aggregate win on this engine at B=2. The B axis needs M6+/wider kernel
 families (the campaign), not more wiring.
 
-## Prefill (fresh prompt ingestion)
+## Prefill (fresh prompt ingestion, tokens per second)
 
 | Rung | 2k FRESH | 8k | 100k rebuild | % of 662 ref @100k |
 |---|---|---|---|---|
@@ -173,7 +177,7 @@ line-for-line**. Battery + banks: [history/T2_P8W4.md](history/T2_P8W4.md).
 the probe is 59.5 of the 118.0 ms K=10 cycle; deeper-K continuation was
 priced offline at K=12-16 optimum ONLY IF per-rung cost halves (D4).
 
-## Comparison context (clearly labeled: NOT this stack)
+## Comparison context: eGPU on a Mac vs native Linux (clearly labeled: NOT this stack)
 
 Reference numbers from a **native Linux stack on the same GPU class**
 (cloud 3090, syv-ai vLLM W4A16, measured during the R0 pre-check —

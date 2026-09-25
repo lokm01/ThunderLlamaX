@@ -1,29 +1,33 @@
-# Getting started — from bare metal to a running service
+# How to run a local LLM on a Mac with an eGPU — getting started
 
-This guide takes you from "a Mac and a spare GPU" to a running ThunderLlamaX
-service. It absorbs the old SETUP.md. Time budget for a first setup: an
-afternoon (weight packing and kernel builds are one-time).
+This is the Mac eGPU setup guide: it takes you from "a Mac and a spare GPU"
+to a running ThunderLlamaX service — a Thunderbolt eGPU enclosure with an
+RTX 3090, the DriverKit driver, packed weights, and an OpenAI-compatible API
+on 127.0.0.1:8080. It absorbs the old SETUP.md. Time budget for a first
+setup: an afternoon (weight packing and kernel builds are one-time).
 
 If anything faults along the way, read
 [DEXT_LAWS.md](DEXT_LAWS.md) before debugging — the failure signature almost
 always matches a known law, and a couple of the laws say "reboot first, then
 think."
 
-## 1. Hardware requirements
+## 1. Mac eGPU hardware requirements
 
 | Component | Requirement | Notes |
 |---|---|---|
 | Mac | Apple Silicon with **Thunderbolt 4** | developed and gated on a 16 GB MacBook Air M2; >= 16 GB host RAM |
 | GPU | NVIDIA **sm_86** class (Ampere) | developed and gated on **RTX 3090 24 GB** — the reference rig |
 | VRAM | **24 GB for the 100k-context config** (~21.6 GB live) | a 2k-context setup fits comfortably in less; see the memory map in [ARCHITECTURE.md](ARCHITECTURE.md) |
-| Enclosure | TB4 eGPU box or dock | TB4 end-to-end (TB3 links throttle the data path) |
+| Enclosure | a Thunderbolt eGPU enclosure or TB4 dock | TB4 end-to-end (TB3 links throttle the data path) |
 | Power | the usual for the GPU class; a 3090 wants ~350 W+ headroom | see thermals below |
 
 **Which GPUs are tested?** Exactly one: the RTX 3090 24 GB (sm_86). The
 kernel set is sm_86-specific — block sizes, `__shfl_sync` trees, `PRMT` int8
 dequant, register budgets — so other Ampere cards will likely work with
 re-tuning rather than recompiling, and non-Ampere arches need real porting.
-Treat anything but a 3090 as an experiment.
+Treat anything but a 3090 as an experiment. (Why a 3090 for LLM work? It is
+the cheapest 24 GB card with tensor cores — 24 GB of VRAM is the practical
+floor for 100k-token-context local inference on a 27B model.)
 
 **Power and thermals.** The eGPU enclosure needs to feed the card; under
 sustained prefill the 3090 pulls its full board power. Two operational notes
@@ -33,7 +37,32 @@ unplug/replug the dock power; an EFI-level cold cycle (below) handles the rest;
 (b) the Mac itself stays cool — nearly all compute is on the GPU; the host
 just steers.
 
-## 2. Software prerequisites
+## 2. Why there is no CUDA on macOS — and what drives the GPU instead
+
+The one-paragraph background, because it shapes every prerequisite below:
+
+- **macOS has no NVIDIA driver and no CUDA.** Apple's last NVIDIA web drivers
+  date from 2018, the CUDA toolkit dropped macOS soon after, and Apple Silicon
+  dropped eGPU support entirely. So the usual "install CUDA and go" path for
+  an NVIDIA GPU does not exist on a Mac — this is the gap ThunderLlamaX fills.
+- **What replaces it:** the TinyGPU **DriverKit system extension** (the
+  "dext"). It maps the GPU's PCIe BARs into userspace and submits work
+  directly — QMDs, pushbuffers, doorbells. There is no CUDA runtime, no CUDA
+  driver, and no NVIDIA userspace *at run time*; the dext plus the tinygrad
+  fork's NV backend are the entire driver stack. This makes the repo one of
+  the very few working answers to "is there a macOS eGPU driver for NVIDIA
+  GPUs?" — and the only one tuned for LLM inference.
+- **Where nvcc fits (build time only):** the kernels are hand-written CUDA
+  compiled ahead of time into raw cubins by an `nvcc` shim that execs into a
+  Docker container (see below). The engine loads the cubins as bare ELF
+  objects; the CUDA *toolchain* builds them, but nothing CUDA-branded runs on
+  the Mac at inference time.
+
+The deep end of the driver story (measured bandwidth, the dext's laws) is
+[ARCHITECTURE.md](ARCHITECTURE.md) and
+[DEXT_LAWS.md](DEXT_LAWS.md).
+
+## 3. Software prerequisites
 
 1. **The TinyGPU DriverKit system extension**
    (`org.tinygrad.tinygpu.driver2`) installed and activated. This is the hard
@@ -82,7 +111,7 @@ before running:
 Every GPU command needs `DEV=NV` (else tinygrad falls back to Metal and OOMs
 the Mac — harmless but wasted).
 
-## 3. Model preparation
+## 4. Model preparation
 
 - **GGUF**: `Qwen3.8-27B-IQ3_XXS` (bartowski). The engine hard-codes this
   model's exact per-layer quant mix (documented in
@@ -101,7 +130,7 @@ the Mac — harmless but wasted).
 - The a3b override JSONs (`lineage/a3b/override*.json`) reference their
   template `.cu` files relative to the `lineage/` directory.
 
-## 4. Build the kernels
+## 5. Build the kernels
 
 ```sh
 cd engine
@@ -110,7 +139,7 @@ python build_kernels.py && python build_w2.py && python build_hm.py
 #  must be on PATH and the docker VM up — see prerequisites)
 ```
 
-## 5. Bootstrap a context snapshot
+## 6. Bootstrap a context snapshot
 
 The engine resumes from a post-prefill snapshot in engine layout:
 
@@ -124,7 +153,7 @@ The engine resumes from a post-prefill snapshot in engine layout:
 
 For the 2k gate, `python bootstrap_w1b.py` produces the 2k bootstrap state.
 
-## 6. First launch — the canonical environment
+## 7. First launch — the canonical environment
 
 The canonical 100k gate/bench (the recipe that produced the published
 numbers):
@@ -260,7 +289,7 @@ cd engine && python3 tests/test_api_mocks.py && \
 | `BATCH_B=2` (+ R6 knobs) | the opt-in batch serving mode — see [SERVING.md](SERVING.md) and [history/R6_BATCH.md](history/R6_BATCH.md) before flipping |
 | `DO_T1=0` | (bench harness) skip the T=1 reference pass |
 
-## 7. Verifying it works
+## 8. Verifying it works
 
 ```sh
 # daemon health (also via the socket: see SERVING.md)
@@ -278,7 +307,7 @@ while loading); the completion streams coherent text and stops naturally;
 prompt cache hit); a second identical request returns in seconds (resident
 prefix reuse). Full API reference: [SERVING.md](SERVING.md).
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 **Read [DEXT_LAWS.md](DEXT_LAWS.md) first.** The failure signature almost
 always matches a known law — alignment, name-encoded launch size, stale bake,

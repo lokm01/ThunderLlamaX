@@ -17,6 +17,52 @@ the decode loop sit the deep-K LOOKUP speculative layer, the batched-prefill
 pipeline, the durable prompt cache and the serving layer (sections below;
 [history/PREFILL.md](history/PREFILL.md) and [SERVING.md](SERVING.md)).
 
+## How eGPU LLM inference works on Apple Silicon
+
+*The driver story in one section — because "is there an NVIDIA eGPU driver
+for macOS?" is the question this whole repo answers, and almost nothing is
+published about what replaces the missing stack.*
+
+On Linux, an NVIDIA GPU is driven by a stack roughly three layers deep: a
+kernel-mode driver, a userspace driver (libcuda etc.), and on top the CUDA
+runtime that frameworks call. macOS has none of these for modern NVIDIA
+GPUs — no web driver since 2018, no CUDA toolkit target, and no eGPU support
+at all on Apple Silicon. Thunderbolt correctly wires the card's PCIe into
+the Mac; nothing on the macOS side knows what to do with it.
+
+What this stack substitutes, layer by layer:
+
+- **The kernel-adjacent layer → a DriverKit system extension (the "dext",
+  the ThunderSilicon layer).** DriverKit is Apple's sanctioned
+  userspace-driver framework. The dext maps the GPU's PCIe BARs into the
+  engine's address space and exposes a queue RPC: the *userspace* builds
+  QMDs (queue meta descriptors = work items), pushbuffers, and semaphore
+  releases, writes them into device-mapped rings, and rings a doorbell. No
+  kernel extension, no NVIDIA code, fully inspectable.
+- **The userspace-driver + runtime layer → the tinygrad fork's NV backend.**
+  NVProgram loads the hand-written kernels' cubins as bare ELF objects
+  (TinyELF); NVComputeQueue owns the command queue, submits through the
+  dext, and does the timeline-signal waits. There is no CUDA runtime
+  anywhere — no `libcuda`, no `cudaLaunchKernel`, no context management
+  beyond what the engine itself does.
+- **What the kernels are: ordinary CUDA, compiled ahead of time.** The
+  hand-written `.cu` sources compile with `nvcc -arch=sm_86 -cubin` inside a
+  Docker container (build-time only). What runs on the Mac at inference time
+  is the cubin ELF + this driver path — the same SASS a Linux box would
+  execute.
+
+Two measured facts that define the platform (full laws in
+[DEXT_LAWS.md](DEXT_LAWS.md)): through this driver path the 3090 sustains
+**880 GB/s streaming and 843 GB/s GEMV — 94% of the card's peak** (the
+driver is not the bottleneck; every host roundtrip costs ~17 ms of
+Thunderbolt latency, which is why the engine is built to touch the host
+~once per token *cycle*, not once per kernel), and the dext imposes its own
+hardware-adjacent laws — hard 1 CTA/SM, 48 KB static smem cap, cp.async
+faults, name-encoded launch dims — that shape every kernel design decision
+in the rest of this document.
+
+
+
 ## The MTP cycle
 
 *Plain language: the engine guesses K tokens ahead, checks all guesses in one

@@ -3,13 +3,15 @@
 **LLM inference on an eGPU, hitched to a Mac.**
 *(Or, if you prefer: the Mac that thinks it's an Ultra.)*
 
-**Run a 27B-class LLM fast on your Mac by bolting a used RTX GPU on over
-Thunderbolt — with a custom open driver stack, because macOS doesn't support
-this natively.** No CUDA runtime, no CUDA driver, no NVIDIA userspace: the GPU
-is driven through a userspace DriverKit extension speaking raw PCIe, and every
-kernel in the hot loop is hand-written CUDA. On top sits a complete
-OpenAI-compatible service: chat completions with SSE streaming, durable prompt
-caching, and 100k-token context — on a MacBook.
+Run a local LLM on your Mac — any Apple Silicon Mac with Thunderbolt — by
+attaching an NVIDIA RTX 3090 eGPU over Thunderbolt 4. macOS supports no eGPU
+on Apple Silicon and ships no NVIDIA driver, so this project brings its own:
+an open DriverKit driver that talks raw PCIe to the GPU (no CUDA runtime, no
+CUDA driver, no NVIDIA userspace), a hand-written kernel engine, and an
+OpenAI-compatible API on top. The result: **75.81 tokens per second** decode
+at 100k-token context on Qwen3.8-27B — **bit-exact** against greedy decoding
+— with 569/510/342 tok/s prefill and a durable prompt cache that restores a
+100k context in ~6.5 seconds. Local inference, on a Mac, at workstation speed.
 
 The X reads as *ten*: K=10 speculative depth is the signature number
 (75.81 tok/s, bit-exact, see below).
@@ -35,7 +37,7 @@ dext, `pcache`.
 | Supervised operation | launchd supervisor + circuit breaker + env single-sourcing + boot-time kernel tripwires; survives GPU-fault reboots |
 | Exactness | **Bit-exact by default** — the speculative stream is token-for-token identical to a non-speculative greedy rollout (Tier-1) |
 
-## Headline results
+## Qwen on a Mac with an RTX 3090: the benchmark numbers
 
 All decode numbers are greedy, at 100k-token context (97,810-token prompt), on
 the reference rig (RTX 3090 24 GB in a TB4 enclosure, MacBook Air M2).
@@ -69,20 +71,59 @@ re-validation on the rig: 85/85 GPU-free tests, Tier-1 decode re-gated at
 including the findings that remain open, is
 [docs/history/FIX_CAMPAIGN.md](docs/history/FIX_CAMPAIGN.md).
 
-## How it works (three big ideas, in plain language)
+## Can you use an eGPU with Apple Silicon?
 
-**1. A custom DriverKit driver talks to the GPU directly.**
-macOS has no NVIDIA driver, so this stack uses a DriverKit system extension
-(the "dext") that maps the GPU's PCIe BARs into userspace and submits work
-directly — QMDs (queue descriptors), pushbuffers, doorbells, the works. The
-surprise that made the whole project worth doing: measured through this path
-the GPU sustains **880 GB/s streaming and 843 GB/s GEMV — 94% of the card's
-peak**. The driver wasn't the wall; the software stack above it was. The dext
-has laws of its own (alignment, 1 CTA/SM, zeroed launch dims...) — forty-odd
-of them, each learned the hard way:
-[docs/DEXT_LAWS.md](docs/DEXT_LAWS.md).
+**Natively? No. Through this stack? Yes — that's the whole project.**
 
-**2. A hand-written kernel engine instead of a framework.**
+The background, because it's the question every Mac owner hits: macOS *did*
+support external GPUs on Intel Macs (Thunderbolt 3, AMD cards only — Apple's
+last NVIDIA web drivers date from 2018, and NVIDIA's CUDA toolkit dropped
+macOS not long after). **Apple Silicon dropped eGPU support entirely**: plug
+an NVIDIA (or any) eGPU into an M-series Mac and macOS simply has no driver to
+hand it to. That's why "eGPU for AI on a Mac" has been a dead end — the
+hardware link works over Thunderbolt, but the software stack stops at the
+door.
+
+ThunderLlamaX replaces the missing door:
+
+- **A custom DriverKit system extension (the "dext")** maps the GPU's PCIe
+  BARs into userspace and submits work directly — QMDs (queue descriptors),
+  pushbuffers, doorbells, the works. No kernel extension, no NVIDIA code; the
+  driver is open and inspectable. For everyone searching for a *macOS eGPU
+  driver*: this is one, and it's the load-bearing wall of the project.
+- The surprise that made the whole project worth doing: measured through this
+  path, the GPU sustains **880 GB/s streaming and 843 GB/s GEMV — 94% of the
+  card's peak**. The driver wasn't the wall; the software stack above it was.
+  The PCIe/Thunderbolt link doesn't throttle decode because the weights are
+  GPU-resident and the host only sends doorbells per token cycle.
+- The dext has laws of its own (alignment, 1 CTA/SM, zeroed launch dims...)
+  — forty-odd of them, each learned the hard way:
+  [docs/DEXT_LAWS.md](docs/DEXT_LAWS.md).
+
+## Does CUDA work on macOS?
+
+**Not as a runtime, no — and this stack doesn't need it to.** If you've seen
+`torch.cuda.is_available()` return `False` or hit "CUDA is not available" on a
+Mac: that's permanent, not a setup problem. There is no CUDA runtime for
+modern macOS and no NVIDIA driver to host one, so the usual stack — PyTorch,
+vLLM, Ollama-with-NVIDIA — cannot use an external NVIDIA GPU on a Mac at all.
+(They run on the Mac's internal GPU via Metal/MLX instead; see the
+[eGPU vs unified memory](#egpu-vs-unified-memory-which-is-faster-for-llms)
+section for that comparison.)
+
+What this project does instead:
+
+- **No CUDA runtime, no CUDA driver, no NVIDIA userspace at run time.** The
+  GPU is driven entirely through the DriverKit dext above.
+- Every kernel in the hot loop is **hand-written CUDA compiled ahead of time
+  to raw cubins** (an `nvcc` container is used at *build* time only), loaded
+  by the engine as bare ELF objects and launched by the dext's queue path.
+  The kernels are the same PTX/SASS you'd write on Linux; it's the *driver
+  stack* that macOS lacks, and that's the part this repo replaces.
+
+## How it works (the engine, in plain language)
+
+**A hand-written kernel engine instead of a framework.**
 The decode loop is not built on a tensor framework's scheduler. It is ~350
 hand-written CUDA kernels (dequant-GEMVs, a fused gated-delta-net scan,
 split-KV flash attention with int8 KV and tensor-core dots), static
@@ -91,7 +132,7 @@ of GPU graphs — so one token cycle costs about one doorbell ring of host work.
 Weights live in offline-repacked, alignment-lawed planes (`packed7`/`packed5`)
 that serve decode and prefill from one resident copy.
 
-**3. Speculative decoding that drafts from the document being read — and
+**Speculative decoding that drafts from the document being read — and
 verifies bit-exactly.**
 While ingesting or revisiting long documents, the model's own context is the
 best drafter: a GPU-side n-gram scan finds where the current 8-token suffix
@@ -102,26 +143,28 @@ single-token kernel's floating-point op order exactly, so acceptance can never
 flip a near-tie**: the speculative stream is bit-identical to plain greedy
 decoding, at 8.9 tokens per cycle on hit-class work.
 
-The fourth quiet idea: **honesty as a feature**. Numbers come with their gate
+The third quiet idea: **honesty as a feature**. Numbers come with their gate
 context, the walls are measured and published, and the workloads where this
 rig does and doesn't shine are written down (see FAQ and
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md)).
 
-## What you need
+## What you need (Mac eGPU hardware requirements)
 
 | Component | Requirement | Reference rig |
 |---|---|---|
-| Mac | Apple Silicon with Thunderbolt 4 | MacBook Air M2, 16 GB |
-| GPU | NVIDIA sm_86 class in a TB4 enclosure; **24 GB VRAM for the 100k-context config** (~21.6 GB live) | RTX 3090 24 GB |
+| Mac | Apple Silicon with Thunderbolt 4 (MacBook Air/Pro, Mac mini, Mac Studio — the Mac just steers) | MacBook Air M2, 16 GB |
+| GPU | NVIDIA sm_86 class in a TB4 eGPU enclosure; **24 GB VRAM for the 100k-context config** (~21.6 GB live) — a used RTX 3090 is the price/performance pick for local LLM work | RTX 3090 24 GB |
 | Cable/dock | TB4 end-to-end (TB3 will throttle) | TB4 dock |
 | Host RAM | >= 16 GB | 16 GB |
 | macOS + dext | TinyGPU DriverKit system extension (`org.tinygrad.tinygpu.driver2`) installed and active | — |
-| Toolchain | Python 3.11 + numpy; tinygrad fork (patch in `patches/`); Docker (Colima) with a CUDA 12.8 `nvcc` image for cubin builds | — |
+| Toolchain | Python 3.11 + numpy; tinygrad fork (patch in `patches/`); Docker (Colima) with a CUDA 12.8 `nvcc` image for cubin builds (build-time only) | — |
 | Model files | Qwen3.8-27B GGUF (IQ3_XXS body) — **not included**; the offline repacker builds the engine's weight planes | — |
 
 Full details, paths, and gotchas: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
-## Quick setup (5 steps — details in docs/GETTING_STARTED.md)
+## How to run an LLM on a Mac with an NVIDIA eGPU (5 steps)
+
+Details in [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
 ```sh
 # 1. prerequisites: tinygrad fork + patches/tinygrad-fork.patch, Python 3.11
@@ -134,12 +177,34 @@ python pack_w1c.py && python q4pack.py && python pack_w7.py && python pack_w5.py
 python bootstrap_w1b.py            # 2k gate state
 # 5. run the 2k Tier-1 gate, then bring up the service
 python test_w2.py                  # expects Tier-1 60/60 + ~40 tok/s class
-#    service (the sanctioned mode = the supervisor; see GETTING_STARTED §6):
+#    service (the sanctioned mode = the supervisor; see GETTING_STARTED):
 #    generate engine/ops/env.canonical from env.canonical.example, then
 #    engine/ops/enginectl install    # launchd-supervised daemon + API
 curl 127.0.0.1:8080/v1/chat/completions -d '{"model":"qwen","stream":true,
      "messages":[{"role":"user","content":"hello"}]}'
 ```
+
+## eGPU vs unified memory: which is faster for LLMs?
+
+The honest, measured answer for *this* workload class (a 27B hybrid model at
+100k-token context):
+
+- **Apple unified memory (MLX / llama.cpp / Ollama on the internal GPU)** is
+  the capacity champion: a 64-96 GB Mac can *hold* huge models that no 24 GB
+  card can. But the internal GPU's compute and bandwidth are the ceiling, and
+  a 27B model at 100k context runs far below the numbers above on it.
+- **A discrete eGPU (RTX 3090, 24 GB GDDR6X)** is the speed champion: ~940 GB/s
+  card bandwidth driven at 94% through the dext, tensor cores, and 24 GB of
+  VRAM that exactly fits the 100k-context config (~21.6 GB live). This stack
+  exists to make that card usable from macOS.
+- The Thunderbolt link is **not** the bottleneck people assume: weights upload
+  once and stay GPU-resident; per token the host sends a doorbell, not the
+  model. The measured decode gap vs a native-Linux stack on the same GPU
+  (75.81 vs 86 tok/s @100k) is attributed in
+  [docs/PERFORMANCE.md](docs/PERFORMANCE.md), not hand-waved.
+
+Rule of thumb: if your model fits in 24 GB and you want speed, the eGPU wins;
+if you need a 70B-class model resident and can wait, unified memory wins.
 
 ## Performance
 
@@ -153,6 +218,40 @@ from behind a Thunderbolt cable and a userspace driver, and the gap that
 remains is measured and explained, not hand-waved.
 
 ## FAQ
+
+**Is CUDA available on macOS?** No — there is no CUDA runtime or NVIDIA
+driver for modern macOS, which is why PyTorch, vLLM, and friends can't see an
+NVIDIA eGPU on a Mac. ThunderLlamaX replaces the missing driver stack with a
+DriverKit dext (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)) and compiles
+its kernels to raw cubins at build time.
+
+**Does macOS support eGPU in 2026?** On Intel Macs, yes (Thunderbolt 3, AMD
+cards). On Apple Silicon, no — eGPU support was dropped with the transition,
+and Apple has announced nothing since. This project is the workaround: a
+custom open driver that makes an NVIDIA eGPU a first-class local-inference
+device on an M-series Mac.
+
+**Can a MacBook Pro / Mac mini / Mac Studio use an external GPU for AI?**
+With this stack, yes — any Apple Silicon Mac with Thunderbolt 4 works as the
+host, from an M1-generation machine to M4 Max / M5-class laptops and desktops
+(the reference rig is a 16 GB MacBook Air M2). The M-chip's speed barely
+matters: the Mac does almost none of the compute, it steers the GPU.
+TB3-only ports throttle the data path.
+
+**Will eGPU support ever come to Apple Silicon natively?** No public sign of
+it. This project stopped waiting and wrote the driver instead.
+
+**Can Ollama or vLLM use an eGPU on a Mac?** No. Ollama on macOS runs on the
+internal GPU via Metal; vLLM has no macOS GPU backend at all (it needs CUDA).
+That's exactly the gap ThunderLlamaX fills — and for scale reference, the
+same 3090 under a tuned native-Linux vLLM does 86 tok/s decode @100k vs our
+75.81 through the Mac.
+
+**How does this compare to MLX?** MLX is Apple's framework for *internal*
+Apple Silicon GPUs — great for models that fit and tolerate its speed; it
+can't touch an external NVIDIA GPU. MPS is PyTorch's Metal backend, same
+story. This stack is a third path: the discrete NVIDIA card, driven from
+macOS. See [eGPU vs unified memory](#egpu-vs-unified-memory-which-is-faster-for-llms).
 
 **Is it exact?** Yes — by default, *bit-exact*. The Tier-1 contract: the
 speculative engine must emit, token for token, the identical sequence a
@@ -188,9 +287,13 @@ cost model (per-stream stateful kernels + M-trunk widening vs the shared
 weight read) is published in
 [docs/history/R6_BATCH.md](docs/history/R6_BATCH.md).
 
+**Can I use two GPUs / a dual-3090 setup?** No — the engine targets exactly
+one sm_86 card. Multi-GPU is not on the roadmap.
+
 **Apple Silicon only?** The driver layer is macOS DriverKit, so yes — this is
 the point. The GPU must be NVIDIA sm_86-class (kernels are tuned for it;
-other arches need re-tuning, not just recompiles).
+other arches need re-tuning, not just recompiles). Only the RTX 3090 is
+tested; treat anything else as an experiment.
 
 **Why not just use a Linux box?** Because a Linux box is easy. This project
 exists to prove the Mac route: full-speed eGPU LLM serving on macOS with an
