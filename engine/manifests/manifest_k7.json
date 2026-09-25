@@ -1,0 +1,49 @@
+{
+ "K": 7,
+ "M": 8,
+ "accept": "accept8k",
+ "acceptsel": "acceptsel8k",
+ "amds_grid": 8,
+ "attn_deep": [
+  "spk_pre8qh_100k",
+  "spk_g4nw32hm8_100k",
+  "spk_c8g_100k"
+ ],
+ "dr7_cu": [
+  "ffn8v8r7",
+  "down8nw32v8r7"
+ ],
+ "drings": 7,
+ "emit_stop_off": 10,
+ "emit_words": 13,
+ "lookup": "lookup8_nw32",
+ "rung": "deep-k7",
+ "scratch_conv": [
+  "conv5x",
+  "conv6x",
+  "conv7x",
+  "conv8x"
+ ],
+ "scratch_rec": [
+  "rec6x",
+  "rec7x",
+  "rec8x"
+ ],
+ "trunk_cu": {
+  "ao8nw32_8": 1024,
+  "aq3k8v8": 256,
+  "aq6k8v8": 256,
+  "down8nw32_8": 1024,
+  "ffn8v8": 256,
+  "h_embed8": 256,
+  "head8v8": 256,
+  "hh8": 256,
+  "k0ab8": 256,
+  "k0n8": 256,
+  "k2s8": 256,
+  "k3aonw32_8": 1024,
+  "op38nw32_8": 1024,
+  "q5g8v8": 256
+ },
+ "trunk_gemvv_alt": {}
+}

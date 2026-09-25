@@ -1,0 +1,245 @@
+name: r_544_8_4_4_4_20_2_2_4
+global: (544, 1, 1) local: (8, 4, 4)
+outs=(0,) ins=(1, 2, 3, 4, 5, 6, 7)
+AST:
+UOp(Ops.SINK, dtypes.void, arg=KernelInfo(name='test', axis_types=(), dont_use_locals=False, applied_opts=(), opts_to_apply=None, estimates=None, beam=1), src=(
+  UOp(Ops.END, dtypes.void, arg=None, src=(
+    UOp(Ops.STORE, dtypes.void, arg=None, src=(
+      UOp(Ops.INDEX, dtypes.float, arg=None, src=(
+        UOp(Ops.PARAM, dtypes.float, arg=ParamArg(0, dtypes.float, device='NV'), src=(
+          x4:=UOp(Ops.CONST, dtypes.weakint, arg=17408, src=()),)),
+        x5:=UOp(Ops.RANGE, dtypes.weakint, arg=(2, AxisType.WEAK), src=(
+          x4,)),)),
+      UOp(Ops.MUL, dtypes.float, arg=None, src=(
+        UOp(Ops.INDEX, dtypes.float, arg=None, src=(
+          UOp(Ops.PARAM, dtypes.float, arg=ParamArg(1, dtypes.float, device='NV'), src=(
+            x4,)),
+          x5,)),
+        UOp(Ops.REDUCE, dtypes.float, arg=(Ops.ADD, 0), src=(
+          UOp(Ops.MUL, dtypes.float, arg=None, src=(
+            UOp(Ops.MUL, dtypes.float, arg=None, src=(
+              UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                UOp(Ops.INDEX, dtypes.float, arg=None, src=(
+                  UOp(Ops.PARAM, dtypes.float, arg=ParamArg(2, dtypes.float, device='NV'), src=(
+                    x15:=UOp(Ops.CONST, dtypes.weakint, arg=5120, src=()),)),
+                  x16:=UOp(Ops.RANGE, dtypes.weakint, arg=(1, AxisType.REDUCE), src=(
+                    x15,)),)),
+                UOp(Ops.RECIPROCAL, dtypes.float, arg=None, src=(
+                  UOp(Ops.INDEX, dtypes.float, arg=None, src=(
+                    UOp(Ops.PARAM, dtypes.float, arg=ParamArg(3, dtypes.float, device='NV'), src=(
+                      x20:=UOp(Ops.CONST, dtypes.weakint, arg=1, src=()),)),
+                    x21:=UOp(Ops.CONST, dtypes.weakint, arg=0, src=()),)),)),)),
+              UOp(Ops.CAST, dtypes.float, arg=dtypes.float, src=(
+                UOp(Ops.CAST, dtypes.half, arg=dtypes.half, src=(
+                  UOp(Ops.BITCAST, dtypes.float, arg=dtypes.float, src=(
+                    UOp(Ops.ADD, dtypes.uint, arg=None, src=(
+                      UOp(Ops.ADD, dtypes.uint, arg=None, src=(
+                        UOp(Ops.ADD, dtypes.uint, arg=None, src=(
+                          UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                            UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                              UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                x31:=UOp(Ops.PARAM, dtypes.uchar, arg=ParamArg(4, dtypes.uchar, device='NV'), src=(
+                                  UOp(Ops.CONST, dtypes.weakint, arg=20480, src=()),)),
+                                x33:=UOp(Ops.MUL, dtypes.weakint, arg=None, src=(
+                                  x16,
+                                  x34:=UOp(Ops.CONST, dtypes.weakint, arg=4, src=()),)),)),)),
+                            x21,)),
+                          UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                            UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                              UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                x31,
+                                UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                  x33,
+                                  x20,)),)),)),
+                            x39:=UOp(Ops.CONST, dtypes.weakint, arg=8, src=()),)),)),
+                        UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                          UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                            UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                              x31,
+                              UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                x33,
+                                x44:=UOp(Ops.CONST, dtypes.weakint, arg=2, src=()),)),)),)),
+                          x45:=UOp(Ops.CONST, dtypes.weakint, arg=16, src=()),)),)),
+                      UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                        UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                          UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                            x31,
+                            UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                              x33,
+                              x50:=UOp(Ops.CONST, dtypes.weakint, arg=3, src=()),)),)),)),
+                        x51:=UOp(Ops.CONST, dtypes.weakint, arg=24, src=()),)),)),)),)),)),)),
+            UOp(Ops.CAST, dtypes.float, arg=dtypes.float, src=(
+              UOp(Ops.CAST, dtypes.half, arg=dtypes.half, src=(
+                UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                  UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                    UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                      UOp(Ops.MUL, dtypes.float, arg=None, src=(
+                        UOp(Ops.CAST, dtypes.float, arg=dtypes.float, src=(
+                          UOp(Ops.BITCAST, dtypes.half, arg=dtypes.half, src=(
+                            UOp(Ops.ADD, dtypes.ushort, arg=None, src=(
+                              UOp(Ops.SHL, dtypes.ushort, arg=None, src=(
+                                UOp(Ops.CAST, dtypes.ushort, arg=dtypes.ushort, src=(
+                                  UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                    x64:=UOp(Ops.RESHAPE, dtypes.uchar, arg=None, src=(
+                                      UOp(Ops.PARAM, dtypes.uchar, arg=ParamArg(5, dtypes.uchar, device='NV'), src=(
+                                        UOp(Ops.CONST, dtypes.weakint, arg=34119680, src=()),)),
+                                      UOp(Ops.STACK, dtypes.weakint, arg=None, src=(
+                                        UOp(Ops.CONST, dtypes.weakint, arg=348160, src=()),
+                                        UOp(Ops.CONST, dtypes.weakint, arg=98, src=()),)),)),
+                                    x70:=UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                      UOp(Ops.MUL, dtypes.weakint, arg=None, src=(
+                                        x5,
+                                        UOp(Ops.CONST, dtypes.weakint, arg=20, src=()),)),
+                                      UOp(Ops.FLOORDIV, dtypes.weakint, arg=None, src=(
+                                        x16,
+                                        x74:=UOp(Ops.CONST, dtypes.weakint, arg=256, src=()),)),)),
+                                    x21,)),)),
+                                x21,)),
+                              UOp(Ops.SHL, dtypes.ushort, arg=None, src=(
+                                UOp(Ops.CAST, dtypes.ushort, arg=dtypes.ushort, src=(
+                                  UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                    x64,
+                                    x70,
+                                    x20,)),)),
+                                x39,)),)),)),)),
+                        UOp(Ops.ADD, dtypes.float, arg=None, src=(
+                          UOp(Ops.CAST, dtypes.float, arg=dtypes.float, src=(
+                            UOp(Ops.SHR, dtypes.uint, arg=None, src=(
+                              UOp(Ops.ADD, dtypes.uint, arg=None, src=(
+                                UOp(Ops.ADD, dtypes.uint, arg=None, src=(
+                                  UOp(Ops.ADD, dtypes.uint, arg=None, src=(
+                                    UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                                      UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                                        UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                          x64,
+                                          x70,
+                                          UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                            x88:=UOp(Ops.MUL, dtypes.weakint, arg=None, src=(
+                                              UOp(Ops.FLOORMOD, dtypes.weakint, arg=None, src=(
+                                                UOp(Ops.FLOORDIV, dtypes.weakint, arg=None, src=(
+                                                  x16,
+                                                  x91:=UOp(Ops.CONST, dtypes.weakint, arg=32, src=()),)),
+                                                x39,)),
+                                              x34,)),
+                                            UOp(Ops.CONST, dtypes.weakint, arg=66, src=()),)),)),)),
+                                      x21,)),
+                                    UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                                      UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                                        UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                          x64,
+                                          x70,
+                                          UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                            x88,
+                                            UOp(Ops.CONST, dtypes.weakint, arg=67, src=()),)),)),)),
+                                      x39,)),)),
+                                  UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                                    UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                                      UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                        x64,
+                                        x70,
+                                        UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                          x88,
+                                          UOp(Ops.CONST, dtypes.weakint, arg=68, src=()),)),)),)),
+                                    x45,)),)),
+                                UOp(Ops.SHL, dtypes.uint, arg=None, src=(
+                                  UOp(Ops.CAST, dtypes.uint, arg=dtypes.uint, src=(
+                                    UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                      x64,
+                                      x70,
+                                      UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                        x88,
+                                        UOp(Ops.CONST, dtypes.weakint, arg=69, src=()),)),)),)),
+                                  x51,)),)),
+                              UOp(Ops.CONST, dtypes.weakint, arg=28, src=()),)),)),
+                          x109:=UOp(Ops.CONST, dtypes.weakfloat, arg=ConstFloat(0.5), src=()),)),)),
+                      UOp(Ops.REDUCE, dtypes.float, arg=(Ops.ADD, 0), src=(
+                        UOp(Ops.WHERE, dtypes.float, arg=None, src=(
+                          UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                            UOp(Ops.CAST, dtypes.int, arg=dtypes.int, src=(
+                              UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                x64,
+                                x70,
+                                UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                  UOp(Ops.FLOORMOD, dtypes.weakint, arg=None, src=(
+                                    UOp(Ops.FLOORDIV, dtypes.weakint, arg=None, src=(
+                                      x16,
+                                      x34,)),
+                                    UOp(Ops.CONST, dtypes.weakint, arg=64, src=()),)),
+                                  x44,)),)),)),
+                            UOp(Ops.CAST, dtypes.int, arg=dtypes.int, src=(
+                              x120:=UOp(Ops.RANGE, dtypes.weakint, arg=(0, AxisType.REDUCE), src=(
+                                x74,)),)),)),
+                          UOp(Ops.CONST, dtypes.weakfloat, arg=ConstFloat(0.0), src=()),
+                          UOp(Ops.INDEX, dtypes.float, arg=None, src=(
+                            UOp(Ops.PARAM, dtypes.float, arg=ParamArg(6, dtypes.float, device='NV'), src=(
+                              UOp(Ops.CONST, dtypes.weakint, arg=1024, src=()),)),
+                            UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                              UOp(Ops.MUL, dtypes.weakint, arg=None, src=(
+                                x120,
+                                x34,)),
+                              UOp(Ops.FLOORMOD, dtypes.weakint, arg=None, src=(
+                                x16,
+                                x34,)),)),)),)),
+                        x120,)),)),
+                    UOp(Ops.CAST, dtypes.float, arg=dtypes.float, src=(
+                      UOp(Ops.WHERE, dtypes.weakfloat, arg=None, src=(
+                        UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                          UOp(Ops.AND, dtypes.uchar, arg=None, src=(
+                            UOp(Ops.CDIV, dtypes.uchar, arg=None, src=(
+                              UOp(Ops.INDEX, dtypes.uchar, arg=None, src=(
+                                UOp(Ops.PARAM, dtypes.uchar, arg=ParamArg(7, dtypes.uchar, device='NV'), src=(
+                                  UOp(Ops.CONST, dtypes.weakint, arg=11141120, src=()),)),
+                                UOp(Ops.ADD, dtypes.weakint, arg=None, src=(
+                                  UOp(Ops.MUL, dtypes.weakint, arg=None, src=(
+                                    x70,
+                                    x91,)),
+                                  UOp(Ops.FLOORMOD, dtypes.weakint, arg=None, src=(
+                                    UOp(Ops.FLOORDIV, dtypes.weakint, arg=None, src=(
+                                      x16,
+                                      x39,)),
+                                    x91,)),)),)),
+                              UOp(Ops.WHERE, dtypes.uchar, arg=None, src=(
+                                UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                  x142:=UOp(Ops.FLOORMOD, dtypes.weakint, arg=None, src=(
+                                    x16,
+                                    x39,)),
+                                  x21,)),
+                                UOp(Ops.WHERE, dtypes.uchar, arg=None, src=(
+                                  UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                    x142,
+                                    x20,)),
+                                  UOp(Ops.WHERE, dtypes.uchar, arg=None, src=(
+                                    UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                      x142,
+                                      x44,)),
+                                    UOp(Ops.WHERE, dtypes.uchar, arg=None, src=(
+                                      UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                        x142,
+                                        x50,)),
+                                      UOp(Ops.WHERE, dtypes.uchar, arg=None, src=(
+                                        UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                          x142,
+                                          x34,)),
+                                        UOp(Ops.WHERE, dtypes.uchar, arg=None, src=(
+                                          UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                            x142,
+                                            UOp(Ops.CONST, dtypes.weakint, arg=5, src=()),)),
+                                          UOp(Ops.WHERE, dtypes.uchar, arg=None, src=(
+                                            UOp(Ops.CMPNE, dtypes.bool, arg=None, src=(
+                                              x142,
+                                              UOp(Ops.CONST, dtypes.weakint, arg=6, src=()),)),
+                                            UOp(Ops.CONST, dtypes.uchar, arg=128, src=()),
+                                            UOp(Ops.CONST, dtypes.uchar, arg=64, src=()),)),
+                                          UOp(Ops.CONST, dtypes.uchar, arg=32, src=()),)),
+                                        UOp(Ops.CONST, dtypes.uchar, arg=16, src=()),)),
+                                      UOp(Ops.CONST, dtypes.uchar, arg=8, src=()),)),
+                                    UOp(Ops.CONST, dtypes.uchar, arg=4, src=()),)),
+                                  UOp(Ops.CONST, dtypes.uchar, arg=2, src=()),)),
+                                UOp(Ops.CONST, dtypes.uchar, arg=1, src=()),)),)),
+                            x20,)),
+                          x21,)),
+                        UOp(Ops.CONST, dtypes.weakfloat, arg=ConstFloat(-1.0), src=()),
+                        UOp(Ops.CONST, dtypes.weakfloat, arg=ConstFloat(1.0), src=()),)),)),)),
+                  x109,)),)),)),)),
+          x16,)),)),)),
+    x5,)),))

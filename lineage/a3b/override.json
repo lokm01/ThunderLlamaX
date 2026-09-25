@@ -1,0 +1,79 @@
+{
+ "rules": [
+  {
+   "N": 17408,
+   "K": 5120,
+   "variant": "silu",
+   "template": "a3b/iq3_gemv_body.cu",
+   "threads": 128,
+   "wpc": 4
+  },
+  {
+   "N": 17408,
+   "K": 5120,
+   "variant": "mul",
+   "template": "a3b/iq3_gemv_body.cu",
+   "threads": 128,
+   "wpc": 4
+  },
+  {
+   "N": 5120,
+   "K": 17408,
+   "variant": "add",
+   "template": "a3b/iq3_gemv_body.cu",
+   "threads": 128,
+   "wpc": 4
+  },
+  {
+   "N": 12288,
+   "K": 5120,
+   "variant": "scale",
+   "template": "a3b/iq3_gemv_body.cu",
+   "threads": 256,
+   "wpc": 8
+  },
+  {
+   "N": 1024,
+   "K": 5120,
+   "variant": "scale",
+   "template": "a3b/iq3_gemv_body.cu",
+   "threads": 128,
+   "wpc": 4
+  },
+  {
+   "N": 5120,
+   "K": 6144,
+   "variant": "add",
+   "template": "a3b/iq3_gemv_body.cu",
+   "threads": 128,
+   "wpc": 4
+  },
+  {
+   "kind": "rowmax",
+   "threads": 256
+  },
+  {
+   "kind": "rowsum",
+   "threads": 256
+  },
+  {
+   "kind": "pv"
+  },
+  {
+   "kind": "q5head",
+   "wpc": 4
+  },
+  {
+   "kind": "q5conv",
+   "wpc": 4
+  },
+  {
+   "kind": "iq3swish",
+   "wpc": 4
+  },
+  {
+   "kind": "q5t3",
+   "wpc": 4
+  }
+ ]
+}

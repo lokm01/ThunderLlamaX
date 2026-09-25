@@ -1,0 +1,5 @@
+{
+ "ms_per_block_batched20": 1.951,
+ "x48_blocks_ms": 93.7,
+ "ms_per_call_single_eager": 42.699
+}

@@ -1,0 +1,47 @@
+{
+ "K": 0,
+ "M": 3,
+ "accept": "accept",
+ "acceptsel": "acceptsel",
+ "amds_grid": 3,
+ "attn_deep": [],
+ "dr7_cu": [
+  "ffn8v3r7",
+  "down8nw32v3r7"
+ ],
+ "drings": 2,
+ "emit_stop_off": 5,
+ "emit_words": 8,
+ "lookup": "lookup_nw32",
+ "rung": "k2-legacy",
+ "scratch_conv": [],
+ "scratch_rec": [],
+ "trunk_cu": {
+  "aattn3": 256,
+  "amx3": 256,
+  "ao8_3": 256,
+  "aq3k8_3": 256,
+  "aq6k8_3": 256,
+  "down8_3": 256,
+  "ffn8_3": 256,
+  "h_embed3": 256,
+  "head8_3": 256,
+  "hh3": 256,
+  "k0ab3": 256,
+  "k0n3": 256,
+  "k2s3": 256,
+  "k3ao3": 256,
+  "op38_3": 256,
+  "q5g8_3": 256
+ },
+ "trunk_gemvv_alt": {
+  "ao8_3": "ao8nw32_3",
+  "aq3k8_3": "aq3k8v_3",
+  "down8_3": "down8nw32_3",
+  "ffn8_3": "ffn8v_3",
+  "head8_3": "head8v_3",
+  "k3ao3": "k3aonw32_3",
+  "op38_3": "op38nw32_3",
+  "q5g8_3": "q5g8v_3"
+ }
+}

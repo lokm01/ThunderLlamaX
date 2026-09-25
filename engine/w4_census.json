@@ -1,0 +1,11723 @@
+{
+ "bad": [],
+ "cubins": {
+  ".a7_1": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 62,
+   "smem": 0
+  },
+  ".a7_2": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  ".a7_4": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  ".chk5": {
+   "batch": false,
+   "canon": false,
+   "kname": "chk5",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 36736
+  },
+  ".chk_c6": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c6g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  ".chk_hm6": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm6_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  ".chk_pre6": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre6qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 3072
+  },
+  ".g6_1": {
+   "batch": false,
+   "canon": false,
+   "kname": "t6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  ".g6_2": {
+   "batch": false,
+   "canon": false,
+   "kname": "t6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  ".g6_4": {
+   "batch": false,
+   "canon": false,
+   "kname": "t6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  ".g6_8": {
+   "batch": false,
+   "canon": false,
+   "kname": "t6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  ".g6x_1": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm6_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 63,
+   "smem": 37568
+  },
+  ".g6x_2": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm6_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  ".g6x_4": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm6_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  ".op6_u2": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  ".op6_u3": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  ".op6_u4": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "a_attn": {
+   "batch": false,
+   "canon": true,
+   "kname": "a_attn",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 12352
+  },
+  "a_kv": {
+   "batch": false,
+   "canon": true,
+   "kname": "a_kv",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "a_o": {
+   "batch": false,
+   "canon": true,
+   "kname": "a_o",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "a_q6": {
+   "batch": false,
+   "canon": true,
+   "kname": "a_q6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "a_qkv_iq3": {
+   "batch": false,
+   "canon": true,
+   "kname": "a_qkv_iq3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "a_qkv_q6": {
+   "batch": false,
+   "canon": true,
+   "kname": "a_qkv_q6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "aattn3": {
+   "batch": false,
+   "canon": true,
+   "kname": "aattn3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 62,
+   "smem": 29880
+  },
+  "aattn_d": {
+   "batch": false,
+   "canon": true,
+   "kname": "aattn_d",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 12352
+  },
+  "accept": {
+   "batch": false,
+   "canon": true,
+   "kname": "accept",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept10k": {
+   "batch": false,
+   "canon": false,
+   "kname": "accept10k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept11k": {
+   "batch": false,
+   "canon": true,
+   "kname": "accept11k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept4": {
+   "batch": false,
+   "canon": false,
+   "kname": "accept4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept5k": {
+   "batch": true,
+   "canon": false,
+   "kname": "accept5k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept6k": {
+   "batch": false,
+   "canon": false,
+   "kname": "accept6k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept7k": {
+   "batch": false,
+   "canon": false,
+   "kname": "accept7k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept8k": {
+   "batch": false,
+   "canon": false,
+   "kname": "accept8k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "accept9k": {
+   "batch": false,
+   "canon": false,
+   "kname": "accept9k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "acceptk": {
+   "batch": false,
+   "canon": true,
+   "kname": "acceptk",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "acceptsel": {
+   "batch": false,
+   "canon": true,
+   "kname": "acceptsel",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 30,
+   "smem": 0
+  },
+  "acceptsel10k": {
+   "batch": false,
+   "canon": false,
+   "kname": "acceptsel10k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 26,
+   "smem": 0
+  },
+  "acceptsel11k": {
+   "batch": false,
+   "canon": true,
+   "kname": "acceptsel11k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 26,
+   "smem": 0
+  },
+  "acceptsel5k": {
+   "batch": true,
+   "canon": false,
+   "kname": "acceptsel5k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 28,
+   "smem": 0
+  },
+  "acceptsel6k": {
+   "batch": false,
+   "canon": false,
+   "kname": "acceptsel6k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 24,
+   "smem": 0
+  },
+  "acceptsel7k": {
+   "batch": false,
+   "canon": false,
+   "kname": "acceptsel7k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 24,
+   "smem": 0
+  },
+  "acceptsel8k": {
+   "batch": false,
+   "canon": false,
+   "kname": "acceptsel8k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 26,
+   "smem": 0
+  },
+  "acceptsel9k": {
+   "batch": false,
+   "canon": false,
+   "kname": "acceptsel9k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 26,
+   "smem": 0
+  },
+  "amx3": {
+   "batch": false,
+   "canon": true,
+   "kname": "amx3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 18,
+   "smem": 64
+  },
+  "ao8": {
+   "batch": false,
+   "canon": true,
+   "kname": "ao8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "ao8_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_10": {
+   "batch": true,
+   "canon": false,
+   "kname": "ao8nw32_10",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_11": {
+   "batch": false,
+   "canon": true,
+   "kname": "ao8nw32_11",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "ao8nw32_3",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_4": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_4",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_5": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_5",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_6": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_7": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_8": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_8",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ao8nw32_9": {
+   "batch": false,
+   "canon": false,
+   "kname": "ao8nw32_9",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "aq3k8": {
+   "batch": false,
+   "canon": true,
+   "kname": "aq3k8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "aq3k8_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "aq3k8_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 56,
+   "smem": 0
+  },
+  "aq3k8v10": {
+   "batch": true,
+   "canon": false,
+   "kname": "aq3k8v10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "aq3k8v11": {
+   "batch": false,
+   "canon": true,
+   "kname": "aq3k8v11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "aq3k8v4": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq3k8v4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 54,
+   "smem": 0
+  },
+  "aq3k8v5": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq3k8v5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "aq3k8v6": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq3k8v6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 55,
+   "smem": 0
+  },
+  "aq3k8v7": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq3k8v7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "aq3k8v8": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq3k8v8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "aq3k8v9": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq3k8v9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "aq3k8v_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "aq3k8v_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "aq6k8": {
+   "batch": false,
+   "canon": true,
+   "kname": "aq6k8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "aq6k8_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "aq6k8_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 56,
+   "smem": 0
+  },
+  "aq6k8v10": {
+   "batch": true,
+   "canon": false,
+   "kname": "aq6k8v10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "aq6k8v11": {
+   "batch": false,
+   "canon": true,
+   "kname": "aq6k8v11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 63,
+   "smem": 0
+  },
+  "aq6k8v4": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq6k8v4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "aq6k8v5": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq6k8v5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "aq6k8v6": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq6k8v6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 68,
+   "smem": 0
+  },
+  "aq6k8v7": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq6k8v7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 66,
+   "smem": 0
+  },
+  "aq6k8v8": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq6k8v8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 68,
+   "smem": 0
+  },
+  "aq6k8v9": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq6k8v9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 73,
+   "smem": 0
+  },
+  "aq6k8v_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "aq6k8v_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 55,
+   "smem": 0
+  },
+  "argtest": {
+   "batch": false,
+   "canon": false,
+   "kname": "k14",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 10,
+   "smem": 0
+  },
+  "attn8a1": {
+   "batch": false,
+   "canon": false,
+   "kname": "attn8a1",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 43904
+  },
+  "attn8a2": {
+   "batch": false,
+   "canon": false,
+   "kname": "attn8a2",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 43904
+  },
+  "attn8a3": {
+   "batch": false,
+   "canon": false,
+   "kname": "attn8a3",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 43904
+  },
+  "attn8a4": {
+   "batch": false,
+   "canon": false,
+   "kname": "attn8a4",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 44,
+   "smem": 43904
+  },
+  "ctaswz": {
+   "batch": false,
+   "canon": false,
+   "kname": "ctaswz32k",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 10,
+   "smem": 32768
+  },
+  "d8a": {
+   "batch": false,
+   "canon": false,
+   "kname": "d8a",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "d8b": {
+   "batch": false,
+   "canon": false,
+   "kname": "d8b",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 37,
+   "smem": 0
+  },
+  "ddown": {
+   "batch": false,
+   "canon": true,
+   "kname": "ddown",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "ddownh": {
+   "batch": false,
+   "canon": false,
+   "kname": "ddownh",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "dfgu": {
+   "batch": false,
+   "canon": true,
+   "kname": "dfgu",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "dfguh": {
+   "batch": false,
+   "canon": false,
+   "kname": "dfguh",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "dkv": {
+   "batch": false,
+   "canon": true,
+   "kname": "dkv",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "dkvh": {
+   "batch": false,
+   "canon": false,
+   "kname": "dkvh",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "dnorm2": {
+   "batch": false,
+   "canon": true,
+   "kname": "dnorm2",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 37,
+   "smem": 0
+  },
+  "doproj": {
+   "batch": false,
+   "canon": true,
+   "kname": "doproj",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "doprojh": {
+   "batch": false,
+   "canon": false,
+   "kname": "doprojh",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "down8": {
+   "batch": false,
+   "canon": true,
+   "kname": "down8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 50,
+   "smem": 0
+  },
+  "down8_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "down8_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 54,
+   "smem": 0
+  },
+  "down8nw32_10": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_10",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_11": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_11",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "down8nw32_3",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_4": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_4",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_5": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_5",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_6": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_7": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_8": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_8",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32_9": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32_9",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32v10r7": {
+   "batch": true,
+   "canon": false,
+   "kname": "down8nw32v10r7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32v11r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "down8nw32v11r7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32v3r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "down8nw32v3r7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32v8r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "down8nw32v8r7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8nw32v9r7": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8nw32v9r7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "down8r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "down8r7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 42,
+   "smem": 0
+  },
+  "down8t_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8t_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 61,
+   "smem": 0
+  },
+  "down8v_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8v_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 54,
+   "smem": 0
+  },
+  "down8w32_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "down8w32_3",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "dposadd": {
+   "batch": false,
+   "canon": true,
+   "kname": "dposadd",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 10,
+   "smem": 0
+  },
+  "dq": {
+   "batch": false,
+   "canon": true,
+   "kname": "dq",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "dqh": {
+   "batch": false,
+   "canon": false,
+   "kname": "dqh",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "e1_sync": {
+   "batch": false,
+   "canon": false,
+   "kname": "k_triv",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 18,
+   "smem": 0
+  },
+  "ehproj": {
+   "batch": false,
+   "canon": true,
+   "kname": "ehproj",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "ehprojh": {
+   "batch": false,
+   "canon": false,
+   "kname": "ehprojh",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "ffn8": {
+   "batch": false,
+   "canon": true,
+   "kname": "ffn8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "ffn8_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "ffn8_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ffn8l_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8l_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 61,
+   "smem": 4096
+  },
+  "ffn8r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "ffn8r7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "ffn8t_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8t_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 75,
+   "smem": 0
+  },
+  "ffn8v10": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 78,
+   "smem": 0
+  },
+  "ffn8v10r7": {
+   "batch": true,
+   "canon": false,
+   "kname": "ffn8v10r7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 68,
+   "smem": 0
+  },
+  "ffn8v11": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "ffn8v11r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "ffn8v11r7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 70,
+   "smem": 0
+  },
+  "ffn8v3r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "ffn8v3r7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 51,
+   "smem": 0
+  },
+  "ffn8v4": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 66,
+   "smem": 0
+  },
+  "ffn8v5": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ffn8v6": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 67,
+   "smem": 0
+  },
+  "ffn8v7": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ffn8v8": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "ffn8v8r7": {
+   "batch": false,
+   "canon": true,
+   "kname": "ffn8v8r7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 69,
+   "smem": 0
+  },
+  "ffn8v9": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 74,
+   "smem": 0
+  },
+  "ffn8v9r7": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8v9r7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 67,
+   "smem": 0
+  },
+  "ffn8v_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "ffn8v_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "ffn8w32_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "ffn8w32_3",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "gdn_block": {
+   "batch": false,
+   "canon": false,
+   "kname": "k3c_down",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "h_argmax": {
+   "batch": false,
+   "canon": true,
+   "kname": "h_argmax",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 15,
+   "smem": 64
+  },
+  "h_embed": {
+   "batch": false,
+   "canon": true,
+   "kname": "h_embed",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "h_embed10": {
+   "batch": false,
+   "canon": false,
+   "kname": "h_embed10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "h_embed11": {
+   "batch": false,
+   "canon": true,
+   "kname": "h_embed11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "h_embed3": {
+   "batch": false,
+   "canon": true,
+   "kname": "h_embed3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "h_embed4": {
+   "batch": false,
+   "canon": false,
+   "kname": "h_embed4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "h_embed5": {
+   "batch": true,
+   "canon": false,
+   "kname": "h_embed5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "h_embed6": {
+   "batch": false,
+   "canon": false,
+   "kname": "h_embed6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "h_embed7": {
+   "batch": false,
+   "canon": false,
+   "kname": "h_embed7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "h_embed8": {
+   "batch": false,
+   "canon": false,
+   "kname": "h_embed8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "h_embed9": {
+   "batch": false,
+   "canon": false,
+   "kname": "h_embed9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "head8": {
+   "batch": false,
+   "canon": true,
+   "kname": "head8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "head8_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "head8_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 54,
+   "smem": 0
+  },
+  "head8v10": {
+   "batch": true,
+   "canon": false,
+   "kname": "head8v10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 57,
+   "smem": 0
+  },
+  "head8v11": {
+   "batch": false,
+   "canon": true,
+   "kname": "head8v11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "head8v4": {
+   "batch": false,
+   "canon": false,
+   "kname": "head8v4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 44,
+   "smem": 0
+  },
+  "head8v5": {
+   "batch": false,
+   "canon": false,
+   "kname": "head8v5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 51,
+   "smem": 0
+  },
+  "head8v6": {
+   "batch": false,
+   "canon": false,
+   "kname": "head8v6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 54,
+   "smem": 0
+  },
+  "head8v7": {
+   "batch": false,
+   "canon": false,
+   "kname": "head8v7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 57,
+   "smem": 0
+  },
+  "head8v8": {
+   "batch": false,
+   "canon": false,
+   "kname": "head8v8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 53,
+   "smem": 0
+  },
+  "head8v9": {
+   "batch": false,
+   "canon": false,
+   "kname": "head8v9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 55,
+   "smem": 0
+  },
+  "head8v_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "head8v_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "hh10": {
+   "batch": true,
+   "canon": false,
+   "kname": "hh10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 0
+  },
+  "hh11": {
+   "batch": false,
+   "canon": true,
+   "kname": "hh11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 0
+  },
+  "hh3": {
+   "batch": false,
+   "canon": true,
+   "kname": "hh3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 0
+  },
+  "hh4": {
+   "batch": false,
+   "canon": false,
+   "kname": "hh4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "hh5": {
+   "batch": false,
+   "canon": false,
+   "kname": "hh5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "hh6": {
+   "batch": false,
+   "canon": false,
+   "kname": "hh6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "hh7": {
+   "batch": false,
+   "canon": false,
+   "kname": "hh7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "hh8": {
+   "batch": false,
+   "canon": false,
+   "kname": "hh8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 0
+  },
+  "hh9": {
+   "batch": false,
+   "canon": false,
+   "kname": "hh9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 0
+  },
+  "k0_norm": {
+   "batch": false,
+   "canon": true,
+   "kname": "k0_norm",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "k0ab": {
+   "batch": false,
+   "canon": true,
+   "kname": "k0ab",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab10": {
+   "batch": true,
+   "canon": false,
+   "kname": "k0ab10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab11": {
+   "batch": false,
+   "canon": true,
+   "kname": "k0ab11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab3": {
+   "batch": false,
+   "canon": true,
+   "kname": "k0ab3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab4": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0ab4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab5": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0ab5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab6": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0ab6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab7": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0ab7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab8": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0ab8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0ab9": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0ab9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n10": {
+   "batch": true,
+   "canon": false,
+   "kname": "k0n10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n11": {
+   "batch": false,
+   "canon": true,
+   "kname": "k0n11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n3": {
+   "batch": false,
+   "canon": true,
+   "kname": "k0n3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n4": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0n4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n5": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0n5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n6": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0n6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n7": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0n7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n8": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0n8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k0n9": {
+   "batch": false,
+   "canon": false,
+   "kname": "k0n9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1_ab": {
+   "batch": false,
+   "canon": true,
+   "kname": "k1_ab",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 36,
+   "smem": 0
+  },
+  "k1_iq3": {
+   "batch": false,
+   "canon": true,
+   "kname": "k1_iq3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1_iq3var": {
+   "batch": false,
+   "canon": false,
+   "kname": "k1_iq3_v2",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1_q5": {
+   "batch": false,
+   "canon": true,
+   "kname": "k1_q5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1_q5g": {
+   "batch": false,
+   "canon": true,
+   "kname": "k1_q5g",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1_q5var": {
+   "batch": false,
+   "canon": false,
+   "kname": "k1_q5_v3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1_split": {
+   "batch": false,
+   "canon": false,
+   "kname": "k1_ab",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 36,
+   "smem": 0
+  },
+  "k1s1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "k1s1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1s1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "k1s1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k1s3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "k1s3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "k1s3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "k1s3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "k2_scan": {
+   "batch": false,
+   "canon": true,
+   "kname": "k2_scan",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k2b_z": {
+   "batch": false,
+   "canon": true,
+   "kname": "k2b_z",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 18,
+   "smem": 0
+  },
+  "k2s": {
+   "batch": false,
+   "canon": true,
+   "kname": "k2s",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k2s1": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s1",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k2s10": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "k2s11": {
+   "batch": false,
+   "canon": true,
+   "kname": "k2s11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k2s3": {
+   "batch": false,
+   "canon": true,
+   "kname": "k2s3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k2s3v": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s3v",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k2s4": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k2s5": {
+   "batch": true,
+   "canon": false,
+   "kname": "k2s5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k2s6": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k2s7": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "k2s8": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "k2s9": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2s9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "k2z3": {
+   "batch": false,
+   "canon": false,
+   "kname": "k2z3",
+   "maxntid": [
+    32,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "k3a_iq3": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3a_iq3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "k3a_oproj": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3a_oproj",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 28,
+   "smem": 0
+  },
+  "k3ao3": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3ao3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k3aonw32_10": {
+   "batch": true,
+   "canon": false,
+   "kname": "k3aonw32_10",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k3aonw32_11": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3aonw32_11",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k3aonw32_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3aonw32_3",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "k3aonw32_4": {
+   "batch": false,
+   "canon": false,
+   "kname": "k3aonw32_4",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "k3aonw32_5": {
+   "batch": false,
+   "canon": false,
+   "kname": "k3aonw32_5",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 56,
+   "smem": 0
+  },
+  "k3aonw32_6": {
+   "batch": false,
+   "canon": false,
+   "kname": "k3aonw32_6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 62,
+   "smem": 0
+  },
+  "k3aonw32_7": {
+   "batch": false,
+   "canon": false,
+   "kname": "k3aonw32_7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k3aonw32_8": {
+   "batch": false,
+   "canon": false,
+   "kname": "k3aonw32_8",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k3aonw32_9": {
+   "batch": false,
+   "canon": false,
+   "kname": "k3aonw32_9",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k3b_ffn": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3b_ffn",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "k3c_down": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3c_down",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "k3m_hh": {
+   "batch": false,
+   "canon": true,
+   "kname": "k3m_hh",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 37,
+   "smem": 0
+  },
+  "kpre1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "kpre1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 28,
+   "smem": 3072
+  },
+  "kpre1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "kpre1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 28,
+   "smem": 3072
+  },
+  "kpre3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "kpre3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 3072
+  },
+  "kpre3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "kpre3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 3072
+  },
+  "lookup10_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "lookup10_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 40,
+   "smem": 4
+  },
+  "lookup11_nw32": {
+   "batch": false,
+   "canon": true,
+   "kname": "lookup11_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 44,
+   "smem": 4
+  },
+  "lookup5_nw32": {
+   "batch": true,
+   "canon": false,
+   "kname": "lookup5_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 22,
+   "smem": 4
+  },
+  "lookup6_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "lookup6_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 26,
+   "smem": 4
+  },
+  "lookup7_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "lookup7_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 30,
+   "smem": 4
+  },
+  "lookup8_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "lookup8_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 34,
+   "smem": 4
+  },
+  "lookup9_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "lookup9_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 36,
+   "smem": 4
+  },
+  "lookup_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "lookup_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 24,
+   "smem": 4
+  },
+  "mfill": {
+   "batch": false,
+   "canon": true,
+   "kname": "mfill",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 12,
+   "smem": 0
+  },
+  "mma_micro": {
+   "batch": false,
+   "canon": false,
+   "kname": "mma_micro",
+   "maxntid": null,
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 22,
+   "smem": 0
+  },
+  "mma_probe": {
+   "batch": false,
+   "canon": false,
+   "kname": "mma_probe",
+   "maxntid": null,
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 22,
+   "smem": 0
+  },
+  "op38": {
+   "batch": false,
+   "canon": true,
+   "kname": "op38",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 43,
+   "smem": 0
+  },
+  "op38_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "op38_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 54,
+   "smem": 0
+  },
+  "op38nw32_10": {
+   "batch": true,
+   "canon": false,
+   "kname": "op38nw32_10",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_11": {
+   "batch": false,
+   "canon": true,
+   "kname": "op38nw32_11",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "op38nw32_3",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_4": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_4",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_5": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_5",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_6": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_6",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_7": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_7",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_8": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_8",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38nw32_9": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38nw32_9",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 0
+  },
+  "op38t_3": {
+   "batch": false,
+   "canon": false,
+   "kname": "op38t_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 66,
+   "smem": 0
+  },
+  "p7a_imma16832_nw4": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_imma16832_nw4",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 21,
+   "smem": 0
+  },
+  "p7a_imma16832i4_nw4": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_imma16832i4_nw4",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 36,
+   "smem": 0
+  },
+  "p7a_imma16832u8_nw4": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_imma16832u8_nw4",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 36,
+   "smem": 0
+  },
+  "p7a_imma8816_nw4": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_imma8816_nw4",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 18,
+   "smem": 0
+  },
+  "p7a_kvdbg_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_kvdbg_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 512
+  },
+  "p7a_kvdp_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_kvdp_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 51,
+   "smem": 2048
+  },
+  "p7a_kvpure_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_kvpure_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 53,
+   "smem": 2048
+  },
+  "p7a_kvs_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_kvs_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 40,
+   "smem": 1024
+  },
+  "p7a_kvs_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_kvs_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 2048
+  },
+  "p7a_kvsc32_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_kvsc32_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 2048
+  },
+  "p7a_kvsc_nw32": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_kvsc_nw32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 61,
+   "smem": 2048
+  },
+  "p7a_ldmx_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_ldmx_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 512
+  },
+  "p7a_wrep16_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_wrep16_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 512
+  },
+  "p7a_wrep8_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_wrep8_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 38,
+   "smem": 1024
+  },
+  "p7a_wrep8_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_wrep8_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 512
+  },
+  "p7a_wstrd_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_wstrd_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 40,
+   "smem": 1024
+  },
+  "p7a_wstrd_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "p7a_wstrd_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 512
+  },
+  "p8_imma_ffn_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8_imma_ffn_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 18432
+  },
+  "p8q8v0_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v0",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 4,
+   "smem": 0
+  },
+  "p8q8v1_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v1",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 27,
+   "smem": 0
+  },
+  "p8q8v2_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v2",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 12,
+   "smem": 0
+  },
+  "p8q8v3_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 10,
+   "smem": 0
+  },
+  "p8q8v4_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 14,
+   "smem": 0
+  },
+  "p8q8v5_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 8,
+   "smem": 0
+  },
+  "p8q8v6_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 8,
+   "smem": 0
+  },
+  "p8q8v7_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 8,
+   "smem": 0
+  },
+  "p8q8v8_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 8,
+   "smem": 0
+  },
+  "p8q8v9_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8v9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 8,
+   "smem": 0
+  },
+  "p8q8wa_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8wa",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 20,
+   "smem": 0
+  },
+  "p8q8wb_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8wb",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 21,
+   "smem": 0
+  },
+  "p8q8wd_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8wd",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 32,
+   "smem": 0
+  },
+  "p8q8we_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8we",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 32,
+   "smem": 0
+  },
+  "p8q8x_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8q8x",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 32,
+   "smem": 0
+  },
+  "p8w4ffn7_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8w4ffn7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 184,
+   "smem": 28672
+  },
+  "p8w4ffn7d_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8w4ffn7d",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 183,
+   "smem": 28672
+  },
+  "p8w4ffn_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "p8w4ffn",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 246,
+   "smem": 27648
+  },
+  "pf13ffn_w2_n1": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13ffn_w2_n1",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pf13ffn_w2_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13ffn_w2_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pf13ffn_w4_n1": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13ffn_w4_n1",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pf13ffn_w4_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13ffn_w4_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pf13ffn_w8_n1": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13ffn_w8_n1",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 182,
+   "smem": 43520
+  },
+  "pf13ffn_w8_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13ffn_w8_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 182,
+   "smem": 43520
+  },
+  "pf13s272_nw8d8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13s272_nw8d8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "pf13s_nw16d8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13s_nw16d8",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "pf13s_nw32d4": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13s_nw32d4",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 26,
+   "smem": 0
+  },
+  "pf13s_nw8d16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13s_nw8d16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 73,
+   "smem": 0
+  },
+  "pf13s_nw8d4": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13s_nw8d4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 26,
+   "smem": 0
+  },
+  "pf13s_nw8d8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf13s_nw8d8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "pf_kscomb4": {
+   "batch": false,
+   "canon": false,
+   "kname": "pf_kscomb4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 12,
+   "smem": 0
+  },
+  "pfa16ctl_nw16_s32_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa16ctl",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 128,
+   "smem": 18560
+  },
+  "pfa16nw32_s128_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa16",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 16,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 35200
+  },
+  "pfa16nw32_s256_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa16",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 16,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 35200
+  },
+  "pfa16nw32_s32_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa16",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 16,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 35200
+  },
+  "pfa16nw32_s64_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa16",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 16,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 35200
+  },
+  "pfa16nw32_s8_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa16",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 16,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 35200
+  },
+  "pfa16r_s8_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa16r",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 24,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 35200
+  },
+  "pfa24nw16_s32_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa24nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 128,
+   "smem": 23744
+  },
+  "pfa32c_16c_s10_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32c16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 37952
+  },
+  "pfa32c_16c_s10_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32c16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 37952
+  },
+  "pfa32c_t32_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32ct",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 104,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 36992
+  },
+  "pfa32c_t32_s13_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32ct",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 104,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 36992
+  },
+  "pfa32c_t32_s26_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32ct",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 104,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 36992
+  },
+  "pfa32c_t64_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32c",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 42112
+  },
+  "pfa32c_t64_s13_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32c",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 42112
+  },
+  "pfa32c_t64n_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32c",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 126,
+   "smem": 42112
+  },
+  "pfa32ctl_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32ctl",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 104,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 36996
+  },
+  "pfa32ctl_s13_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32ctl",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 104,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 36996
+  },
+  "pfa32nw16_s128_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 128,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 128,
+   "smem": 28928
+  },
+  "pfa32nw16_s256_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 128,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 128,
+   "smem": 28928
+  },
+  "pfa32nw16_s32_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 128,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 128,
+   "smem": 28928
+  },
+  "pfa32nw16_s64_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 128,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 128,
+   "smem": 28928
+  },
+  "pfa32nw16_s8_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa32nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 128,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 128,
+   "smem": 28928
+  },
+  "pfa8nw32_s32_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa8",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 72,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 43904
+  },
+  "pfa8t64nw32_s32_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfa8t64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 56,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 47488
+  },
+  "pfaw_w128h_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfaw128h",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 48,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 49152
+  },
+  "pfaw_w32_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfaw32",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 127,
+   "smem": 40960
+  },
+  "pfaw_w32_s13_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfaw32",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 127,
+   "smem": 40960
+  },
+  "pfaw_w32_s26_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfaw32",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 127,
+   "smem": 40960
+  },
+  "pfaw_w64_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfaw64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 48,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 49152
+  },
+  "pfaw_w64h_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfaw64h",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 127,
+   "smem": 40960
+  },
+  "pfaw_w64q_s13_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfaw64q",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 80,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 49152
+  },
+  "pfc16_s128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc16_s256": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc16_s32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc16_s64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc16_s8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc16ctl_s32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16ctl",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc16t_s13": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16t",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc16t_s26": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc16t",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc24_s32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc24",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc32_s128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc32_s256": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc32_s32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc32_s64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfc32_s8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfc32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfca_c32_nc1_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32_nc1_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 63,
+   "smem": 21504
+  },
+  "pfca_c32_nc2_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32_nc2_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 60,
+   "smem": 21504
+  },
+  "pfca_c32_nc4_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32_nc4_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 60,
+   "smem": 21504
+  },
+  "pfca_c32d1": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32d1",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 52,
+   "smem": 21504
+  },
+  "pfca_c32d2": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32d2",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 63,
+   "smem": 21504
+  },
+  "pfca_c32d3": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32d3",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 56,
+   "smem": 21504
+  },
+  "pfca_c32d4": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32d4",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 54,
+   "smem": 21504
+  },
+  "pfca_c32d5": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c32d5",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21504
+  },
+  "pfca_c64_nc1_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c64_nc1_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 43520
+  },
+  "pfca_c64_nc4_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c64_nc4_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 43520
+  },
+  "pfca_c64_nc8_nw16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfca_c64_nc8_nw16",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 43520
+  },
+  "pfcb_c32_nc1_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcb_c32_nc1_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 73,
+   "smem": 32032
+  },
+  "pfcb_c32_nc2_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcb_c32_nc2_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 32032
+  },
+  "pfcb_c32_nc4_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcb_c32_nc4_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 32032
+  },
+  "pfcb_c64_nc1_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcb_c64_nc1_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 84,
+   "smem": 34336
+  },
+  "pfcb_c64_nc4_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcb_c64_nc4_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 64,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 72,
+   "smem": 34336
+  },
+  "pfcb_c64_nc8_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcb_c64_nc8_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 64,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 72,
+   "smem": 34336
+  },
+  "pfcbdbg_c64_nc1_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcbdbg_c64_nc1_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 84,
+   "smem": 34336
+  },
+  "pfcw128h_s13": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcw128h",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfcw32_s13": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcw32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfcw32_s13_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcw32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfcw32_s26": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcw32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfcw64_s13": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcw64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfcw64h_s13": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcw64h",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfcz_c32_nc1_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcz_c32_nc1_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 34,
+   "smem": 0
+  },
+  "pfcz_c32_nc2_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcz_c32_nc2_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 36,
+   "smem": 0
+  },
+  "pfcz_c32_nc4_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcz_c32_nc4_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 36,
+   "smem": 0
+  },
+  "pfcz_c64_nc1_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcz_c64_nc1_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 34,
+   "smem": 0
+  },
+  "pfcz_c64_nc4_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcz_c64_nc4_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 36,
+   "smem": 0
+  },
+  "pfcz_c64_nc8_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfcz_c64_nc8_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 36,
+   "smem": 0
+  },
+  "pfd_dnorm16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfd_dnorm16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfg2_attnqkvi3_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg2_attnqkvi3_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 59,
+   "smem": 21760
+  },
+  "pfg2_attnqkvi3_m32_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg2_attnqkvi3_m32_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 73,
+   "smem": 26112
+  },
+  "pfg2_attnqkvq6_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg2_attnqkvq6_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg2_attnqkvq6_m32_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg2_attnqkvq6_m32_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg2_dqkv_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg2_dqkv_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg2_gdnqg_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg2_gdnqg_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 63,
+   "smem": 39168
+  },
+  "pfg2_gdnqg_m32_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg2_gdnqg_m32_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 62,
+   "smem": 43520
+  },
+  "pfg3_ffn_cl_m32_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_ffn_cl_m32_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pfg3_ffn_cl_m64_nw6k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_ffn_cl_m64_nw6k128",
+   "maxntid": [
+    192,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 168,
+   "smem": 43520
+  },
+  "pfg3_ffn_r7_m32_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_ffn_r7_m32_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 139,
+   "smem": 43520
+  },
+  "pfg3_ffn_r7_m64_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_ffn_r7_m64_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 48,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 34816
+  },
+  "pfg3_ffn_r7_m64_nw6k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_ffn_r7_m64_nw6k128",
+   "maxntid": [
+    192,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 180,
+   "smem": 43520
+  },
+  "pfg3_ffn_r7pp1_m32_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_ffn_r7pp1_m32_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 254,
+   "smem": 43520
+  },
+  "pfg3_fgp_r7_m128_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_fgp_r7_m128_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 448,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 43520
+  },
+  "pfg3_fgp_r7_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_fgp_r7_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3_fup_r7_m128_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_fup_r7_m128_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 448,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 43520
+  },
+  "pfg3_fup_r7_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_fup_r7_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3_iq3d_cl_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_cl_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3_iq3d_r7_m128_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7_m128_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 448,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 43520
+  },
+  "pfg3_iq3d_r7_m32_nt32_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7_m32_nt32_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 109,
+   "smem": 17408
+  },
+  "pfg3_iq3d_r7_m32_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7_m32_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg3_iq3d_r7_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3_iq3d_r7pp1_m32_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7pp1_m32_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pfg3_iq3d_r7pp1_m64_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7pp1_m64_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 254,
+   "smem": 34816
+  },
+  "pfg3_iq3d_r7pp2_m32_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7pp2_m32_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 190,
+   "smem": 34816
+  },
+  "pfg3_iq3d_r7q4_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3d_r7q4_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 180,
+   "smem": 34816
+  },
+  "pfg3_iq3o_r7_m128_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3o_r7_m128_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 448,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 43520
+  },
+  "pfg3_iq3o_r7_m32_nt32_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3o_r7_m32_nt32_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 109,
+   "smem": 17408
+  },
+  "pfg3_iq3o_r7_m32_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3o_r7_m32_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg3_iq3o_r7_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3o_r7_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3_iq3o_r7q4_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3o_r7q4_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 180,
+   "smem": 34816
+  },
+  "pfg3_iq3s_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3_iq3s_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3m_attnqkvi3_r7_m128_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvi3_r7_m128_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 408,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 43520
+  },
+  "pfg3m_attnqkvi3_r7_m32_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvi3_r7_m32_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 90,
+   "smem": 26112
+  },
+  "pfg3m_attnqkvi3_r7_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvi3_r7_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 139,
+   "smem": 34816
+  },
+  "pfg3m_attnqkvi3_r7q4_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvi3_r7q4_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 180,
+   "smem": 34816
+  },
+  "pfg3m_attnqkvq6_r7_m128_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvq6_r7_m128_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 408,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 43520
+  },
+  "pfg3m_attnqkvq6_r7_m32_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvq6_r7_m32_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 90,
+   "smem": 26112
+  },
+  "pfg3m_attnqkvq6_r7_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvq6_r7_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3m_attnqkvq6_r7q4_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_attnqkvq6_r7q4_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 182,
+   "smem": 34816
+  },
+  "pfg3m_gdnqg_r7_m128_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_gdnqg_r7_m128_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 592,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 255,
+   "smem": 43520
+  },
+  "pfg3m_gdnqg_r7_m32_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_gdnqg_r7_m32_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 117,
+   "smem": 43520
+  },
+  "pfg3m_gdnqg_r7_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_gdnqg_r7_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 180,
+   "smem": 34816
+  },
+  "pfg3m_gdnqg_r7q4_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_gdnqg_r7q4_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3m_gdnqg_r7q4p5_m64_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3m_gdnqg_r7q4p5_m64_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 34816
+  },
+  "pfg3w_ffn_r7_m64_ws6p2k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3w_ffn_r7_m64_ws6p2k64",
+   "maxntid": [
+    192,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 168,
+   "smem": 36864
+  },
+  "pfg3w_iq3d_r7_m64_ws10p2k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3w_iq3d_r7_m64_ws10p2k64",
+   "maxntid": [
+    320,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 122,
+   "smem": 36864
+  },
+  "pfg3w_iq3d_r7_m64_ws11p3k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3w_iq3d_r7_m64_ws11p3k64",
+   "maxntid": [
+    352,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 36864
+  },
+  "pfg3w_iq3o_r7_m64_ws10p2k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg3w_iq3o_r7_m64_ws10p2k64",
+   "maxntid": [
+    320,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 122,
+   "smem": 36864
+  },
+  "pfg_dbg1_k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_dbg1_k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 27,
+   "smem": 21760
+  },
+  "pfg_dbg2_k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_dbg2_k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_dbg3_k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_dbg3_k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_ehd_res_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ehd_res_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_ffnX_h2_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffnX_h2_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 39168
+  },
+  "pfg_ffnX_h2sw_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffnX_h2sw_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 41472
+  },
+  "pfg_ffnX_h2sw_nw32k32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffnX_h2sw_nw32k32",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 58,
+   "smem": 43520
+  },
+  "pfg_ffnX_h2sw_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffnX_h2sw_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pfg_ffnX_h2sw_nw8k32s4": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffnX_h2sw_nw8k32s4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pfg_ffnX_h2sw_nw8k64s2": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffnX_h2sw_nw8k64s2",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 41472
+  },
+  "pfg_ffnX_sw_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffnX_sw_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pfg_ffn_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_ffn_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 127,
+   "smem": 39168
+  },
+  "pfg_ffn_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 20736
+  },
+  "pfg_ffn_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 72,
+   "smem": 39168
+  },
+  "pfg_ffn_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 125,
+   "smem": 39168
+  },
+  "pfg_ffn_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 20736
+  },
+  "pfg_ffn_m32_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_m32_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 43520
+  },
+  "pfg_ffn_m32_nt32_hm_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ffn_m32_nt32_hm_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 176,
+   "smem": 26112
+  },
+  "pfg_iq3dX_h2_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3dX_h2_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3dX_h2sw_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3dX_h2sw_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 78,
+   "smem": 26112
+  },
+  "pfg_iq3d_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3d_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 50,
+   "smem": 20736
+  },
+  "pfg_iq3d_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 61,
+   "smem": 39168
+  },
+  "pfg_iq3d_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3d_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 56,
+   "smem": 11520
+  },
+  "pfg_iq3d_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 77,
+   "smem": 39168
+  },
+  "pfg_iq3d_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 52,
+   "smem": 20736
+  },
+  "pfg_iq3d_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3d_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3d_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_iq3d_m32_ks2_res_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_m32_ks2_res_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg_iq3d_m32_res_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_m32_res_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg_iq3d_m32_res_nt32_hm_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_m32_res_nt32_hm_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 105,
+   "smem": 17408
+  },
+  "pfg_iq3d_res_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3d_res_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 72,
+   "smem": 21760
+  },
+  "pfg_iq3g_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3g_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 50,
+   "smem": 20736
+  },
+  "pfg_iq3g_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 61,
+   "smem": 39168
+  },
+  "pfg_iq3g_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3g_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 56,
+   "smem": 11520
+  },
+  "pfg_iq3g_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 72,
+   "smem": 39168
+  },
+  "pfg_iq3g_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 52,
+   "smem": 20736
+  },
+  "pfg_iq3g_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3g_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3g_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3g_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_iq3k_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3k_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 50,
+   "smem": 20736
+  },
+  "pfg_iq3k_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 61,
+   "smem": 39168
+  },
+  "pfg_iq3k_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3k_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 56,
+   "smem": 11520
+  },
+  "pfg_iq3k_hm_ks4_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hm_ks4_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3k_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 77,
+   "smem": 39168
+  },
+  "pfg_iq3k_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 52,
+   "smem": 20736
+  },
+  "pfg_iq3k_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3k_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3k_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3k_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_iq3n_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3n_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 50,
+   "smem": 20736
+  },
+  "pfg_iq3n_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 61,
+   "smem": 39168
+  },
+  "pfg_iq3n_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3n_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 56,
+   "smem": 11520
+  },
+  "pfg_iq3n_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 77,
+   "smem": 39168
+  },
+  "pfg_iq3n_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 52,
+   "smem": 20736
+  },
+  "pfg_iq3n_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3n_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3n_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3n_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_iq3oX_h2_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3oX_h2_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3oX_h2sw_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3oX_h2sw_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 78,
+   "smem": 26112
+  },
+  "pfg_iq3o_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3o_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 50,
+   "smem": 20736
+  },
+  "pfg_iq3o_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 61,
+   "smem": 39168
+  },
+  "pfg_iq3o_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3o_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 56,
+   "smem": 11520
+  },
+  "pfg_iq3o_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 77,
+   "smem": 39168
+  },
+  "pfg_iq3o_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 52,
+   "smem": 20736
+  },
+  "pfg_iq3o_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3o_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 70,
+   "smem": 21760
+  },
+  "pfg_iq3o_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_iq3o_m32_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_m32_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg_iq3o_m32_ks2_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_m32_ks2_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg_iq3o_m32_nt32_hm_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3o_m32_nt32_hm_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 105,
+   "smem": 17408
+  },
+  "pfg_iq3qX_h2_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3qX_h2_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3qX_h2sw_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3qX_h2sw_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 78,
+   "smem": 26112
+  },
+  "pfg_iq3q_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3q_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 50,
+   "smem": 20736
+  },
+  "pfg_iq3q_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 61,
+   "smem": 39168
+  },
+  "pfg_iq3q_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3q_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 56,
+   "smem": 11520
+  },
+  "pfg_iq3q_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 77,
+   "smem": 39168
+  },
+  "pfg_iq3q_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 52,
+   "smem": 20736
+  },
+  "pfg_iq3q_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3q_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 70,
+   "smem": 21760
+  },
+  "pfg_iq3q_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3q_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_iq3s_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3s_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 55,
+   "smem": 20736
+  },
+  "pfg_iq3s_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 55,
+   "smem": 39168
+  },
+  "pfg_iq3s_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3s_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 49,
+   "smem": 11520
+  },
+  "pfg_iq3s_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3s_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 40,
+   "smem": 20736
+  },
+  "pfg_iq3s_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_iq3s_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_iq3s_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 46,
+   "smem": 11520
+  },
+  "pfg_iq3s_m32_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_m32_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg_iq3s_m32_ks2_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_m32_ks2_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 26112
+  },
+  "pfg_iq3s_m32_nt32_hm_nw4k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_iq3s_m32_nt32_hm_nw4k128",
+   "maxntid": [
+    128,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 101,
+   "smem": 17408
+  },
+  "pfg_ks2c_hm": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ks2c_hm",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 14,
+   "smem": 0
+  },
+  "pfg_ks2c_res_hm": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_ks2c_res_hm",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 20,
+   "smem": 0
+  },
+  "pfg_q4dd_res_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dd_res_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 78,
+   "smem": 21760
+  },
+  "pfg_q4dk_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dk_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4dn_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 72,
+   "smem": 39168
+  },
+  "pfg_q4dn_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 50,
+   "smem": 20736
+  },
+  "pfg_q4dn_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q4dn_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 72,
+   "smem": 21760
+  },
+  "pfg_q4dn_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 11520
+  },
+  "pfg_q4dn_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 70,
+   "smem": 39168
+  },
+  "pfg_q4dn_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 51,
+   "smem": 20736
+  },
+  "pfg_q4dn_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q4dn_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4dn_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dn_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 48,
+   "smem": 11520
+  },
+  "pfg_q4do_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4do_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4dq_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dq_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4dv_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4dv_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4eh_res_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4eh_res_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 80,
+   "smem": 21760
+  },
+  "pfg_q4v_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q4v_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 40,
+   "smem": 20736
+  },
+  "pfg_q4v_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 57,
+   "smem": 39168
+  },
+  "pfg_q4v_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4v_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 47,
+   "smem": 11520
+  },
+  "pfg_q4v_hm_ks4_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hm_ks4_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4v_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q4v_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 40,
+   "smem": 20736
+  },
+  "pfg_q4v_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q4v_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q4v_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q4v_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 45,
+   "smem": 11520
+  },
+  "pfg_q5h_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 113,
+   "smem": 39168
+  },
+  "pfg_q5h_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 63,
+   "smem": 20736
+  },
+  "pfg_q5h_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q5h_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 79,
+   "smem": 21760
+  },
+  "pfg_q5h_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 48,
+   "smem": 11520
+  },
+  "pfg_q5h_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 81,
+   "smem": 39168
+  },
+  "pfg_q5h_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 59,
+   "smem": 20736
+  },
+  "pfg_q5h_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q5h_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q5h_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5h_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 48,
+   "smem": 11520
+  },
+  "pfg_q5kv_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 113,
+   "smem": 39168
+  },
+  "pfg_q5kv_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 63,
+   "smem": 20736
+  },
+  "pfg_q5kv_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q5kv_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 79,
+   "smem": 21760
+  },
+  "pfg_q5kv_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 48,
+   "smem": 11520
+  },
+  "pfg_q5kv_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 81,
+   "smem": 39168
+  },
+  "pfg_q5kv_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 59,
+   "smem": 20736
+  },
+  "pfg_q5kv_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q5kv_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q5kv_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q5kv_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 48,
+   "smem": 11520
+  },
+  "pfg_q6q_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q6q_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 40,
+   "smem": 20736
+  },
+  "pfg_q6q_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q6q_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q6q_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_q6q_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q6q_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 40,
+   "smem": 20736
+  },
+  "pfg_q6q_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q6q_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 64,
+   "smem": 21760
+  },
+  "pfg_q6q_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q6q_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_q8o_hf_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hf_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q8o_hf_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hf_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 62,
+   "smem": 20736
+  },
+  "pfg_q8o_hf_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hf_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q8o_hf_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hf_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 74,
+   "smem": 21760
+  },
+  "pfg_q8o_hf_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hf_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 62,
+   "smem": 11520
+  },
+  "pfg_q8o_hm_nw16k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hm_nw16k128",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q8o_hm_nw16k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hm_nw16k64",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": true,
+   "regs": 64,
+   "smem": 20736
+  },
+  "pfg_q8o_hm_nw32k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hm_nw32k64",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": true,
+   "regs": 64,
+   "smem": 39168
+  },
+  "pfg_q8o_hm_nw8k128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hm_nw8k128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 76,
+   "smem": 21760
+  },
+  "pfg_q8o_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 11520
+  },
+  "pfg_q8o_m32_hm_nw8k64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfg_q8o_m32_hm_nw8k64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 13824
+  },
+  "pfk_ab16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_ab16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfk_ab16w": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_ab16w",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 62,
+   "smem": 0
+  },
+  "pfk_dp4a": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_dp4a",
+   "maxntid": null,
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 54,
+   "smem": 0
+  },
+  "pfk_emb16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_emb16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfk_hh16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_hh16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 38,
+   "smem": 0
+  },
+  "pfk_n16": {
+   "batch": true,
+   "canon": false,
+   "kname": "pfk_n16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfk_pre16_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_pre16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 38,
+   "smem": 3072
+  },
+  "pfk_pre16_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_pre16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 38,
+   "smem": 3072
+  },
+  "pfk_pre32_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_pre32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 38,
+   "smem": 3072
+  },
+  "pfk_pre64_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_pre64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 3072
+  },
+  "pfk_q8nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_q8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 27,
+   "smem": 0
+  },
+  "pfk_rec16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_rec16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 40,
+   "smem": 0
+  },
+  "pfk_smul128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_smul128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 23,
+   "smem": 0
+  },
+  "pfk_smul64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfk_smul64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 23,
+   "smem": 0
+  },
+  "pfs16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfs16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 0
+  },
+  "pfs32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfs32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 0
+  },
+  "pfs64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pfs64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": true,
+   "regs": 128,
+   "smem": 0
+  },
+  "pv_b": {
+   "batch": false,
+   "canon": false,
+   "kname": "pv_b",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 14,
+   "smem": 0
+  },
+  "pv_row32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pv_row32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 26,
+   "smem": 0
+  },
+  "pv_u128": {
+   "batch": false,
+   "canon": false,
+   "kname": "pv_u128",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 14,
+   "smem": 0
+  },
+  "pv_u16": {
+   "batch": false,
+   "canon": false,
+   "kname": "pv_u16",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 13,
+   "smem": 0
+  },
+  "pv_u32": {
+   "batch": false,
+   "canon": false,
+   "kname": "pv_u32",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 16,
+   "smem": 0
+  },
+  "pv_u64": {
+   "batch": false,
+   "canon": false,
+   "kname": "pv_u64",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 19,
+   "smem": 0
+  },
+  "q5g8": {
+   "batch": false,
+   "canon": true,
+   "kname": "q5g8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "q5g8_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "q5g8_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 51,
+   "smem": 0
+  },
+  "q5g8v10": {
+   "batch": true,
+   "canon": false,
+   "kname": "q5g8v10",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 70,
+   "smem": 0
+  },
+  "q5g8v11": {
+   "batch": false,
+   "canon": true,
+   "kname": "q5g8v11",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 71,
+   "smem": 0
+  },
+  "q5g8v4": {
+   "batch": false,
+   "canon": false,
+   "kname": "q5g8v4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "q5g8v5": {
+   "batch": false,
+   "canon": false,
+   "kname": "q5g8v5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "q5g8v6": {
+   "batch": false,
+   "canon": false,
+   "kname": "q5g8v6",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "q5g8v7": {
+   "batch": false,
+   "canon": false,
+   "kname": "q5g8v7",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "q5g8v8": {
+   "batch": false,
+   "canon": false,
+   "kname": "q5g8v8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "q5g8v9": {
+   "batch": false,
+   "canon": false,
+   "kname": "q5g8v9",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 54,
+   "smem": 0
+  },
+  "q5g8v_3": {
+   "batch": false,
+   "canon": true,
+   "kname": "q5g8v_3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "r7_e1bis5": {
+   "batch": false,
+   "canon": false,
+   "kname": "b7_ld8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 8,
+   "smem": 0
+  },
+  "r7_e1c": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1f_dldg_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 31,
+   "smem": 0
+  },
+  "r7_e1d_e1a0_ldg_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1a0_ldg_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 37,
+   "smem": 0
+  },
+  "r7_e1d_e1a_ldg_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1a_ldg_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 36,
+   "smem": 0
+  },
+  "r7_e1d_e1b_fma_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1b_fma_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 14,
+   "smem": 0
+  },
+  "r7_e1d_e1c_hmma_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1c_hmma_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 24,
+   "smem": 0
+  },
+  "r7_e1d_e1d_mix_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1d_mix_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "r7_e1d_e1e_copy_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1e_copy_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 58,
+   "smem": 0
+  },
+  "r7_e1d_e1f_dldg_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1f_dldg_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 18,
+   "smem": 0
+  },
+  "r7_e1d_e1g_empty_nw8": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1g_empty_nw8",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 8,
+   "smem": 0
+  },
+  "r7_e1d_fill": {
+   "batch": false,
+   "canon": false,
+   "kname": "e1_fill",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 14,
+   "smem": 0
+  },
+  "r7b_fill": {
+   "batch": false,
+   "canon": false,
+   "kname": "r7b_fill",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 14,
+   "smem": 0
+  },
+  "r7b_mb_empty": {
+   "batch": false,
+   "canon": false,
+   "kname": "r7b_mb",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 8,
+   "smem": 0
+  },
+  "r7b_mb_mbarr": {
+   "batch": false,
+   "canon": false,
+   "kname": "r7b_mb",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 32,
+   "smem": 16416
+  },
+  "r7b_mb_nbar": {
+   "batch": false,
+   "canon": false,
+   "kname": "r7b_mb",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 16384
+  },
+  "r7b_mb_sync": {
+   "batch": false,
+   "canon": false,
+   "kname": "r7b_mb",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 16384
+  },
+  "samx": {
+   "batch": false,
+   "canon": true,
+   "kname": "samx",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 15,
+   "smem": 64
+  },
+  "shead": {
+   "batch": false,
+   "canon": true,
+   "kname": "shead",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk2_a1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk2_a1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 128,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "spk2_a1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk2_a1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 128,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 48,
+   "smem": 0
+  },
+  "spk2_a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk2_a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 144,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "spk2_a3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk2_a3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 144,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "spk2_a3p8_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk2_a3p8_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 272,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "spk2_a3v64_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk2_a3v64_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 144,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 0
+  },
+  "spk3_a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk3_a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 222,
+   "smem": 0
+  },
+  "spk3_a3v64_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk3_a3v64_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 222,
+   "smem": 0
+  },
+  "spk3_a3v96_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk3_a3v96_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 190,
+   "smem": 0
+  },
+  "spk_a1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_a1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_a1v64_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a1v64_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "spk_a3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "spk_a3u8_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a3u8_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "spk_a3v128_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a3v128_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "spk_a3v64_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a3v64_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "spk_a3v64u8_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_a3v64u8_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 92,
+   "smem": 0
+  },
+  "spk_c1": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c1",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c10g_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c10g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c11g_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_c11g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c1g128_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c1g128_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c1g_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_c1g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c3": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c3",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c3g128_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c3g128_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c3g_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_c3g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c4": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c4",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c4g_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c4g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c5": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c5",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "spk_c5g_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c5g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c6g_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c6g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c7g_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c7g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c8g_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c8g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_c9g_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_c9g_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 0
+  },
+  "spk_g1a1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g1a1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 98,
+   "smem": 33280
+  },
+  "spk_g1a1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g1a1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 98,
+   "smem": 33280
+  },
+  "spk_g1a3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g1a3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 101,
+   "smem": 33280
+  },
+  "spk_g1s128a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g1s128a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 101,
+   "smem": 33280
+  },
+  "spk_g1s64a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g1s64a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 101,
+   "smem": 33280
+  },
+  "spk_g2a1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2a1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g2a1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2a1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g2a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g2a3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2a3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g2pfa3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2pfa3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g2s256a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2s256a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g2s32a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2s32a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g2s64a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g2s64a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 36352
+  },
+  "spk_g3a1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3a1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3a1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3a1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3a3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3a3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3l2a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3l2a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 128,
+   "smem": 32768
+  },
+  "spk_g3l3a1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3l3a1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3l3a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3l3a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3l3s256a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3l3s256a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3l3s64a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3l3s64a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3s256a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3s256a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g3s64a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g3s64a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g4nw16a1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw16a1_2k",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw16a3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw16a3_2k",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 128,
+   "smem": 32768
+  },
+  "spk_g4nw16fqa3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw16fqa3_100k",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 97,
+   "smem": 49152
+  },
+  "spk_g4nw16s128a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw16s128a3_100k",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 128,
+   "smem": 32768
+  },
+  "spk_g4nw16s256a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw16s256a3_100k",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 128,
+   "smem": 32768
+  },
+  "spk_g4nw16s512a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw16s512a3_100k",
+   "maxntid": [
+    512,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 512,
+   "pf": false,
+   "regs": 128,
+   "smem": 32768
+  },
+  "spk_g4nw24s256a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw24s256a3_100k",
+   "maxntid": [
+    768,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 768,
+   "pf": false,
+   "regs": 40,
+   "smem": 32768
+  },
+  "spk_g4nw32a1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a1_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32a1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a1_2k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32a3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a3_2k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32a4_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a4_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32a4_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a4_2k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32a5_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a5_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32a5_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32a5_2k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32fqa3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32fqa3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 49152
+  },
+  "spk_g4nw32hm10_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm10_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 40704
+  },
+  "spk_g4nw32hm11_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_g4nw32hm11_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 41536
+  },
+  "spk_g4nw32hm1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm1_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 33600
+  },
+  "spk_g4nw32hm3_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_g4nw32hm3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 35200
+  },
+  "spk_g4nw32hm5_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm5_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 36736
+  },
+  "spk_g4nw32hm6_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm6_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 37568
+  },
+  "spk_g4nw32hm7_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm7_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 38336
+  },
+  "spk_g4nw32hm8_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm8_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 39104
+  },
+  "spk_g4nw32hm9_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32hm9_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 39936
+  },
+  "spk_g4nw32qa1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32qa1_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32qa3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32qa3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32qh1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32qh1_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 16,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32qh1p_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_g4nw32qh1p_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32qh3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32qh3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 8,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32qh3p_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32qh3p_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32qh3ppad_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32qh3ppad_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 35840
+  },
+  "spk_g4nw32s128a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32s128a3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw32s256a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw32s256a3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 1024,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nw8s256a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nw8s256a3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 80,
+   "smem": 32768
+  },
+  "spk_g4nwpp1p_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nwpp1p_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4nwpp3p_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4nwpp3p_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_g4q4a3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_g4q4a3_100k",
+   "maxntid": [
+    1024,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 64,
+   "smem": 32768
+  },
+  "spk_pre10qh_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre10qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 3072
+  },
+  "spk_pre11qh_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_pre11qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 3072
+  },
+  "spk_pre1_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre1_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 28,
+   "smem": 3072
+  },
+  "spk_pre1_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre1_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 28,
+   "smem": 3072
+  },
+  "spk_pre1q_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre1q_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 28,
+   "smem": 3072
+  },
+  "spk_pre1qh_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_pre1qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 29,
+   "smem": 3072
+  },
+  "spk_pre3_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre3_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 3072
+  },
+  "spk_pre3_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre3_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 3072
+  },
+  "spk_pre3q_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre3q_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 3072
+  },
+  "spk_pre3qh_100k": {
+   "batch": false,
+   "canon": true,
+   "kname": "spk_pre3qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 3072
+  },
+  "spk_pre4_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre4_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 3072
+  },
+  "spk_pre4_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre4_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 3072
+  },
+  "spk_pre5_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre5_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 3072
+  },
+  "spk_pre5_2k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre5_2k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 39,
+   "smem": 3072
+  },
+  "spk_pre5qh_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre5qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 3072
+  },
+  "spk_pre6qh_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre6qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 3072
+  },
+  "spk_pre7qh_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre7qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 3072
+  },
+  "spk_pre8qh_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre8qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 3072
+  },
+  "spk_pre9qh_100k": {
+   "batch": false,
+   "canon": false,
+   "kname": "spk_pre9qh_100k",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 32,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 38,
+   "smem": 3072
+  },
+  "stxconv": {
+   "batch": false,
+   "canon": true,
+   "kname": "stxconv",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  },
+  "stxrec": {
+   "batch": false,
+   "canon": true,
+   "kname": "stxrec",
+   "maxntid": [
+    256,
+    1,
+    1
+   ],
+   "min_stack": 0,
+   "name_law_ls": 256,
+   "pf": false,
+   "regs": 40,
+   "smem": 0
+  }
+ }
+}

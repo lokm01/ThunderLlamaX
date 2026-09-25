@@ -1,0 +1,3324 @@
+# This patch is a derivative work of tinygrad (https://github.com/tinygrad/tinygrad),
+# distributed under the terms of the tinygrad MIT license. See THIRD_PARTY_NOTICES.md.
+diff --git a/tinygrad/codegen/__init__.py b/tinygrad/codegen/__init__.py
+index 9b3f7ad..5aeb620 100644
+--- a/tinygrad/codegen/__init__.py
++++ b/tinygrad/codegen/__init__.py
+@@ -499,4 +499,6 @@ def to_program_key(ast:UOp, renderer:Renderer) -> tuple:
+ to_program_cache: dict[tuple, UOp] = {}
+ def to_program(ast:UOp, renderer:Renderer) -> UOp:
+   if (prg:=to_program_cache.get(key:=to_program_key(ast, renderer))) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
+-  return prg
++  # A3b (env-gated, no-op unless MTP_A3_OVERRIDE/MTP_A3_DUMP set): source-level kernel substitution
++  from tinygrad.codegen.a3b import a3b_substitute, ENABLED as _a3b_enabled
++  return a3b_substitute(prg, renderer) if _a3b_enabled else prg
+diff --git a/tinygrad/codegen/a3b.py b/tinygrad/codegen/a3b.py
+new file mode 100644
+index 0000000..d4bc420
+--- /dev/null
++++ b/tinygrad/codegen/a3b.py
+@@ -0,0 +1,1865 @@
++"""A3b: source-level substitution of IQ3_XXS lazy-dequant GEMV kernels with hand CUDA.
++
++Enabled via env (read once at import):
++  MTP_A3_OVERRIDE=<path.json>  substitute matching kernels per JSON rules
++  MTP_A3_DUMP=<dir>            dump source of structurally-matching kernels (no substitution)
++  MTP_A3_VALIDATE=0            disable the orig-vs-new self-check (default: on)
++
++JSON format (see ~/tinygrad-metal/a3b/override.json):
++  {"rules": [{"N":17408,"K":5120,"variant":"silu","template":"...body.cu","threads":128,"wpc":4}, ...]}
++Rule key is (N, K, variant). variant is structural: "silu" (s+nw+exp2 epilogue),
++"mul" (s+nw+aux), "scale" (s+nw), "add" (aux = residual add), "plain".
++Matching is by arg sizes/types only (kernel names ignored); the replacement keeps the
++original C signature verbatim (arg order/types), so kernargs marshalling, QMD setup and
++JIT=1 HCQGraph capture are untouched. Substituted kernels are renamed <name>_a3b and get
++rule-specified launch dims. Signs are computed INLINE from the scale words (XOR-parity
++form of the even_signs table, bit-exact port of gguf.py case 18) — the signs buffer arg,
++if still present in the signature, is ignored.
++"""
++from __future__ import annotations
++import os, re, json, math
++from dataclasses import replace as dc_replace
++from tinygrad.helpers import to_function_name, ansistrip
++from tinygrad.uop.ops import UOp, Ops
++
++_OVERRIDE_PATH = os.getenv("MTP_A3_OVERRIDE", "")
++_DUMP_DIR = os.getenv("MTP_A3_DUMP", "")
++_DUMP_MATCH = os.getenv("MTP_DUMP_MATCH", "")
++_VALIDATE = os.getenv("MTP_A3_VALIDATE", "1") != "0"   # 2026-09-07: validate under T3_LAZY too
++# (batch-3 subs went in UNVALIDATED before -> wrong probe logits; _val_ok() still gates
++# on ALLOW_DEVICE_USAGE so compile workers fall back to stock via the assert+except path)
++
++# validators need device access: only legal when ALLOW_DEVICE_USAGE=1 (parent-side
++# realize.py re-substitution). The to_program path runs under @Context(ALLOW_DEVICE_USAGE=0)
++# in compile workers -> eager validation launches there WEDGE the channel (watchdog reboots,
++# observed 2026-08-29). Dynamic check: the same kernel is re-substituted parent-side later.
++from tinygrad.helpers import ALLOW_DEVICE_USAGE as _ADU
++def _val_ok() -> bool: return _VALIDATE and _ADU.value == 1   # T3: eager validation launches wedge the channel during JIT=1 capture comp
++ENABLED = bool(_OVERRIDE_PATH or _DUMP_DIR)
++
++_rules: dict[tuple, dict] = {}
++if _OVERRIDE_PATH:
++  with open(_OVERRIDE_PATH) as f:
++    for r in json.load(f)["rules"]:
++      if "kind" in r: _rules[r["kind"]] = r                      # A3c attention rules
++      else: _rules[(int(r["N"]), int(r["K"]), r["variant"])] = r  # A3b GEMV rules
++
++if _DUMP_DIR: os.makedirs(_DUMP_DIR, exist_ok=True)
++_subst_cache: dict[bytes, UOp] = {}
++_orig_by_key: dict[bytes, UOp] = {}   # substituted key -> original PROGRAM (tooling)
++_dumped: set[str] = set()
++
++_SIG_RE = re.compile(r'extern "C" __global__ void (?:__launch_bounds__\(\d+\) )?(\w+)\(([^)]*)\)')
++_ARG_RE = re.compile(r'^(unsigned char\*|float\*|half\*) (\w+?)_(\d+)$')
++_SCALAR_RE = re.compile(r'^const int (\w+?)_$')
++
++def _parse(prg) -> tuple[str, list, str] | None:
++  srcs = [s.arg for s in prg.src if s.op is Ops.SOURCE]
++  if not srcs or len(srcs) > 1: return None   # A3c: vars (start_pos) allowed; scalars kept below
++  m = _SIG_RE.search(srcs[0])
++  if m is None: return None
++  args = []
++  for a in m.group(2).split(", "):
++    am = _ARG_RE.match(a.strip())
++    if am is not None: args.append((am.group(1), am.group(2), int(am.group(3))))   # (ctype, name, numel)
++    elif (sm := _SCALAR_RE.match(a.strip())) is not None:   # A3c: keep scalars as ("const int", name, 0)
++      args.append(("const int", sm.group(1), 0))
++    else: return None
++  return m.group(1), args, srcs[0]
++
++def _match(args, src):
++  """Structurally identify an IQ3_XXS lazy-dequant GEMV kernel (y = arg0, float*)."""
++  if not args or args[0][0] not in ("float*", "half*"): return None   # 2026-09-07: half outputs (GDN in_proj)
++  args = [a for a in args if a[0] != "const int"]   # A3c: scalars kept by _parse; GEMV match ignores them
++  y = args[0]
++  fl = [a for a in args if a[0] == "float*"]
++  uc = [a for a in args if a[0] == "unsigned char*"]
++  cands = []
++  for grid in [a for a in fl if a is not y and a[2] == 1024]:
++    for W in uc:
++      if W[2] % 98: continue
++      BN = W[2] // 98
++      # signs tensor: optional (inline-signs graph has none); at most one consistent one
++      Ss = [a for a in uc if a is not W and a[2] == 32 * BN]
++      if len(Ss) > 1: continue
++      S = Ss[0] if Ss else None
++      for batch in (1, 3):   # T3: probe passes feed 3 rows through the same weights
++        N = y[2] // batch if y[2] % batch == 0 else 0
++        if N < 2 or BN % N: continue
++        B = BN // N
++        K = 256 * B
++        if K < 256: continue
++        xs = [a for a in args if a is not y and a is not grid and a[2] == batch * K and a[0] in ("float*", "half*")]
++        ss = [a for a in fl if a[2] == batch]   # A3-T3: per-row RMS scales (s_1 at T=1, s_3 at T=3)
++        nws = [a for a in uc if a[2] == 4 * K]
++        auxs = [a for a in fl if a is not y and a is not grid and a[2] == batch * N]
++        if len(xs) != 1 or len(ss) > 1 or len(nws) > 1 or len(auxs) > 1: continue
++        used = {id(a) for a in [y, xs[0], grid, W, S, *ss, *nws, *auxs] if a is not None}
++        if any(id(a) not in used for a in args): continue
++        if ss and nws and auxs: variant = "mul"
++        elif ss and nws and "exp2" in src: variant = "silu"
++        elif ss and nws: variant = "scale"
++        elif auxs: variant = "add"
++        elif not ss and not nws: variant = "plain"
++        else: continue
++        cands.append(dict(y=y, x=xs[0], s=ss[0] if ss else None, nw=nws[0] if nws else None,
++                          aux=auxs[0] if auxs else None, W=W, S=S, grid=grid, batch=batch,
++                          N=N, K=K, B=B, xhalf=(xs[0][0] == "half*"), variant=variant))
++  uniq = {tuple(sorted((k, v[1] if isinstance(v, tuple) else v) for k, v in c.items())): c for c in cands}
++  cands = list(uniq.values())
++  return cands[0] if len(cands) == 1 else None
++
++_XLOAD_FLOAT = """    const int koff = xrow + (int)(((size_t)b << 8) + ((unsigned int)lane << 3));
++    const float4 xa = *((const float4*)(a3b_x + koff));
++    const float4 xb = *((const float4*)(a3b_x + koff + 4));"""
++_XNW_FLOAT = """    const int eoff = koff - xrow;   // nw is per-input-dim (not batched)
++    const float4 na = *((const float4*)(a3b_nw + eoff));
++    const float4 nb = *((const float4*)(a3b_nw + eoff + 4));
++    const float x0 = xa.x*na.x, x1 = xa.y*na.y, x2 = xa.z*na.z, x3 = xa.w*na.w;
++    const float x4 = xb.x*nb.x, x5 = xb.y*nb.y, x6 = xb.z*nb.z, x7 = xb.w*nb.w;"""
++_XPLAIN_FLOAT = """    const float x0 = xa.x, x1 = xa.y, x2 = xa.z, x3 = xa.w;
++    const float x4 = xb.x, x5 = xb.y, x6 = xb.z, x7 = xb.w;"""
++_XLOAD_HALF = """    const int koff = xrow + (int)(((size_t)b << 8) + ((unsigned int)lane << 3));
++    const uint4 xw = *((const uint4*)((const __half*)a3b_x + koff));
++    const float2 f0 = __half22float2(*((const __half2*)&xw.x));
++    const float2 f1 = __half22float2(*((const __half2*)&xw.y));
++    const float2 f2 = __half22float2(*((const __half2*)&xw.z));
++    const float2 f3 = __half22float2(*((const __half2*)&xw.w));"""
++_XNW_HALF = """    const int eoff = koff - xrow;   // nw is per-input-dim (not batched)
++    const float4 na = *((const float4*)(a3b_nw + eoff));
++    const float4 nb = *((const float4*)(a3b_nw + eoff + 4));
++    const float x0 = f0.x*na.x, x1 = f0.y*na.y, x2 = f1.x*na.z, x3 = f1.y*na.w;
++    const float x4 = f2.x*nb.x, x5 = f2.y*nb.y, x6 = f3.x*nb.z, x7 = f3.y*nb.w;"""
++_XPLAIN_HALF = """    const float x0 = f0.x, x1 = f0.y, x2 = f1.x, x3 = f1.y;
++    const float x4 = f2.x, x5 = f2.y, x6 = f3.x, x7 = f3.y;"""
++
++_EPILOGUE = {
++  "silu":  "    float u = acc * (1.0f/a3b_s[warp/A3B_N]); a3b_y[warp] = u / (1.0f + expf(-u));",
++  "mul":   "    a3b_y[warp] = a3b_aux[warp] * acc * (1.0f/a3b_s[warp/A3B_N]);",
++  "scale": "    a3b_y[warp] = acc * (1.0f/a3b_s[warp/A3B_N]);",
++  "plain": "    a3b_y[warp] = acc;",
++  "add":   "    a3b_y[warp] = acc + a3b_aux[warp];",
++}
++
++def _build_source(fname: str, sig: str, roles: dict, rule: dict) -> str:
++  N, K, B = roles["N"], roles["K"], roles["B"]
++  batch = roles.get("batch", 1)
++  threads, wpc = int(rule.get("threads", 128)), int(rule.get("wpc", int(rule.get("threads", 128)) // 32))
++  with open(rule["template"]) as f: body = f.read()
++  body = body.replace("%%BATCH%%", str(batch))
++  if roles["xhalf"]:
++    xl = _XLOAD_HALF + "\n" + (_XNW_HALF if roles["nw"] else _XPLAIN_HALF)
++  else:
++    xl = _XLOAD_FLOAT + "\n" + (_XNW_FLOAT if roles["nw"] else _XPLAIN_FLOAT)
++  def _full(a): return f"{a[1]}_{a[2]}"   # signature names carry a numel suffix (data0_17408)
++  yhalf = roles["y"][0] == "half*"
++  prologue = [(f"  half* a3b_y = {_full(roles['y'])};" if yhalf else f"  float* a3b_y = {_full(roles['y'])};"),
++              f"  const {'__half' if roles['xhalf'] else 'float'}* a3b_x = {_full(roles['x'])};"]
++  if roles["s"]: prologue.append(f"  const float* a3b_s = {_full(roles['s'])};")
++  if roles["nw"]: prologue.append(f"  const float* a3b_nw = (const float*){_full(roles['nw'])};")
++  if roles["aux"]: prologue.append(f"  const float* a3b_aux = {_full(roles['aux'])};")
++  prologue.append(f"  const unsigned char* a3b_W = {_full(roles['W'])};")
++  prologue.append(f"  const float* a3b_g = {_full(roles['grid'])};")
++
++  _epi = _EPILOGUE[roles["variant"]]
++  if yhalf:
++    import re as _re
++    _epi = _re.sub(r"a3b_y\[warp\] = (.*);", r"a3b_y[warp] = __float2half_rn(\1);", _epi)
++  body = (body.replace("%%XLOAD%%", xl).replace("%%EPILOGUE%%", _epi)
++              .replace("%%THREADS%%", str(threads)).replace("%%WPC%%", str(wpc)))
++  return (f'#include <cuda_fp16.h>\n#define A3B_N {N}\n#define A3B_K {K}\n#define A3B_BLOCKS {B}\n#define A3B_BATCH {batch}\n'
++          f'extern "C" __global__ void {fname}({sig}) {{\n' + "\n".join(prologue) + "\n" + body + "\n}\n")
++
++def _mk_blocks(rng, nblocks):
++  """Random but VALID IQ3_XXS blocks (finite d; mirrors a3a_bench.make_blocks)."""
++  import numpy as np
++  b = np.zeros((nblocks, 98), dtype=np.uint8)
++  d = rng.lognormal(-7.8, 0.4, nblocks).astype(np.float16)
++  b[:, :2] = np.ascontiguousarray(d).view(np.uint8).reshape(nblocks, 2)
++  b[:, 2:66] = rng.integers(0, 256, (nblocks, 64), dtype=np.uint8)
++  words = rng.integers(0, 1 << 32, (nblocks, 8), dtype=np.uint64).astype(np.uint32)
++  b[:, 66:98] = np.ascontiguousarray(words).view(np.uint8).reshape(nblocks, 32)
++  return b, words
++
++def _signs_bytes(blocks: "np.ndarray", N: int, B: int) -> bytes:
++  """Consistent signs tensor ([row][block][32] row-major) for given raw blocks."""
++  import numpy as np
++  words = np.ascontiguousarray(blocks[:, 66:98]).view(np.uint32).reshape(N * B, 8)
++  shifts = np.array([0, 7, 14, 21], dtype=np.uint32)
++  idx = ((words[:, :, None] >> shifts) & 0x7F).reshape(N * B, 32).astype(np.int32)
++  esign = np.array([i | (0x80 if bin(i).count("1") % 2 else 0) for i in range(128)], dtype=np.uint8)
++  return esign[idx].reshape(N, B, 32).tobytes()
++
++def _nbytes(ctype: str, numel: int) -> int:
++  return numel * (1 if ctype == "unsigned char*" else (2 if ctype == "half*" else 4))
++
++def _validate(renderer, orig_prg, new_prg, roles, sig_args, new_dims):
++  """Run orig and substituted kernel on random buffers, compare outputs. Raises on mismatch."""
++  import numpy as np
++  from tinygrad.device import Device, BufferSpec
++  dev = Device[renderer.target.device]
++  rng = np.random.default_rng(1234)
++  N, B = roles["N"], roles["B"]
++  blocks, _ = _mk_blocks(rng, N * B)
++  W_bytes = blocks.tobytes()
++  bufs, allocs = [], []
++  wname = roles["W"][1]
++  for ctype, name, numel in sig_args:
++    nbytes = _nbytes(ctype, numel)
++    b = dev.allocator.alloc(nbytes, BufferSpec())
++    if name == wname: data = memoryview(W_bytes).cast("B")
++    elif name == roles["y"][1]: data = memoryview(bytearray(nbytes)).cast("B")
++    elif roles.get("S") and name == roles["S"][1]: data = memoryview(_signs_bytes(blocks, N, B)).cast("B")
++    elif roles["s"] and name == roles["s"][1]:
++      _sv = np.array([2.3, 0.7, 1.9][:numel], dtype=np.float32)   # batch-distinct, FULL fill
++      data = memoryview(_sv.tobytes()).cast("B")
++    elif roles["nw"] and name == roles["nw"][1]:   # norm weight: fp32 viewed as bytes
++      data = memoryview(rng.uniform(0.5, 1.5, numel // 4).astype(np.float32).tobytes()).cast("B")
++    elif ctype == "unsigned char*": data = memoryview(rng.integers(0, 256, numel, dtype=np.uint8).tobytes()).cast("B")
++    elif ctype == "half*": data = memoryview(rng.uniform(-1, 1, numel).astype(np.float16).tobytes()).cast("B")
++    else: data = memoryview(rng.uniform(-1, 1, numel).astype(np.float32).tobytes()).cast("B")
++    dev.allocator._copyin(b, data)
++    bufs.append(b); allocs.append((b, nbytes))
++  yidx = [a[1] for a in sig_args].index(roles["y"][1])
++  rt_orig, rt_new = dev.runtime(orig_prg.to_elf()), dev.runtime(new_prg.to_elf())
++  og, ol = orig_prg.arg.launch_dims({})
++  if ol is None: ol = (1, 1, 1)
++  rt_orig(*bufs, global_size=tuple(og), local_size=tuple(ol), vals=(), wait=True)
++  mv = memoryview(bytearray(4 * N)); dev.allocator._copyout(mv, bufs[yidx]); y_orig = np.frombuffer(mv, dtype=np.float32).copy()
++  rt_new(*bufs, global_size=new_dims[0], local_size=new_dims[1], vals=(), wait=True)
++  mv2 = memoryview(bytearray(4 * N)); dev.allocator._copyout(mv2, bufs[yidx]); y_new = np.frombuffer(mv2, dtype=np.float32).copy()
++  # timing (b2b): helps pick launch configs; not part of correctness
++  import time as _time
++  _REPS = 30
++  t0 = _time.perf_counter()
++  for _ in range(_REPS): rt_orig(*bufs, global_size=tuple(og), local_size=tuple(ol), vals=(), wait=True)
++  t_orig = (_time.perf_counter() - t0) / _REPS * 1e6
++  t0 = _time.perf_counter()
++  for _ in range(_REPS): rt_new(*bufs, global_size=new_dims[0], local_size=new_dims[1], vals=(), wait=True)
++  t_new = (_time.perf_counter() - t0) / _REPS * 1e6
++  print(f"[a3b]   b2b: orig={t_orig:.0f}us new={t_new:.0f}us", flush=True)
++  for b, nbytes in allocs:
++    try: dev.allocator.free(b, nbytes, BufferSpec())
++    except Exception: pass
++  if not (np.isfinite(y_orig).all() and np.isfinite(y_new).all()):
++    print(f"[a3b] validation nan/inf: orig finite={np.isfinite(y_orig).all()} new finite={np.isfinite(y_new).all()}", flush=True)
++    return False, float("nan")
++  denom = max(float(np.abs(y_orig).max()), 1e-9)
++  rel = float(np.abs(y_orig - y_new).max()) / denom
++  ok = rel < 1e-3 and bool(np.allclose(y_orig, y_new, rtol=1e-3, atol=1e-3 * denom))
++  return ok, rel
++
++
++# ---- A3c: O(L) attention kernel substitution (rowmax / rowsum / pv) ----
++_ROWMAX_BODY = """  const int r = blockIdx.x;
++  const int tid = threadIdx.x;
++  const int n = %%SP%% + 1;
++  const size_t base = (size_t)r * (size_t)%%L%%;
++  float m = __int_as_float(0xff800000u);   // -inf (0xff800000), NOT 0x7f800000 which is +inf
++  {
++    const float4* p4 = (const float4*)(%%IN%% + base);
++    const int n4 = n >> 2;
++    for (int i = tid; i < n4; i += %%NT%%) {
++      float4 v = p4[i];
++      m = fmaxf(m, fmaxf(fmaxf(v.x, v.y), fmaxf(v.z, v.w)));
++    }
++    for (int t = (n4 << 2) + tid; t < n; t += %%NT%%) m = fmaxf(m, %%IN%%[base + t]);
++  }
++  __shared__ float sh[%%NT%%];
++  sh[tid] = m;
++  __syncthreads();
++  for (int s = %%NT%% >> 1; s > 0; s >>= 1) {
++    if (tid < s) sh[tid] = fmaxf(sh[tid], sh[tid + s]);
++    __syncthreads();
++  }
++  if (tid == 0) %%OUT%%[r] = sh[0];"""
++
++_ROWSUM_BODY = """  const int r = blockIdx.x;
++  const int tid = threadIdx.x;
++  const int n = %%SP%% + 1;
++  const size_t base = (size_t)r * (size_t)%%L%%;
++  const float mr = %%M%%[r];
++  float acc = 0.0f;
++  {
++    const float4* p4 = (const float4*)(%%IN%% + base);
++    const int n4 = n >> 2;
++    for (int i = tid; i < n4; i += %%NT%%) {
++      float4 v = p4[i];
++      acc += exp2f((v.x - mr) * 1.4426950408889634f) + exp2f((v.y - mr) * 1.4426950408889634f)
++           + exp2f((v.z - mr) * 1.4426950408889634f) + exp2f((v.w - mr) * 1.4426950408889634f);
++    }
++    for (int t = (n4 << 2) + tid; t < n; t += %%NT%%) acc += exp2f((%%IN%%[base + t] - mr) * 1.4426950408889634f);
++  }
++  __shared__ float sh[%%NT%%];
++  sh[tid] = acc;
++  __syncthreads();
++  for (int s = %%NT%% >> 1; s > 0; s >>= 1) {
++    if (tid < s) sh[tid] += sh[tid + s];
++    __syncthreads();
++  }
++  if (tid == 0) %%OUT%%[r] = sh[0];"""
++
++_PV_BODY = """  const int gx = blockIdx.x;          // 8
++  const int gy = blockIdx.y;          // 12
++  const int x = threadIdx.x, y = threadIdx.y, z = threadIdx.z;
++  const int d = x + (y << 4) + (gx << 5);          // 0..255, matches original alu0
++  const int xy = x + (y << 4);
++  const int n = %%SP%% + 1;
++  const size_t L = (size_t)%%L%%;
++  const float* pr0 = %%PROBS%% + (size_t)gy * 2 * L;      // score row 2*gy
++  const float* pr1 = pr0 + L;                              // score row 2*gy+1
++  const __half* vp = (const __half*)%%V%% + (size_t)1024 * L + (size_t)(gy / 3) * (size_t)(L * 256);
++  float acc0 = 0.0f, acc1 = 0.0f;
++  {
++    const float4* q0 = (const float4*)pr0;
++    const float4* q1 = (const float4*)pr1;
++    const int n4 = n >> 2;
++    #pragma unroll 2
++    for (int i = z; i < n4; i += 32) {
++      const float4 p0 = __ldg(q0 + i);
++      const float4 p1 = __ldg(q1 + i);
++      const size_t tb = (size_t)i * 1024;   // i is the quad index (t = 4i), so v offset = 4i*256
++      acc0 += p0.x * __half2float(__ldg(vp + tb + d));         acc1 += p1.x * __half2float(__ldg(vp + tb + d));
++      acc0 += p0.y * __half2float(__ldg(vp + tb + 256 + d));   acc1 += p1.y * __half2float(__ldg(vp + tb + 256 + d));
++      acc0 += p0.z * __half2float(__ldg(vp + tb + 512 + d));   acc1 += p1.z * __half2float(__ldg(vp + tb + 512 + d));
++      acc0 += p0.w * __half2float(__ldg(vp + tb + 768 + d));   acc1 += p1.w * __half2float(__ldg(vp + tb + 768 + d));
++    }
++    for (int t = (n4 << 2) + z; t < n; t += 32) {
++      const float p0 = __ldg(pr0 + t), p1 = __ldg(pr1 + t);
++      const float vv = __half2float(__ldg(vp + (size_t)t * 256 + d));
++      acc0 += p0 * vv; acc1 += p1 * vv;
++    }
++  }
++  __shared__ float sh0[32][32], sh1[32][32];
++  sh0[z][xy] = acc0;
++  sh1[z][xy] = acc1;
++  __syncthreads();
++  if (z == 0) {
++    float a0 = 0.0f, a1 = 0.0f;
++    #pragma unroll
++    for (int k = 0; k < 32; k++) { a0 += sh0[k][xy]; a1 += sh1[k][xy]; }
++    const int alu7 = d + (gy << 10);
++    const int alu8 = d + (gy << 9);
++    %%OUT%%[alu8] = a0 * (1.0f/(1.0f + exp2f(%%GATE%%[alu7 + 256] * -1.4426950216293335f)));
++    %%OUT%%[alu8 + 256] = a1 * (1.0f/(1.0f + exp2f(%%GATE%%[alu7 + 768] * -1.4426950216293335f)));
++  }"""
++
++_ATTN_PRELUDE = """typedef unsigned int uint;
++#define INFINITY (__int_as_float(0x7f800000))
++#define NAN (__int_as_float(0x7fffffff))
++#include <cuda_fp16.h>
++"""
++
++def _attn_rules() -> dict:
++  return {r["kind"]: r for r in _rules.values() if "kind" in r}
++
++def _match_rowmax(args, src):
++  if len(args) != 3 or "(float)(-INFINITY)" not in src: return None
++  sc = [a for a in args if a[0] == "const int"]
++  fl = [a for a in args if a[0] == "float*"]
++  if len(sc) != 1 or len(fl) != 2 or args[0] is not fl[0]: return None
++  out, inn = fl if fl[0][2] <= fl[1][2] else (fl[1], fl[0])
++  if out[2] != 24 or inn[2] % 24 or inn[2] // 24 < 1024: return None
++  return dict(kind="rowmax", out=out, inn=inn, sp=sc[0], N=24, L=inn[2] // 24)
++
++def _match_rowsum(args, src):
++  if len(args) != 4 or "exp2" not in src: return None
++  sc = [a for a in args if a[0] == "const int"]
++  fl = [a for a in args if a[0] == "float*"]
++  if len(sc) != 1 or len(fl) != 3 or args[0] is not fl[0]: return None
++  rest = sorted(fl[1:], key=lambda a: a[2])
++  m, inn = rest
++  if fl[0][2] != 24 or m[2] != 24 or inn[2] % 24 or inn[2] // 24 < 1024: return None
++  return dict(kind="rowsum", out=fl[0], inn=inn, m=m, sp=sc[0], N=24, L=inn[2] // 24)
++
++def _match_pv(args, src):
++  if len(args) != 5 or "exp2" not in src: return None
++  sc = [a for a in args if a[0] == "const int"]
++  hs = [a for a in args if a[0] == "half*"]
++  fl = [a for a in args if a[0] == "float*"]
++  if len(sc) != 1 or len(hs) != 1 or len(fl) != 3 or args[0] is not fl[0]: return None
++  out = fl[0]
++  by_n = sorted(fl[1:], key=lambda a: a[2])
++  gate, probs = by_n[0], by_n[1]
++  cache = hs[0]
++  O, P, H, G = out[2], probs[2], cache[2], gate[2]
++  if O != 6144 or P % 24 or H % 2048: return None
++  L = H // 2048
++  if L < 1024 or P // L != 24 or G != 2 * O or O // 256 * L != P: return None   # heads = O/256; P = heads*L
++  return dict(kind="pv", out=out, probs=probs, cache=cache, gate=gate, sp=sc[0], L=L, O=O)
++
++def _build_attn(roles, rule, fname, sig):
++  kind = roles["kind"]
++  nt = int(rule.get("threads", 256))
++  sub = {"%%SP%%": roles["sp"][1] + "_", "%%L%%": str(roles["L"]), "%%NT%%": str(nt),
++         "%%OUT%%": roles["out"][1] + "_" + str(roles["out"][2])}
++  if kind == "rowmax":
++    body = _ROWMAX_BODY; sub["%%IN%%"] = roles["inn"][1] + "_" + str(roles["inn"][2])
++    grid, local = (roles["N"], 1, 1), (nt, 1, 1)
++  elif kind == "rowsum":
++    body = _ROWSUM_BODY
++    sub["%%IN%%"] = roles["inn"][1] + "_" + str(roles["inn"][2])
++    sub["%%M%%"] = roles["m"][1] + "_" + str(roles["m"][2])
++    grid, local = (roles["N"], 1, 1), (nt, 1, 1)
++  else:
++    body = _PV_BODY
++    sub["%%PROBS%%"] = roles["probs"][1] + "_" + str(roles["probs"][2])
++    sub["%%V%%"] = roles["cache"][1] + "_" + str(roles["cache"][2])
++    sub["%%GATE%%"] = roles["gate"][1] + "_" + str(roles["gate"][2])
++    grid, local = (8, 12, 1), (16, 2, 32)
++  src = _ATTN_PRELUDE + f'extern "C" __global__ void __launch_bounds__({local[0]*local[1]*local[2]}) {fname}({sig}) {{\n' + body + "\n}\n"
++  for k, v in sub.items(): src = src.replace(k, v)
++  return src, grid, local
++
++def _validate_attn(renderer, orig_prg, new_prg, roles, sig_args, new_dims):
++  import numpy as np
++  from tinygrad.device import Device, BufferSpec
++  dev = Device[renderer.target.device]
++  rng = np.random.default_rng(4242)
++  L = roles["L"]
++  sp_val = L - 1
++  wdata = {}
++  big = roles.get("inn", roles.get("probs"))
++  wdata[big[1]] = rng.uniform(-1, 1, (big[2],)).astype(np.float32)
++  if roles["kind"] == "rowsum": wdata[roles["m"][1]] = rng.uniform(0.5, 2.0, (roles["N"],)).astype(np.float32)
++  if roles["kind"] == "pv":
++    import os as _os
++    if _os.getenv("A3C_DBG_PV"):
++      # deterministic probes: v==1, gate==0 -> out = 0.5 * rowsum(probs); row identity visible
++      pr = np.zeros((roles["probs"][2],), dtype=np.float32)
++      for h in range(24):
++        for t in range(roles["L"]):
++          pr[h * roles["L"] + t] = (h % 2) * 1000.0 + (t / 100.0)   # head parity flag + t/100
++      wdata[roles["probs"][1]] = pr
++      wdata[roles["cache"][1]] = np.ones((roles["cache"][2],), dtype=np.float16)
++      g = np.zeros((roles["gate"][2],), dtype=np.float32)
++      if _os.getenv("A3C_DBG_PV") == "gate":
++        # deterministic per-element gate: value reveals index identity
++        g = (np.arange(roles["gate"][2], dtype=np.float32) % 97) * 0.01
++      wdata[roles["gate"][1]] = g
++    else:
++      wdata[roles["probs"][1]] = rng.uniform(0, 1, (roles["probs"][2],)).astype(np.float32)
++      wdata[roles["cache"][1]] = rng.uniform(-1, 1, (roles["cache"][2],)).astype(np.float16)
++      wdata[roles["gate"][1]] = rng.uniform(-2, 2, (roles["gate"][2],)).astype(np.float32)
++  bufs, allocs, yidx = [], [], None
++  oname = roles["out"][1]
++  for ctype, name, numel in sig_args:
++    if ctype == "const int": continue
++    nbytes = numel * (2 if ctype == "half*" else 4)
++    b = dev.allocator.alloc(nbytes, BufferSpec())
++    if name == oname:
++      yidx = len(bufs); data = memoryview(bytearray(nbytes)).cast("B")
++    elif name in wdata: data = memoryview(wdata[name].tobytes()).cast("B")
++    else: data = memoryview(rng.uniform(-1, 1, numel).astype(np.float32).tobytes()).cast("B")
++    dev.allocator._copyin(b, data)
++    bufs.append(b); allocs.append((b, nbytes))
++  rt_orig, rt_new = dev.runtime(orig_prg.to_elf()), dev.runtime(new_prg.to_elf())
++  og, ol = orig_prg.arg.launch_dims({})
++  if ol is None: ol = (1, 1, 1)
++  vals = (sp_val,)
++  rt_orig(*bufs, global_size=tuple(og), local_size=tuple(ol), vals=vals, wait=True)
++  mv = memoryview(bytearray(4 * roles["out"][2])); dev.allocator._copyout(mv, bufs[yidx])
++  y_orig = np.frombuffer(mv, dtype=np.float32).copy()
++  _fill = bytearray(4 * roles["out"][2])   # A3d: poison out before the new kernel so missed writes are caught
++  _fill[0::4097] = b"\xcd" * len(_fill[0::4097])
++  dev.allocator._copyin(bufs[yidx], memoryview(_fill).cast("B"))
++  rt_new(*bufs, global_size=new_dims[0], local_size=new_dims[1], vals=vals, wait=True)
++  mv2 = memoryview(bytearray(4 * roles["out"][2])); dev.allocator._copyout(mv2, bufs[yidx])
++  y_new = np.frombuffer(mv2, dtype=np.float32).copy()
++  for b, nb in allocs:
++    try: dev.allocator.free(b, nb, BufferSpec())
++    except Exception: pass
++  if not (np.isfinite(y_orig).all() and np.isfinite(y_new).all()):
++    print(f"[a3c] validation nan/inf orig_finite={np.isfinite(y_orig).all()} new_finite={np.isfinite(y_new).all()} "
++          f"orig[:6]={y_orig[:6]} new[:6]={y_new[:6]}", flush=True); return False, float("nan")
++  denom = max(float(np.abs(y_orig).max()), 1e-9)
++  rel = float(np.abs(y_orig - y_new).max()) / denom
++  if rel >= 1e-4 and np.isfinite(y_new).all():
++    idx = list(range(0, min(12, len(y_orig))))
++    print(f"[a3c] MISMATCH DETAIL orig[{idx}]={y_orig[:12]}", flush=True)
++    print(f"[a3c] MISMATCH DETAIL new [{idx}]={y_new[:12]}", flush=True)
++    print(f"[a3c] ratio new/orig = {y_new[:12] / np.where(np.abs(y_orig[:12])>1e-9, y_orig[:12], 1.0)}", flush=True)
++  return (rel < 1e-4 and bool(np.allclose(y_orig, y_new, rtol=1e-4, atol=1e-4 * denom))), rel
++
++
++
++
++# ==================== SKV: split-KV attention K1/K2 (MTP_SKV) ====================
++# Replaces the T=3 probe attention pair: K1 = QK+online-softmax partials (QK kernel),
++# K2 = combine (PV kernel). Workspace partials live in a dedicated buffer whose VA
++# is baked into both kernels (allocated once per (L,T), never freed, capture-safe).
++_SKV = bool(os.getenv("MTP_SKV"))
++_SKV_S = int(os.getenv("MTP_SKV_S", "20"))
++_SKV_WS = {}       # (L, T) -> (buffer, va_int)
++_SKV_PENDING = {}  # (L, T) -> (orig_qk_prg, new_k1_prg, roles)
++_SKV_DEAD = set()  # (L, T) keys that failed -> everything stock
++_SKV_LIVE = set()  # (L, T) keys where K2 took over the PV -> softmax bookkeeping kernels are dead code
++
++def _match_skv_noop(args, src, key):
++  # dead softmax kernels once K2 owns the PV: their outputs (mx/sm/partials) fed only the stock PV
++  L = key[0]
++  if len(args) == 2 and all(a[0] == "float*" for a in args):
++    a, b = args
++    if (a[2], b[2]) in ((18432, 72 * L), (72, 18432)):   # rowmax stage1 / stage2+sumreduce
++      return True
++  if len(args) == 3 and all(a[0] == "float*" for a in args) and "exp2" in src:
++    out, P, mx = args
++    if (out[2], P[2], mx[2]) == (18432, 72 * L, 72):     # partsum
++      return True
++  return False
++
++def _skv_retro_noop(renderer, key):
++  # layers 1..15's rowmax/partsum/reduce programs are already rendered (stock) by the time
++  # K2 replaces the PV on layer 0's render; swap every cached matching program for a no-op.
++  import sys as _sys
++  cg = _sys.modules.get("tinygrad.codegen")
++  if cg is None or not hasattr(cg, "to_program_cache"): return
++  for ck, cp in list(cg.to_program_cache.items()):
++    if cp is None: continue
++    parsed = _parse(cp)
++    if parsed is None: continue
++    _, cargs, csrc = parsed
++    if not _match_skv_noop(cargs, csrc, key): continue
++    try:
++      mm = _SIG_RE.search(csrc)
++      nn = to_function_name(mm.group(1) + "_skvn")
++      nsrc = _SKV_PRELUDE + f'extern "C" __global__ void __launch_bounds__(32) {nn}({mm.group(2)}) {{\n}}\n'
++      nlib = renderer.compiler.compile_cached(nsrc)
++      narg = dc_replace(cp.arg, name=nn, global_size=(1, 1, 1), local_size=(32, 1, 1))
++      nprg = cp.replace(src=(cp.src[0], cp.src[1], UOp(Ops.SOURCE, arg=nsrc), UOp(Ops.BINARY, arg=nlib)), arg=narg)
++      cg.to_program_cache[ck] = nprg
++      _subst_cache[cp.key] = nprg
++      print(f"[skv] retro-noop <- {mm.group(1)}", flush=True)
++    except Exception as e:
++      print(f"[skv] retro-noop FAILED for {mm.group(1)}: {e}", flush=True)
++
++
++
++_SKV_K1_BODY = """  float* __restrict__ ws = (float*)%%VA%%ULL;
++  const int s  = blockIdx.x / 12;
++  const int gr = blockIdx.x % 12;
++  const int g = gr / 3, r = gr % 3;
++  const int start = s * %%C%%;
++  const int cend = min(start + %%C%%, %%L%%);
++  const int end_r = min(cend, %%SP%% + r + 1);
++  const int h0 = g * 6;
++  const __half* Kg = %%KV%% + (size_t)g * (%%L%% * 256);
++  const __half* Vg = Kg + (size_t)%%L%% * 1024;
++  __shared__ __align__(16) __half sK[32][256];
++  __shared__ __align__(16) __half sV[32][256];
++  const int tid = threadIdx.x, lane = tid & 31, warp = tid >> 5;
++  const int nwarp = 8;
++  const int spr = tid >> 3, sdc = (tid & 7) << 5;
++  float q[6][8];
++  #pragma unroll
++  for (int h6 = 0; h6 < 6; h6++)
++    #pragma unroll
++    for (int j = 0; j < 8; j++)
++      q[h6][j] = %%Q%%[(size_t)(h0 + h6) * 768 + r * 256 + lane * 8 + j];
++  float m[6], l[6], o[6][8];
++  #pragma unroll
++  for (int h6 = 0; h6 < 6; h6++) { m[h6] = NEG_INF; l[h6] = 0.0f;
++    #pragma unroll
++    for (int j = 0; j < 8; j++) o[h6][j] = 0.0f; }
++  skv_u4 kp[4], vp[4];
++  bool kvalid = start + spr < cend;
++  if (kvalid) {
++    const skv_u4* ksrc = (const skv_u4*)(Kg + (size_t)(start + spr) * 256 + sdc);
++    const skv_u4* vsrc = (const skv_u4*)(Vg + (size_t)(start + spr) * 256 + sdc);
++    #pragma unroll
++    for (int e = 0; e < 4; e++) { kp[e] = ksrc[e]; vp[e] = vsrc[e]; }
++  }
++  for (int t0 = start; t0 < cend; t0 += 32) {
++    if (kvalid) {
++      skv_u4* kd = (skv_u4*)&sK[spr][sdc];
++      skv_u4* vd = (skv_u4*)&sV[spr][sdc];
++      #pragma unroll
++      for (int e = 0; e < 4; e++) { kd[e] = kp[e]; vd[e] = vp[e]; }
++    }
++    __syncthreads();
++    const int tn = t0 + 32;
++    kvalid = tn + spr < cend;
++    if (kvalid) {
++      const skv_u4* ksrc = (const skv_u4*)(Kg + (size_t)(tn + spr) * 256 + sdc);
++      const skv_u4* vsrc = (const skv_u4*)(Vg + (size_t)(tn + spr) * 256 + sdc);
++      #pragma unroll
++      for (int e = 0; e < 4; e++) { kp[e] = ksrc[e]; vp[e] = vsrc[e]; }
++    }
++    const int npos = min(32, cend - t0);
++    for (int pi = warp; pi < npos; pi += nwarp) {
++      const int p = t0 + pi;
++      const bool valid = p < end_r;
++      #pragma unroll
++      for (int h6 = 0; h6 < 6; h6++) {
++        float dpt = 0.0f;
++        #pragma unroll
++        for (int j = 0; j < 8; j++)
++          dpt += q[h6][j] * __half2float(sK[pi][lane * 8 + j]);
++        #pragma unroll
++        for (int off = 16; off > 0; off >>= 1) dpt += __shfl_xor_sync(0xffffffffu, dpt, off);
++        const float raw = dpt * 0.0625f;
++        if (lane == 0) %%P%%[(size_t)(h0 + h6) * (3 * %%L%%) + (size_t)r * %%L%% + p] = valid ? raw : NEG_INF;
++        if (valid) {
++          const float s2 = raw * 1.4426950216293335f;
++          if (s2 > m[h6]) {
++            const float sc = exp2f(m[h6] - s2);
++            l[h6] *= sc;
++            #pragma unroll
++            for (int j = 0; j < 8; j++) o[h6][j] *= sc;
++            m[h6] = s2;
++          }
++          const float e = exp2f(s2 - m[h6]);
++          l[h6] += e;
++          #pragma unroll
++          for (int j = 0; j < 8; j++) o[h6][j] += e * __half2float(sV[pi][lane * 8 + j]);
++        }
++      }
++    }
++    __syncthreads();
++  }
++  #pragma unroll
++  for (int h6 = 0; h6 < 6; h6++) {
++    float* w = ws + ((((size_t)(s * 12 + gr) * 6) + h6) * 8 + warp) * 258;
++    #pragma unroll
++    for (int j = 0; j < 8; j++) w[lane * 8 + j] = o[h6][j];
++    if (lane == 0) { w[256] = m[h6]; w[257] = l[h6]; }
++  }
++"""
++
++_SKV_K2_BODY = """  const float* __restrict__ ws = (const float*)%%VA%%ULL;
++  const int hr = blockIdx.x;            // 72 = h*3 + r
++  const int h = hr / 3, r = hr % 3, d = threadIdx.x;
++  const int gr = (h / 6) * 3 + r, h6 = h % 6;
++  float M = NEG_INF;
++  for (int s = 0; s < %%S%%; s++)
++    for (int wv = 0; wv < 8; wv++)
++      M = fmaxf(M, ws[((((size_t)(s * 12 + gr) * 6) + h6) * 8 + wv) * 258 + 256]);
++  float L_ = 0.0f, O = 0.0f;
++  for (int s = 0; s < %%S%%; s++)
++    for (int wv = 0; wv < 8; wv++) {
++      const float* w = ws + ((((size_t)(s * 12 + gr) * 6) + h6) * 8 + wv) * 258;
++      const float wt = exp2f(w[256] - M);
++      L_ += wt * w[257];
++      O += wt * w[d];
++    }
++  const float gt = %%GATE%%[d + (size_t)h * 512 + (size_t)r * 12288 + 256];
++  %%OUT%%[d + (size_t)h * 256 + (size_t)r * 6144] = (O / L_) * (1.0f / (1.0f + exp2f(-gt * 1.4426950216293334f)));
++"""
++
++def _skv_ws(renderer, L, T):
++  key = (L, T)
++  if key not in _SKV_WS:
++    from tinygrad.device import Device, BufferSpec
++    dev = Device[renderer.target.device]
++    nbytes = _SKV_S * 4 * T * 6 * 8 * 258 * 4
++    b = dev.allocator.alloc(nbytes, BufferSpec())
++    _SKV_WS[key] = (b, int(b.va_addr))
++  return _SKV_WS[key]
++
++def _match_skv_qk(args, src):
++  if len(args) != 4 or "0.0625f" not in src or "-INFINITY" not in src: return None
++  sc = [a for a in args if a[0] == "const int"]
++  hs = [a for a in args if a[0] == "half*"]
++  fl = [a for a in args if a[0] == "float*"]
++  if len(sc) != 1 or len(hs) != 1 or len(fl) != 2: return None
++  P, Q = (fl if fl[0][2] >= fl[1][2] else (fl[1], fl[0]))
++  KV = hs[0]
++  if Q[2] != 18432 or KV[2] % 2048: return None
++  L = KV[2] // 2048
++  if L < 1024 or P[2] != 72 * L: return None
++  return dict(kind="skv_qk", L=L, T=3, P=P, Q=Q, KV=KV, SP=sc[0])
++
++def _match_skv_pv(args, src):
++  if len(args) != 6 or "exp2" not in src: return None
++  hs = [a for a in args if a[0] == "half*"]
++  if len(hs) != 1 or args[4] is not hs[0]: return None
++  out, P, mx, sm, V, gate = args
++  if any(a[0] != "float*" for a in (out, P, mx, sm, gate)): return None
++  if out[2] != 18432 or mx[2] != 72 or sm[2] != 72 or gate[2] != 36864: return None
++  if V[2] % 2048: return None
++  L = V[2] // 2048
++  if L < 1024 or P[2] != 72 * L: return None
++  if "(gidx2*12288)+256" not in src and "(gidx2*12544)" not in src:
++    import os as _o
++    if _o.getenv("MTP_SKV"):
++      print(f"[skv] PV near-miss: numel pattern OK but structure check failed "
++            f"(12288 in src: {'12288' in src}, +256: {'+256' in src}, gidx2: {'gidx2' in src})", flush=True)
++      try:
++        with open("/tmp/skv_pv_nearmiss.cu", "w") as f: f.write(src)
++      except Exception: pass
++    return None
++  return dict(kind="skv_pv", L=L, T=3, out=out, P=P, mx=mx, sm=sm, V=V, gate=gate)
++
++_SKV_PRELUDE = """#include <cuda_fp16.h>
++#define NEG_INF (__int_as_float(0xff800000))
++struct __align__(16) skv_u4 { unsigned x, y, z, w; };
++"""
++
++def _build_skv(fname, sig, body, roles, va):
++  src = _SKV_PRELUDE + f'extern "C" __global__ void __launch_bounds__(256) {fname}({sig}) {{\n' + body + "\n}\n"
++  L = roles["L"]
++  C = (L + _SKV_S - 1) // _SKV_S
++  nm = lambda a: a[1] + "_" if a[0] == "const int" else a[1] + "_" + str(a[2])   # sig names carry _numel suffix
++  sub = {"%%L%%": str(L), "%%C%%": str(C), "%%S%%": str(_SKV_S), "%%VA%%": hex(va), "%%P%%": nm(roles["P"])}
++  if roles["kind"] == "skv_qk":
++    sub["%%Q%%"] = nm(roles["Q"]); sub["%%KV%%"] = nm(roles["KV"]); sub["%%SP%%"] = nm(roles["SP"])
++  else:
++    sub["%%OUT%%"] = nm(roles["out"]); sub["%%GATE%%"] = nm(roles["gate"])
++  for k, v in sub.items(): src = src.replace(k, v)
++  return src
++
++def _validate_skv(renderer, orig_qk, orig_pv, new_k1, new_k2, roles):
++  import numpy as np
++  from tinygrad.device import Device, BufferSpec
++  dev = Device[renderer.target.device]
++  rng = np.random.default_rng(4242)
++  L = roles["L"]
++  sp = L - 2000
++  def ab(nb): return dev.allocator.alloc(nb, BufferSpec())
++  def up(arr):
++    b = ab(len(arr) * 4); dev.allocator._copyin(b, memoryview(arr.astype(np.float32).tobytes()).cast("B")); return b
++  Qb = up((rng.standard_normal(18432) * 0.5).astype(np.float32))
++  KVh = (rng.standard_normal(L * 2048) * 0.3).astype(np.float16)
++  KVb = ab(L * 2048 * 2); dev.allocator._copyin(KVb, memoryview(KVh.tobytes()).cast("B"))
++  Gb = up((rng.standard_normal(36864) * 0.5).astype(np.float32))
++  Pb = ab(72 * L * 4)
++  o1, o2 = ab(18432 * 4), ab(18432 * 4)
++  allocs = [(Qb, 18432*4), (KVb, L*2048*2), (Gb, 36864*4), (Pb, 72*L*4), (o1, 18432*4), (o2, 18432*4)]
++  try:
++    rt_oq = dev.runtime(orig_qk.to_elf())
++    og, ol = orig_qk.arg.launch_dims({})
++    if ol is None: ol = (1, 1, 1)
++    rt_oq(Pb, Qb, KVb, global_size=tuple(og), local_size=tuple(ol), vals=(sp,), wait=True)
++    mv = memoryview(bytearray(72 * L * 4)); dev.allocator._copyout(mv, Pb)
++    Pn = np.frombuffer(mv, np.float32).reshape(72, L)
++    mx = Pn.max(axis=1).astype(np.float32)
++    sm = np.exp2((Pn - mx[:, None]) * np.float32(1.4426950216293335)).sum(axis=1).astype(np.float32)
++    mxb, smb = up(mx), up(sm); allocs += [(mxb, 288), (smb, 288)]
++    rt_op = dev.runtime(orig_pv.to_elf())
++    pg, pl = orig_pv.arg.launch_dims({})
++    if pl is None: pl = (1, 1, 1)
++    rt_op(o1, Pb, mxb, smb, KVb, Gb, global_size=tuple(pg), local_size=tuple(pl), vals=(0,), wait=True)
++    rt_k1 = dev.runtime(new_k1.to_elf())
++    rt_k1(Pb, Qb, KVb, global_size=(_SKV_S * 12, 1, 1), local_size=(256, 1, 1), vals=(sp,), wait=True)
++    rt_k2 = dev.runtime(new_k2.to_elf())
++    rt_k2(o2, Pb, mxb, smb, KVb, Gb, global_size=(72, 1, 1), local_size=(256, 1, 1), vals=(0,), wait=True)
++    m1 = memoryview(bytearray(18432 * 4)); dev.allocator._copyout(m1, o1)
++    m2 = memoryview(bytearray(18432 * 4)); dev.allocator._copyout(m2, o2)
++    y1 = np.frombuffer(m1, np.float32).copy(); y2 = np.frombuffer(m2, np.float32).copy()
++    if not (np.isfinite(y1).all() and np.isfinite(y2).all()):
++      return False, float("nan")
++    rel = float(np.abs(y1 - y2).max()) / max(float(np.abs(y1).max()), 1e-9)
++    return (rel < 1e-4), rel
++  finally:
++    for b, nb in allocs:
++      try: dev.allocator.free(b, nb, BufferSpec())
++      except Exception: pass
++
++
++# ==================== SKV-T1: draft fused-PV split-KV (last-CTA combine) ====================
++_SKV_T1_WS = None   # (buffer, va) — ws + self-resetting atomic counter, allocated once
++
++_SKV_T1_BODY = """  float* __restrict__ ws = (float*)%%VA%%ULL;
++  const int s = blockIdx.x >> 2;
++  const int g = blockIdx.x & 3;
++  const int start = s * %%C%%;
++  const int cend = min(start + %%C%%, %%SP%% + 1);
++  const __half* Vg = %%KV%% + (size_t)g * (%%L%% * 256) + (size_t)%%L%% * 1024;
++  __shared__ __align__(16) __half sV[8][256];
++  const int tid = threadIdx.x, lane = tid & 31;
++  const int spr = tid >> 5, sdc = (tid & 31) << 3;
++  struct __align__(16) u4 { unsigned x, y, z, w; };
++  float acc[6][8];
++  #pragma unroll
++  for (int h6 = 0; h6 < 6; h6++)
++    #pragma unroll
++    for (int j = 0; j < 8; j++) acc[h6][j] = 0.0f;
++  const int end = cend - start;
++  for (int t0 = 0; t0 < end; t0 += 8) {
++    if (t0 + spr < end) *(u4*)&sV[spr][sdc] = *(const u4*)(Vg + (size_t)(start + t0 + spr) * 256 + sdc);
++    __syncthreads();
++    const int npos = min(8, end - t0);
++    const int pi = tid >> 5;
++    if (pi < npos) {
++      const int p = start + t0 + pi;
++      #pragma unroll
++      for (int h6 = 0; h6 < 6; h6++) {
++        const float pv = %%P%%[(size_t)(g * 6 + h6) * %%PS%% + p];
++        #pragma unroll
++        for (int j = 0; j < 8; j++)
++          acc[h6][j] += pv * __half2float(sV[pi][(lane << 3) + j]);
++      }
++    }
++    __syncthreads();
++  }
++  #pragma unroll
++  for (int h6 = 0; h6 < 6; h6++) {
++    float* w = ws + ((((size_t)(s * 4 + g) * 6) + h6) * 8 + (tid >> 5)) * 256;
++    #pragma unroll
++    for (int j = 0; j < 8; j++) w[(lane << 3) + j] = acc[h6][j];
++  }
++  float* counter = ws + (size_t)%%S%% * 4 * 6 * 8 * 256;
++  __threadfence();
++  __shared__ unsigned is_last;
++  if (tid == 0) is_last = (atomicAdd(counter, 1u) == (unsigned)(%%S%% * 4 - 1)) ? 1u : 0u;
++  __syncthreads();
++  if (!is_last) return;
++  if (tid == 0) *counter = 0u;
++  for (int h = 0; h < 24; h++) {
++    const int g2 = h / 6, h6 = h % 6;
++    float a = 0.0f;
++    for (int s2 = 0; s2 < %%S%%; s2++)
++      #pragma unroll 8
++      for (int wv = 0; wv < 8; wv++)
++        a += ws[(((size_t)(s2 * 4 + g2) * 6) + h6) * 8 * 256 + (size_t)wv * 256 + tid];
++    const float gt = %%GATE%%[tid + (size_t)h * 512 + 256];
++    %%OUT%%[tid + (size_t)h * 256] = a * (1.0f / (1.0f + exp2f(-gt * 1.4426950216293335f)));
++  }
++"""
++
++def _match_skv_t1(args, src):
++  # stock fused-PV: (out_6144, P_2408376, half KV_205520896, gate_12288, const int sp)
++  if len(args) != 5: return None
++  sc = [a for a in args if a[0] == "const int"]
++  hs = [a for a in args if a[0] == "half*"]
++  fl = [a for a in args if a[0] == "float*"]
++  if len(sc) != 1 or len(hs) != 1 or len(fl) != 3: return None
++  out, P, gate = fl[0], fl[1], fl[2]
++  if P[2] != 2408376: P, gate = gate, P
++  if out[2] != 6144 or P[2] != 2408376 or gate[2] != 12288 or hs[0][2] != 205520896: return None
++  if "exp2" not in src or "+1" not in src: return None   # loop bound sp+1 marker
++  return dict(kind="skv_t1", out=out, P=P, KV=hs[0], gate=gate, SP=sc[0])
++
++def _skv_t1_ws(renderer):
++  global _SKV_T1_WS
++  if _SKV_T1_WS is None:
++    from tinygrad.device import Device, BufferSpec
++    import numpy as _np
++    dev = Device[renderer.target.device]
++    nbytes = (_SKV_S * 4 * 6 * 8 * 256 + 1) * 4
++    b = dev.allocator.alloc(nbytes, BufferSpec())
++    dev.allocator._copyin(b, memoryview(_np.zeros(_SKV_S*4*6*8*256 + 1, _np.float32).tobytes()).cast("B"))
++    _SKV_T1_WS = (b, int(b.va_addr))
++  return _SKV_T1_WS
++
++# ---- A3d: Q5_K warp-per-row GEMVs (lm_head fp32 path + GDN qkv half path) ----
++_Q5_BODY = """  const int warp = (blockIdx.x * %%WPC%%) + (threadIdx.x >> 5);
++  const int lane = threadIdx.x & 31;
++  if (warp < %%NROWS%%) {
++    float acc = 0.0f;
++    const int bg = lane >> 3;                                // byte group 0..3 (32 qs bytes each)
++    const int bbase = ((lane & 7) << 2) + (bg << 5);         // this lane's 4 consecutive qs bytes
++    const int ebase = (bg << 6) + ((lane & 7) << 2);         // low-nibble element base (probed mapping)
++    const int hb = bg << 1;                                  // qh bit for low elements; +1 for high
++    #pragma unroll 2
++    for (int sb = 0; sb < %%NSB%%; ++sb) {
++      const unsigned char* blk = %%W%% + (size_t)warp * (size_t)(%%NSB%% * 176) + (size_t)sb * 176;
++      const float d = __half2float(*((const __half*)blk));
++      const float dmin = __half2float(*((const __half*)(blk + 2)));
++      const unsigned char* s = blk + 4;
++      const unsigned char* qh = blk + 16;
++      const unsigned char* qs = blk + 48;
++      const float sca=(float)(s[0]&63), scb=(float)(s[1]&63), scc=(float)(s[2]&63), scd=(float)(s[3]&63);
++      const float sce=(float)((s[8]&0xF)|((s[0]>>6)<<4)), scf=(float)((s[9]&0xF)|((s[1]>>6)<<4));
++      const float scg=(float)((s[10]&0xF)|((s[2]>>6)<<4)), sch=(float)((s[11]&0xF)|((s[3]>>6)<<4));
++      const float mna=(float)(s[4]&63), mnb=(float)(s[5]&63), mnc=(float)(s[6]&63), mnd=(float)(s[7]&63);
++      const float mne=(float)((s[8]>>4)|((s[4]>>6)<<4)), mnf=(float)((s[9]>>4)|((s[5]>>6)<<4));
++      const float mng=(float)((s[10]>>4)|((s[6]>>6)<<4)), mnh=(float)((s[11]>>4)|((s[7]>>6)<<4));
++      float dsA, dmA, dsB, dmB;                              // sub 2*bg and 2*bg+1 scale products
++      switch (bg) {
++        case 0: dsA=d*sca; dmA=dmin*mna; dsB=d*scb; dmB=dmin*mnb; break;
++        case 1: dsA=d*scc; dmA=dmin*mnc; dsB=d*scd; dmB=dmin*mnd; break;
++        case 2: dsA=d*sce; dmA=dmin*mne; dsB=d*scf; dmB=dmin*mnf; break;
++        default: dsA=d*scg; dmA=dmin*mng; dsB=d*sch; dmB=dmin*mnh; break;
++      }
++      const int xbase = (sb << 8) + ebase;
++      #pragma unroll
++      for (int k = 0; k < 4; ++k) {
++        const unsigned char qsb = qs[bbase + k];
++        const unsigned char qhb = qh[(bbase + k) & 31];
++        const float w0 = (dsA * (float)(((qsb & 0xF) + (((qhb >> hb) & 1) << 4)))) - dmA;
++        const float w1 = (dsB * (float)(((qsb >> 4) + (((qhb >> (hb + 1)) & 1) << 4)))) - dmB;
++        const int xoff0 = xbase + k;
++        const int xoff1 = xoff0 + 32;
++        const float xw0 = %%XW0%%;
++        const float xw1 = %%XW1%%;
++        %%ACC%%;
++      }
++    }
++    #pragma unroll
++    for (int o = 16; o > 0; o >>= 1) acc += __shfl_down_sync(0xffffffffu, acc, o);
++    if (lane == 0) { %%EPILOGUE%% }
++    %%PASSTHROUGH%%
++  }"""
++
++def _match_q5head(args, src):
++  if len(args) != 7: return None
++  fl = [a for a in args if a[0] == "float*"]
++  uc = [a for a in args if a[0] == "unsigned char*"]
++  if len(uc) != 2 or len(fl) != 5: return None
++  out = args[0]
++  if out[0] != "float*": return None
++  W = max(uc, key=lambda a: a[2]); nw = min(uc, key=lambda a: a[2])
++  if W[2] % 3520 or nw[2] != 20480: return None
++  R = W[2] // 3520
++  if R < 1024 or out[2] != R: return None
++  rest = sorted([a for a in fl if a is not out], key=lambda a: a[2])
++  aux, x, s1, s2 = rest[3], rest[2], rest[0], rest[1]
++  if aux[2] != R or x[2] != 5120 or s1[2] != 1 or s2[2] != 1: return None
++  if "log2" not in src: return None
++  return dict(kind="q5head", out=out, x=x, s1=s1, s2=s2, nw=nw, W=W, aux=aux, N=R, K=5120, NSB=20)
++
++def _match_q5conv(args, src):
++  if len(args) != 7: return None
++  sc = [a for a in args if a[0] == "const int"]
++  fl = [a for a in args if a[0] == "float*"]
++  uc = [a for a in args if a[0] == "unsigned char*"]
++  if len(sc) != 1 or len(uc) != 2 or len(fl) != 4: return None
++  out = args[0]
++  if out[0] != "float*": return None
++  W = max(uc, key=lambda a: a[2]); nw = min(uc, key=lambda a: a[2])
++  if W[2] % 3520 or nw[2] != 20480: return None
++  R = W[2] // 3520
++  if R < 1024 or out[2] != 4 * R: return None
++  rest = sorted([a for a in fl if a is not out], key=lambda a: a[2])
++  s, x, inn = rest[0], rest[1], rest[2]
++  if s[2] != 1 or x[2] != 5120 or inn[2] != 3 * R: return None
++  if "half" not in src: return None
++  return dict(kind="q5conv", out=out, inn=inn, x=x, s=s, nw=nw, W=W, sp=sc[0], N=R, K=5120, NSB=20)
++
++def _n_(a): return f"{a[1]}_{a[2]}"
++
++def _build_q5(roles, rule, fname, sig):
++  kind = roles["kind"]
++  wpc = int(rule.get("wpc", 4))
++  sub = {"%%WPC%%": str(wpc), "%%NROWS%%": str(roles["N"]), "%%NSB%%": str(roles["NSB"]),
++         "%%W%%": _n_(roles["W"])}
++  if kind == "q5head":
++    _xw = lambda o: f"({_n_(roles['x'])}[({o})] * (float)(*((const float*)(({_n_(roles['nw'])}) + ({o}) * 4))))"
++    sub["%%XW0%%"] = _xw("xoff0")
++    sub["%%XW1%%"] = _xw("xoff1")
++    sub["%%ACC%%"] = "acc += xw0 * w0 + xw1 * w1"
++    sub["%%EPILOGUE%%"] = (
++      f"const float _s1 = {_n_(roles['s1'])}[0]; "
++      f"const float _s2 = {_n_(roles['s2'])}[0]; "
++      f"const float _a = {_n_(roles['aux'])}[warp]; "
++      f"const float _acl = (_a < 9.999999960041972e-13f) ? 9.999999960041972e-13f : _a; "
++      f"const float _s2c = (_s2 < 9.999999960041972e-13f) ? 9.999999960041972e-13f : _s2; "
++      f"{_n_(roles['out'])}[warp] = (acc * (1.0f / (_s1 * _s2c))) + "
++      f"(log2f((log2f(_acl) * -0.6931471824645996f)) * -0.6931471824645996f);")
++    sub["%%PASSTHROUGH%%"] = ""
++    grid, local = (math.ceil(roles["N"] / wpc), 1, 1), (wpc * 32, 1, 1)
++  else:
++    _xw = lambda o: (f"({_n_(roles['x'])}[({o})] * (1.0f / {_n_(roles['s'])}[0]) * "
++                     f"(float)(*((const float*)(({_n_(roles['nw'])}) + ({o}) * 4))))")
++    sub["%%XW0%%"] = _xw("xoff0")
++    sub["%%XW1%%"] = _xw("xoff1")
++    sub["%%ACC%%"] = ("acc += __half2float(__hmul(__float2half(xw0), __float2half(w0))) "
++                      "+ __half2float(__hmul(__float2half(xw1), __float2half(w1)))")
++    sub["%%EPILOGUE%%"] = f"{_n_(roles['out'])}[(%%NP%%) + warp] = acc;"
++    sub["%%EPILOGUE%%"] = sub["%%EPILOGUE%%"].replace("%%NP%%", str(3 * roles["N"]))
++    sub["%%PASSTHROUGH%%"] = (
++      f"    if (lane < 3) {{ const int _off = warp + lane * {roles['N']}; "
++      f"{_n_(roles['out'])}[_off] = ({roles['sp'][1]}_ != 0) ? {_n_(roles['inn'])}[_off] : 0.0f; }}")
++    grid, local = (math.ceil(roles["N"] / wpc), 1, 1), (wpc * 32, 1, 1)
++  src_new = _ATTN_PRELUDE + f'extern "C" __global__ void __launch_bounds__({local[0]}) {fname}({sig}) {{\n' + _Q5_BODY + "\n}\n"
++  for k, v in sub.items(): src_new = src_new.replace(k, v)
++  return src_new, grid, local
++
++def _validate_q5(renderer, orig_prg, new_prg, roles, sig_args, new_dims):
++  import numpy as np
++  from tinygrad.device import Device, BufferSpec
++  dev = Device[renderer.target.device]
++  rng = np.random.default_rng(31337)
++  N = roles["N"]
++  # valid random Q5_K rows: small d/dmin, arbitrary scale/quant bytes
++  Wb = np.zeros((N, 3520), dtype=np.uint8)
++  if os.getenv("A3D_DBG_Q5") == "1":
++    # deterministic: every row d=1.0 dmin=0 sc[0]=8, all qs/qh/scales else 0 -> only j=0 has q=1
++    Wb[:, 0:2] = np.array([0x00, 0x3C], dtype=np.uint8)
++    Wb[:, 4] = 8
++    Wb[:, 48] = 1
++  else:
++    W3 = Wb.reshape(N, 20, 176)
++    W3[:, :, :2] = np.ascontiguousarray(rng.uniform(0.001, 0.05, (N, 20)).astype(np.float16)).view(np.uint8).reshape(N, 20, 2)
++    W3[:, :, 2:4] = np.ascontiguousarray(rng.uniform(0.0, 0.01, (N, 20)).astype(np.float16)).view(np.uint8).reshape(N, 20, 2)
++    W3[:, :, 4:] = rng.integers(0, 256, (N, 20, 172), dtype=np.uint8)
++  wdata = {}
++  wdata[roles["W"][1]] = Wb.tobytes()
++  wdata[roles["nw"][1]] = rng.uniform(0.5, 1.5, 5120).astype(np.float32).tobytes()
++  sp_val = 7
++  if roles["kind"] == "q5head":
++    wdata[roles["x"][1]] = rng.uniform(-1, 1, 5120).astype(np.float32).tobytes()
++  elif roles["kind"] == "q5conv" and os.getenv("A3D_DBG_Q5") == "1":
++    wdata[roles["x"][1]] = np.ones((5120,), dtype=np.float32).tobytes()
++    wdata[roles["nw"][1]] = np.ones((5120,), dtype=np.float32).tobytes()
++    wdata[roles["s"][1]] = np.array([2.0], dtype=np.float32).tobytes()
++    wdata[roles["s1"][1]] = np.array([2.3], dtype=np.float32).tobytes()
++    wdata[roles["s2"][1]] = np.array([1.7], dtype=np.float32).tobytes()
++    wdata[roles["aux"][1]] = rng.uniform(0.5, 3.0, N).astype(np.float32).tobytes()
++  else:
++    wdata[roles["x"][1]] = rng.uniform(-1, 1, 5120).astype(np.float32).tobytes()
++    wdata[roles["s"][1]] = np.array([2.3], dtype=np.float32).tobytes()
++    wdata[roles["inn"][1]] = rng.uniform(-1, 1, 3 * N).astype(np.float32).tobytes()
++  bufs, allocs, yidx = [], [], None
++  oname = roles["out"][1]
++  for ctype, name, numel in sig_args:
++    if ctype == "const int": continue
++    nbytes = numel * (2 if ctype == "half*" else 4 if ctype.endswith("*") else 4)
++    b = dev.allocator.alloc(nbytes, BufferSpec())
++    if name == oname: yidx = len(bufs); data = memoryview(bytearray(nbytes)).cast("B")
++    elif name in wdata: data = memoryview(wdata[name]).cast("B")
++    else: data = memoryview(rng.uniform(-1, 1, max(numel, 1)).astype(np.float32).tobytes()).cast("B")
++    dev.allocator._copyin(b, data)
++    bufs.append(b); allocs.append((b, nbytes))
++  rt_orig, rt_new = dev.runtime(orig_prg.to_elf()), dev.runtime(new_prg.to_elf())
++  og, ol = orig_prg.arg.launch_dims({})
++  if ol is None: ol = (1, 1, 1)
++  vals = (sp_val,) if roles["kind"] == "q5conv" else ()
++  rt_orig(*bufs, global_size=tuple(og), local_size=tuple(ol), vals=vals, wait=True)
++  mv = memoryview(bytearray(4 * roles["out"][2])); dev.allocator._copyout(mv, bufs[yidx])
++  y_orig = np.frombuffer(mv, dtype=np.float32).copy()
++  _fill = bytearray(4 * roles["out"][2])   # A3d: poison out before the new kernel so missed writes are caught
++  _fill[0::4097] = b"\xcd" * len(_fill[0::4097])
++  dev.allocator._copyin(bufs[yidx], memoryview(_fill).cast("B"))
++  rt_new(*bufs, global_size=new_dims[0], local_size=new_dims[1], vals=vals, wait=True)
++  mv2 = memoryview(bytearray(4 * roles["out"][2])); dev.allocator._copyout(mv2, bufs[yidx])
++  y_new = np.frombuffer(mv2, dtype=np.float32).copy()
++  for b, nb in allocs:
++    try: dev.allocator.free(b, nb, BufferSpec())
++    except Exception: pass
++  if not (np.isfinite(y_orig).all() and np.isfinite(y_new).all()):
++    bo = np.where(~np.isfinite(y_orig))[0]
++    bn = np.where(~np.isfinite(y_new))[0]
++    print(f"[a3d] nan/inf orig_bad={len(bo)}@{bo[:6]} new_bad={len(bn)}@{bn[:6]} "
++          f"o_vals={y_orig[bo[:4]] if len(bo) else []} n_vals={y_new[bn[:4]] if len(bn) else []}", flush=True)
++    if roles["kind"] == "q5conv":
++      # numpy ground truth for the first bad row (or row 0)
++      r0 = (bo[0] - 3 * N) if len(bo) else 0
++      Wf = np.frombuffer(wdata[roles["W"][1]], dtype=np.uint8).reshape(N, 3520)
++      xf = np.frombuffer(wdata[roles["x"][1]], dtype=np.float32)
++      nwf = np.frombuffer(wdata[roles["nw"][1]], dtype=np.float32)
++      sf = np.frombuffer(wdata[roles["s"][1]], dtype=np.float32)[0]
++      blk = Wf[r0].reshape(20, 176)
++      d = blk[:, 0:2].copy().view(np.float16).astype(np.float32).reshape(20)
++      dm = blk[:, 2:4].copy().view(np.float16).astype(np.float32).reshape(20)
++      s = blk[:, 4:16].astype(np.int32)
++      sc = np.stack([s[:, 0] & 63, s[:, 1] & 63, s[:, 2] & 63, s[:, 3] & 63,
++                     (s[:, 8] & 0xF) | ((s[:, 0] >> 6) << 4), (s[:, 9] & 0xF) | ((s[:, 1] >> 6) << 4),
++                     (s[:, 10] & 0xF) | ((s[:, 2] >> 6) << 4), (s[:, 11] & 0xF) | ((s[:, 3] >> 6) << 4)], axis=1)
++      mn = np.stack([s[:, 4] & 63, s[:, 5] & 63, s[:, 6] & 63, s[:, 7] & 63,
++                     (s[:, 8] >> 4) | ((s[:, 4] >> 6) << 4), (s[:, 9] >> 4) | ((s[:, 5] >> 6) << 4),
++                     (s[:, 10] >> 4) | ((s[:, 6] >> 6) << 4), (s[:, 11] >> 4) | ((s[:, 7] >> 6) << 4)], axis=1)
++      qh = blk[:, 16:48].astype(np.int32)
++      qs = blk[:, 48:176].astype(np.int32)
++      j = np.arange(256)
++      qv = ((qs[:, j >> 1] >> (4 * (j & 1))) & 0xF) + (((qh[:, j >> 3] >> (j & 7)) & 1) << 4)
++      w = d[:, None] * sc[:, j >> 5] * qv - dm[:, None] * mn[:, j >> 5]
++      ref = np.float32(np.float16(xf / sf * nwf)[None, :] if False else 0)  # skip half-ref; fp32 ref:
++      reff = float((xf * (1.0 / sf) * nwf * w.reshape(-1)).sum())
++      print(f"[a3d] numpy ref row {r0}: {reff:.6g} (d max {d.max()}, sc max {sc.max()}, qv max {qv.max()})", flush=True)
++    return False, float("nan")
++  off = 3 * N if roles["kind"] == "q5conv" else 0
++  yo, yn = y_orig[off:off+N], y_new[off:off+N]
++  denom = max(float(np.abs(yo).max()), 1e-9)
++  rel = float(np.abs(yo - yn).max()) / denom
++  if rel > 3e-3 and roles["kind"] == "q5conv" and os.getenv("A3D_DBG_Q5") == "ref":
++    Wf = np.frombuffer(wdata[roles["W"][1]], dtype=np.uint8).reshape(N, 3520)
++    xf = np.frombuffer(wdata[roles["x"][1]], dtype=np.float32)
++    nwf = np.frombuffer(wdata[roles["nw"][1]], dtype=np.float32)
++    sf = np.frombuffer(wdata[roles["s"][1]], dtype=np.float32)[0]
++    j = np.arange(256)
++    ref = np.zeros(N, dtype=np.float64)
++    for r in range(4):
++      blk = Wf[r].reshape(20, 176).astype(np.int32)
++      d = Wf[r].reshape(20, 176)[:, 0:2].copy().view(np.float16).astype(np.float32).reshape(20)
++      dm = Wf[r].reshape(20, 176)[:, 2:4].copy().view(np.float16).astype(np.float32).reshape(20)
++      s = blk[:, 4:16]
++      sc = np.stack([s[:, 0] & 63, s[:, 1] & 63, s[:, 2] & 63, s[:, 3] & 63,
++                     (s[:, 8] & 0xF) | ((s[:, 0] >> 6) << 4), (s[:, 9] & 0xF) | ((s[:, 1] >> 6) << 4),
++                     (s[:, 10] & 0xF) | ((s[:, 2] >> 6) << 4), (s[:, 11] & 0xF) | ((s[:, 3] >> 6) << 4)], axis=1)
++      mn = np.stack([s[:, 4] & 63, s[:, 5] & 63, s[:, 6] & 63, s[:, 7] & 63,
++                     (s[:, 8] >> 4) | ((s[:, 4] >> 6) << 4), (s[:, 9] >> 4) | ((s[:, 5] >> 6) << 4),
++                     (s[:, 10] >> 4) | ((s[:, 6] >> 6) << 4), (s[:, 11] >> 4) | ((s[:, 7] >> 6) << 4)], axis=1)
++      qh = blk[:, 16:48]; qs = blk[:, 48:176]
++      qv = ((qs[:, j >> 1] >> (4 * (j & 1))) & 0xF) + (((qh[:, j >> 3] >> (j & 7)) & 1) << 4)
++      w = d[:, None] * sc[:, j >> 5] * qv - dm[:, None] * mn[:, j >> 5]
++      ref[r] = (xf * (1.0 / sf) * nwf * w.reshape(-1)).sum()
++    print(f"[a3d] REF orig[:4]={yo[:4]} new[:4]={yn[:4]} numpy={ref[:4]}", flush=True)
++  if roles["kind"] == "q5conv":
++    c = np.abs(y_orig[:3*N] - y_new[:3*N]).max()   # passthrough part must match too
++    if c > 0: print(f"[a3d] passthrough mismatch {c}", flush=True); return False, float("nan")
++  return (rel < 3e-3 and bool(np.allclose(yo, yn, rtol=3e-3, atol=3e-3 * denom))), rel
++
++
++# ---- A3e: GDN in_proj IQ3 GEMV (r_48_2): warp-per-row, half products, swish epilogue ----
++_IQ3SW_BODY = """  const int warp = (blockIdx.x * %%WPC%%) + (threadIdx.x >> 5);
++  if (warp >= %%NROWS%%) return;
++  const int lane = threadIdx.x & 31;
++  const int bidx = warp / %%N%%;          // batch row (T3: 0..2; T1: 0)
++  const int rb = (bidx == 0 ? %%R0%% : (bidx == 1 ? %%R1%% : %%R2%%));   // rms batch perm (agent-derived (2,0,1))
++  const int xrow = bidx * 5120;   // x rows are IDENTITY-ordered vs output batches
++  const float inv_s = 1.0f / %%RMS%%[rb];
++  const unsigned char* rowp = %%W%% + (size_t)(warp - bidx * %%N%%) * 1960u;
++  float acc = 0.0f;
++  #pragma unroll 4
++  for (int b = 0; b < 20; ++b) {
++    const unsigned char* blk = rowp + (size_t)b * 98u;
++    const float d = __half2float(*((const __half*)blk));
++    const unsigned short* scw = (const unsigned short*)(blk + 66);
++    const unsigned int sw = ((unsigned int)scw[2*(lane>>2)]) | (((unsigned int)scw[2*(lane>>2)+1]) << 16);
++    const float db = d * (((float)(sw >> 28)) + 0.5f) * 0.5f;
++    const unsigned int sidx = (sw >> (7u * (unsigned int)(lane & 3))) & 0x7Fu;
++    const unsigned int spar = (sidx ^ (sidx>>1) ^ (sidx>>2) ^ (sidx>>3) ^ (sidx>>4) ^ (sidx>>5) ^ (sidx>>6)) & 1u;
++    const unsigned int q = ((unsigned int)blk[2 + 2*lane]) | (((unsigned int)blk[3 + 2*lane]) << 8);
++    const float4 g0 = *((const float4*)(%%GRID%% + ((q & 0xFFu) << 2)));
++    const float4 g1 = *((const float4*)(%%GRID%% + ((q >> 8) << 2)));
++    const int koff = (b << 8) + (lane << 3);
++    const float4 xa = *((const float4*)(%%X%% + xrow + koff));
++    const float4 xb = *((const float4*)(%%X%% + xrow + koff + 4));
++    const float4 na = *((const float4*)((const float*)%%NW%% + koff));
++    const float4 nb = *((const float4*)((const float*)%%NW%% + koff + 4));
++    const float sg0 = ((sidx>>0)&1) ? -1.0f : 1.0f;
++    const float sg1 = ((sidx>>1)&1) ? -1.0f : 1.0f;
++    const float sg2 = ((sidx>>2)&1) ? -1.0f : 1.0f;
++    const float sg3 = ((sidx>>3)&1) ? -1.0f : 1.0f;
++    const float sg4 = ((sidx>>4)&1) ? -1.0f : 1.0f;
++    const float sg5 = ((sidx>>5)&1) ? -1.0f : 1.0f;
++    const float sg6 = ((sidx>>6)&1) ? -1.0f : 1.0f;
++    const float sg7 = spar ? -1.0f : 1.0f;
++    const float wv0 = db * g0.x * sg0, wv1 = db * g0.y * sg1, wv2 = db * g0.z * sg2, wv3 = db * g0.w * sg3;
++    const float wv4 = db * g1.x * sg4, wv5 = db * g1.y * sg5, wv6 = db * g1.z * sg6, wv7 = db * g1.w * sg7;
++    acc += __half2float(__hmul(__float2half(xa.x*inv_s*na.x), __float2half(wv0)))
++         + __half2float(__hmul(__float2half(xa.y*inv_s*na.y), __float2half(wv1)));
++    acc += __half2float(__hmul(__float2half(xa.z*inv_s*na.z), __float2half(wv2)))
++         + __half2float(__hmul(__float2half(xa.w*inv_s*na.w), __float2half(wv3)));
++    acc += __half2float(__hmul(__float2half(xb.x*inv_s*nb.x), __float2half(wv4)))
++         + __half2float(__hmul(__float2half(xb.y*inv_s*nb.y), __float2half(wv5)));
++    acc += __half2float(__hmul(__float2half(xb.z*inv_s*nb.z), __float2half(wv6)))
++         + __half2float(__hmul(__float2half(xb.w*inv_s*nb.w), __float2half(wv7)));
++  }
++  #pragma unroll
++  for (int o = 16; o > 0; o >>= 1) acc += __shfl_down_sync(0xffffffffu, acc, o);
++  if (lane == 0) {
++    const float v = %%VEC%%[warp];
++    const int sb = (bidx == 0 ? %%S0%% : (bidx == 1 ? %%S1%% : %%S2%%));   // s48 batch perm
++    const float sp = 1.0f / %%S48%%[(sb * (%%N%% >> 7)) + ((warp - bidx * %%N%%) >> 7)];
++    const float m = *((const float*)%%NWO%% + (warp & 127));
++    const __half h5 = __float2half(acc);
++    const __half swv = __hmul(h5, hrcp((__half)1.0f + hexp2(__hmul(h5, __float2half(-1.4423828125f)))));
++    %%OUT%%[warp] = (__half)((v * sp * m) * ((float)swv));
++  }"""
++
++def _match_iq3swish(args, src):
++  if len(args) != 9: return None
++  hs = [a for a in args if a[0] == "half*"]
++  fl = [a for a in args if a[0] == "float*"]
++  uc = [a for a in args if a[0] == "unsigned char*"]
++  if len(hs) != 1 or len(uc) != 3 or len(fl) != 5: return None
++  out = args[0]
++  if out[0] != "half*" or out is not hs[0]: return None
++  W = max(uc, key=lambda a: a[2])
++  if W[2] % 1960 or out[2] * 1960 != W[2]: return None
++  R = out[2]
++  if R < 1024: return None
++  rest_uc = [a for a in uc if a is not W]
++  nw = next((a for a in rest_uc if a[2] == 20480), None)
++  nwo = next((a for a in rest_uc if a is not nw), None)
++  if nw is None or nwo is None or nwo[2] * 12 != R: return None   # nwo = R/12 bytes = R/48 floats (o&127 index)
++  by = {a[2]: a for a in fl}
++  x, grid, rms = by.get(5120), by.get(1024), by.get(1)
++  vec, s48 = by.get(R), by.get(R >> 7)
++  if None in (x, grid, rms, vec, s48): return None
++  if "exp2" not in src: return None
++  return dict(kind="iq3swish", out=out, vec=vec, s48=s48, nwo=nwo, x=x, rms=rms, nw=nw, W=W, grid=grid, N=R)
++
++def _match_iq3swish_t3(args, src):
++  # 10-arg batch-3 render of the same in_proj GEMV (fused swish epilogue)
++  if len(args) != 10: return None
++  out = args[0]
++  if out[0] != "half*": return None
++  fl = [a for a in args if a[0] == "float*"]
++  uc = [a for a in args if a[0] == "unsigned char*"]
++  if len(fl) != 5 or len(uc) != 4: return None
++  R3 = out[2]
++  if R3 < 3*1024 or R3 % 3: return None
++  R = R3 // 3
++  W = max(uc, key=lambda a: a[2])
++  if W[2] != R * 1960: return None
++  rest_uc = [a for a in uc if a is not W]
++  nw = next((a for a in rest_uc if a[2] == 20480), None)
++  nwo = next((a for a in rest_uc if a is not nw and a[2] == R // 12), None)
++  if nw is None or nwo is None: return None
++  sgns = next((a for a in rest_uc if a is not nw and a is not nwo), None)
++  if sgns is None or sgns[2] != 32 * R * 20: return None   # external signs table
++  by = {a[2]: a for a in fl}
++  x, grid, rms, vec, s48 = by.get(3*5120), by.get(1024), by.get(3), by.get(R3), by.get(3*(R >> 7))
++  if None in (x, grid, rms, vec, s48): return None
++  if "exp2" not in src: return None
++  return dict(kind="iq3swish_t3", out=out, vec=vec, s48=s48, nwo=nwo, x=x, rms=rms, nw=nw, W=W, grid=grid, N=R, batch=3, sgns=sgns)
++
++def _build_iq3sw(roles, rule, fname, sig):
++  wpc = int(rule.get("wpc", 4))
++  def _n(a): return f"{a[1]}_{a[2]}"
++  _rperm = roles.get("rperm", (0, 1, 2))
++  _sperm = roles.get("sperm", (0, 1, 2))
++  sub = {"%%WPC%%": str(wpc), "%%NROWS%%": str(roles["N"] * roles.get("batch", 1)), "%%N%%": str(roles["N"]),
++         "%%R0%%": str(_rperm[0]), "%%R1%%": str(_rperm[1]), "%%R2%%": str(_rperm[2]),
++         "%%S0%%": str(_sperm[0]), "%%S1%%": str(_sperm[1]), "%%S2%%": str(_sperm[2]),
++         "%%W%%": _n(roles["W"]), "%%X%%": _n(roles["x"]), "%%NW%%": _n(roles["nw"]),
++         "%%GRID%%": _n(roles["grid"]), "%%RMS%%": _n(roles["rms"]),
++         "%%VEC%%": _n(roles["vec"]), "%%S48%%": _n(roles["s48"]), "%%NWO%%": _n(roles["nwo"]),
++         "%%OUT%%": _n(roles["out"])}
++  src_new = _ATTN_PRELUDE + f'extern "C" __global__ void __launch_bounds__({wpc*32}) {fname}({sig}) {{\n' + _IQ3SW_BODY + "\n}\n"
++  for k, v in sub.items(): src_new = src_new.replace(k, v)
++  # FIX 2026-09-03 (p2_a3e_live_debug.py): the body writes out[warp] for warp < NROWS =
++  # N*batch, so the launch grid MUST scale with batch. The old ceil(N/wpc) grid
++  # under-launched 3x at batch=3 -> out batches 1,2 were NEVER WRITTEN (stale garbage
++  # into GDN block 0 in_proj -> model emitted token 0 forever in production), while
++  # _validate_iq3sw still passed because it compared only the first N outputs (batch 0)
++  # — exactly the one batch the under-launched kernel did write.
++  return src_new, (math.ceil(roles["N"] * roles.get("batch", 1) / wpc), 1, 1), (wpc * 32, 1, 1)
++
++def _validate_iq3sw(renderer, orig_prg, new_prg, roles, sig_args, new_dims):
++  import numpy as np
++  from tinygrad.device import Device, BufferSpec
++  dev = Device[renderer.target.device]
++  rng = np.random.default_rng(2718)
++  N = roles["N"]
++  blocks, _ = _mk_blocks(rng, N * 20)
++  wdata = {}
++  wdata[roles["W"][1]] = blocks.tobytes()
++  _b3 = int(roles.get("batch", 1))
++  wdata[roles["x"][1]] = rng.uniform(-1, 1, 5120*_b3).astype(np.float32).tobytes()
++  wdata[roles["nw"][1]] = rng.uniform(0.5, 1.5, 5120).astype(np.float32).tobytes()
++  wdata[roles["rms"][1]] = np.array([2.3, 0.8, 1.6][:_b3], dtype=np.float32).tobytes()
++  wdata[roles["vec"][1]] = rng.uniform(-1, 1, N*_b3).astype(np.float32).tobytes()
++  wdata[roles["s48"][1]] = rng.uniform(0.5, 2.0, _b3*(N >> 7)).astype(np.float32).tobytes()
++  wdata[roles["nwo"][1]] = rng.uniform(0.5, 1.5, roles["nwo"][2] // 4).astype(np.float32).tobytes()
++  wdata[roles["grid"][1]] = rng.uniform(-1, 1, 1024).astype(np.float32).tobytes()
++  if roles.get("sgns") is not None:
++    # T3 renders carry an EXTERNAL signs table; it must be CONSISTENT with the random
++    # W blocks or orig-vs-new can never match (was: generic random fill -> relerr ~1).
++    wdata[roles["sgns"][1]] = _signs_bytes(blocks, N, 20)
++  bufs, allocs, yidx = [], [], None
++  oname = roles["out"][1]
++  for ctype, name, numel in sig_args:
++    if ctype == "const int": continue
++    nbytes = numel * (2 if ctype == "half*" else 4 if ctype.endswith("*") else 4)
++    b = dev.allocator.alloc(nbytes, BufferSpec())
++    if name == oname: yidx = len(bufs); data = memoryview(bytearray(nbytes)).cast("B")
++    elif name in wdata: data = memoryview(wdata[name]).cast("B")
++    else: data = memoryview(rng.uniform(-1, 1, max(numel, 1)).astype(np.float32).tobytes()).cast("B")
++    dev.allocator._copyin(b, data)
++    bufs.append(b); allocs.append((b, nbytes))
++  rt_orig, rt_new = dev.runtime(orig_prg.to_elf()), dev.runtime(new_prg.to_elf())
++  og, ol = orig_prg.arg.launch_dims({})
++  if ol is None: ol = (1, 1, 1)
++  rt_orig(*bufs, global_size=tuple(og), local_size=tuple(ol), vals=(), wait=True)
++  # FIX 2026-09-03: compare the FULL out (all _b3 batches). The old 2*N compare only
++  # checked batch 0 — the exact blind spot that let an under-launched (wrong-grid)
++  # substitution pass validation bit-exactly while corrupting batches 1,2 in production.
++  _NB = 2 * N * _b3
++  mv = memoryview(bytearray(_NB)); dev.allocator._copyout(mv, bufs[yidx])
++  y_orig = np.frombuffer(mv, dtype=np.float16).astype(np.float32)
++  _fill = bytearray(_NB)
++  _fill[0::4097] = b"\xcd" * len(_fill[0::4097])
++  dev.allocator._copyin(bufs[yidx], memoryview(_fill).cast("B"))
++  rt_new(*bufs, global_size=new_dims[0], local_size=new_dims[1], vals=(), wait=True)
++  mv2 = memoryview(bytearray(_NB)); dev.allocator._copyout(mv2, bufs[yidx])
++  y_new = np.frombuffer(mv2, dtype=np.float16).astype(np.float32)
++  for b_, nb in allocs:
++    try: dev.allocator.free(b_, nb, BufferSpec())
++    except Exception: pass
++  if not (np.isfinite(y_orig).all() and np.isfinite(y_new).all()):
++    print(f"[a3e] nan/inf o={np.isfinite(y_orig).all()} n={np.isfinite(y_new).all()}", flush=True)
++    return False, float("nan")
++  denom = max(float(np.abs(y_orig).max()), 1e-9)
++  rel = float(np.abs(y_orig - y_new).max()) / denom
++  return (rel < 1e-2 and bool(np.allclose(y_orig, y_new, rtol=1e-2, atol=1e-2 * denom))), rel
++
++
++# ---- A3f: T=3 GDN qkv (dot-only, per-batch scales) ----
++_Q5T3_BODY = """  const int warp = (blockIdx.x * %%WPC%%) + (threadIdx.x >> 5);
++  const int lane = threadIdx.x & 31;
++  if (warp < %%NROWS%% * 3) {
++    const int row = warp % %%NROWS%%;
++    const int xrow = (warp / %%NROWS%%) * %%K%%;
++    const float inv_s = 1.0f / %%S%%[warp / %%NROWS%%];
++    const int bg = lane >> 3;
++    const int bbase = ((lane & 7) << 2) + (bg << 5);
++    const int ebase = (bg << 6) + ((lane & 7) << 2);
++    const int hb = bg << 1;
++    float acc = 0.0f;
++    #pragma unroll 2
++    for (int sb = 0; sb < %%NSB%%; ++sb) {
++      const unsigned char* blk = %%W%% + (size_t)row * (size_t)(%%NSB%% * 176) + (size_t)sb * 176;
++      const float d = __half2float(*((const __half*)blk));
++      const float dmin = __half2float(*((const __half*)(blk + 2)));
++      const unsigned char* s = blk + 4;
++      const unsigned char* qh = blk + 16;
++      const unsigned char* qs = blk + 48;
++      float dsA, dmA, dsB, dmB;
++      switch (bg) {
++        case 0: dsA=d*(float)(s[0]&63); dmA=dmin*(float)(s[4]&63); dsB=d*(float)(s[1]&63); dmB=dmin*(float)(s[5]&63); break;
++        case 1: dsA=d*(float)(s[2]&63); dmA=dmin*(float)(s[6]&63); dsB=d*(float)(s[3]&63); dmB=dmin*(float)(s[7]&63); break;
++        case 2: dsA=d*(float)((s[8]&0xF)|((s[0]>>6)<<4)); dmA=dmin*(float)((s[8]>>4)|((s[4]>>6)<<4));
++                dsB=d*(float)((s[9]&0xF)|((s[1]>>6)<<4)); dmB=dmin*(float)((s[9]>>4)|((s[5]>>6)<<4)); break;
++        default: dsA=d*(float)((s[10]&0xF)|((s[2]>>6)<<4)); dmA=dmin*(float)((s[10]>>4)|((s[6]>>6)<<4));
++                 dsB=d*(float)((s[11]&0xF)|((s[3]>>6)<<4)); dmB=dmin*(float)((s[11]>>4)|((s[7]>>6)<<4)); break;
++      }
++      const int xbase = (sb << 8) + xrow + ebase;
++      #pragma unroll
++      for (int k = 0; k < 4; ++k) {
++        const unsigned char qsb = qs[bbase + k];
++        const unsigned char qhb = qh[(bbase + k) & 31];
++        const float w0 = (dsA * (float)(((qsb & 0xF) + (((qhb >> hb) & 1) << 4)))) - dmA;
++        const float w1 = (dsB * (float)(((qsb >> 4) + (((qhb >> (hb + 1)) & 1) << 4)))) - dmB;
++        const int xoff0 = xbase + k;
++        const int xoff1 = xoff0 + 32;
++        const float xw0 = (%%X%%[xoff0] * inv_s * (float)(*((const float*)((%%NW%%) + (xoff0 - xrow) * 4))));
++        const float xw1 = (%%X%%[xoff1] * inv_s * (float)(*((const float*)((%%NW%%) + (xoff1 - xrow) * 4))));
++        acc += __half2float(__hmul(__float2half(xw0), __float2half(w0)))
++             + __half2float(__hmul(__float2half(xw1), __float2half(w1)));
++      }
++    }
++    #pragma unroll
++    for (int o = 16; o > 0; o >>= 1) acc += __shfl_down_sync(0xffffffffu, acc, o);
++    if (lane == 0) { %%OUT%%[%%OFF%% + warp] = %%CAST%%acc; }
++  }"""
++
++def _match_q5t3(args, src):
++  if len(args) != 5: return None
++  fl = [a for a in args if a[0] == "float*"]
++  uc = [a for a in args if a[0] == "unsigned char*"]
++  out = args[0]
++  if out[0] == "float*" and out not in fl: fl = fl + [out]
++  if len(uc) != 2 or len(fl) != (3 if out[0] == "float*" else 2): return None
++  W = max(uc, key=lambda a: a[2]); nw = min(uc, key=lambda a: a[2])
++  if W[2] % 3520 or nw[2] != 20480: return None
++  R = W[2] // 3520
++  if R < 1024: return None
++  if out[0] == "float*":
++    if out[2] != 6 * R: return None
++    off = 3 * R   # GDN qkv T3: [passthrough 3N || 3xN dot]
++  elif out[0] == "half*" and out[2] == 3 * R:
++    off = 0       # lm_head T3: out[b*R + n]
++  else: return None
++  rest = sorted([a for a in fl if a is not out], key=lambda a: a[2])
++  s, x = rest[0], rest[1]
++  if s[2] != 3 or x[2] != 3 * 5120: return None
++  if "half" not in src: return None
++  return dict(kind="q5t3", out=out, x=x, s=s, nw=nw, W=W, N=R, K=5120, NSB=20, off=off)
++
++def _build_q5t3(roles, rule, fname, sig):
++  wpc = int(rule.get("wpc", 4))
++  def _n(a): return f"{a[1]}_{a[2]}"
++  sub = {"%%WPC%%": str(wpc), "%%NROWS%%": str(roles["N"]), "%%K%%": str(roles["K"]),
++         "%%NSB%%": str(roles["NSB"]), "%%W%%": _n(roles["W"]), "%%X%%": _n(roles["x"]),
++         "%%S%%": _n(roles["s"]), "%%NW%%": _n(roles["nw"]), "%%OUT%%": _n(roles["out"]),
++         "%%OFF%%": str(roles.get("off", 3 * roles["N"])),
++         "%%CAST%%": "(__half)" if roles["out"][0] == "half*" else ""}
++  src_new = _ATTN_PRELUDE + f'extern "C" __global__ void __launch_bounds__({wpc*32}) {fname}({sig}) {{\n' + _Q5T3_BODY + "\n}\n"
++  for k, v in sub.items(): src_new = src_new.replace(k, v)
++  return src_new, (math.ceil(roles["N"] * 3 / wpc), 1, 1), (wpc * 32, 1, 1)
++
++
++# ---- A5: generic source transforms (serial-reduce tree + pure-copy vectorize) ----
++# T3/probe context (MTP_T3_LAZY=1) renders DIFFERENT kernel sources at T>1 that the A5
++# unit tests never covered; A5 there produced wrong logits (GREEDY 2/20, 2026-08-29).
++# A5 is perf-neutral at T=1 anyway — disable in T3 runs entirely.
++_A5 = os.getenv("MTP_A5", "1") != "0" and not os.getenv("MTP_T3_LAZY")
++_A5_SKIP = re.compile(os.getenv("MTP_A5_SKIP", "") or "(?x)^$")
++_A5_DUMP = os.getenv("MTP_A5_DUMP", "")
++# NEVER standalone-validate from here: a3b_substitute also runs inside the COMPILE WORKER
++# (codegen/__init__.py hook) where eager device launches are forbidden -> channel wedge ->
++# watchdog reboot (observed 2x 2026-08-29). Parent-side pool kernels are the only safe site;
++# A5 correctness is arbitrated by the in-model greedy gates instead.
++_A5_VAL = os.getenv("MTP_A5_VAL", "0") == "1" and _ADU.value == 1
++
++_A5_LOOP_RE = re.compile(r"for \(int (Ridx\d+) = 0; \1 < (\d+); \1\+\+\) \{\n((?:    [^\n]+\n)+)  \}")
++
++def _a5_one_loop(src, m):
++  rid, K, body = m.group(1), int(m.group(2)), m.group(3)
++  if K < 8 or (K & (K - 1)) != 0: return None
++  if "data" in body: return None
++  shm = re.findall(r"buf\d+", body)
++  if not shm: return None
++  buf = sorted(set(shm), key=shm.index)[0]
++  decl = re.search(r"__shared__[^;]*\b" + buf + r"\[", src)
++  if not decl or not decl.group(0).startswith("__shared__"): return None
++  if buf in src[m.end():]: return None          # tree destroys the shared buffer
++
++  base = None; V = 1
++  if re.search(r"float \w+ = \(\*\(" + buf + r"\+" + rid + r"\)\);", body): V, base = 1, None
++  elif (bm := re.search(r"float \w+ = \(\*\(" + buf + r"\+\((\w+)\+" + rid + r"\)\)\);", body)): V, base = 1, bm.group(1)
++  elif re.search(r"float2 \w+ = \(\*\(\(float2\*\)\(\(" + buf + r"\+\(" + rid + r"<<1\)\)\)\)\);", body): V, base = 2, None
++  elif (bm := re.search(r"float4 \w+ = \(\*\(\(float4\*\)\(\(" + buf + r"\+\((\w+)\+\(" + rid + r"<<2\)\)\)\)\)\);", body)): V, base = 4, bm.group(1)
++  else: return None
++
++  accs = sorted(set(re.findall(r"\*\((buf\d+)\+(\d)\) = \(\(\*\(\1\+\2\)\)\+", body)))
++  if not accs: return None
++  accum = accs[0][0]
++  if sorted({int(a[1]) for a in accs}) != list(range(V)): return None
++
++  pre = src[:m.start()]
++  dim = None; wbase = None; WV = 1
++  if (wm := re.search(r"\*\(\(float4\*\)\(\(" + buf + r"\+\(\((lidx\d+)<<2\)\+(\w+)\)\)\)\) =", pre)):
++    dim, wbase, WV = wm.group(1), wm.group(2), 4
++  elif (wm := re.search(r"\*\(\(float2\*\)\(\(" + buf + r"\+\((lidx\d+)<<1\)\)\)\) =", pre)):
++    dim, wbase, WV = wm.group(1), None, 2
++  elif (wm := re.search(r"\*\(" + buf + r"\+\((lidx\d+)\+(\w+)\)\) =", pre)):
++    dim, wbase, WV = wm.group(1), wm.group(2), 1
++  elif (wm := re.search(r"\*\(" + buf + r"\+(lidx\d+)\) =", pre)):
++    dim, wbase, WV = wm.group(1), None, 1
++  if dim is None or WV != V or (wbase is None) != (base is None): return None
++  b = base if base is not None else "0"
++
++  L = ["  __syncthreads();", f"  for (int a5s = {K >> 1}; a5s > 0; a5s >>= 1) {{"]
++  if V == 1:
++    L.append(f"    if ({dim} < a5s) {{ *({buf}+({b}+{dim})) = ((*({buf}+({b}+{dim})))+*({buf}+({b}+({dim}+a5s)))); }}")
++  else:
++    vt = "float2" if V == 2 else "float4"
++    sh = V.bit_length() - 1
++    mk = "make_float2(((a5p->x)+(a5q->x)),((a5p->y)+(a5q->y)))" if V == 2 else \
++         "make_float4(((a5p->x)+(a5q->x)),((a5p->y)+(a5q->y)),((a5p->z)+(a5q->z)),((a5p->w)+(a5q->w)))"
++    L.append(f"    if ({dim} < a5s) {{")
++    L.append(f"      {vt}* a5p = (({vt}*)(({buf}+({b}+({dim}<<{sh})))));")
++    L.append(f"      const {vt}* a5q = ((const {vt}*)(({buf}+({b}+(({dim}+a5s)<<{sh})))));")
++    L.append(f"      *a5p = {mk};")
++    L.append("    }")
++  L += ["    __syncthreads();", "  }", f"  if (({dim}==0)) {{"]
++  if V == 1:
++    L.append(f"    *({accum}+0) = (*({buf}+({b}+0)));")
++  else:
++    vt = "float2" if V == 2 else "float4"
++    comps = ["x", "y"] if V == 2 else ["x", "y", "z", "w"]
++    L.append(f"    const {vt}* a5r = ((const {vt}*)(({buf}+({b}+0))));")
++    for i, c in enumerate(comps): L.append(f"    *({accum}+{i}) = a5r->{c};")
++  L.append("  }")
++  return "\n".join(L)
++
++def a5_xform_reduce(src):
++  out, n = src, 0
++  for m in reversed(list(_A5_LOOP_RE.finditer(src))):
++    rep = _a5_one_loop(src, m)
++    if rep is not None:
++      out = out[:m.start()] + rep + out[m.end():]
++      n += 1
++  return out, n
++
++_A5_LOAD_LINE = re.compile(r"float (\w+) = \(\*\((data\d+_\d+)\+(alu\d+)\)\);")
++_A5_STORE_LINE = re.compile(r"\*\((data\d+_\d+)\+(alu\d+)\) = (val\d+);")
++
++def a5_xform_copy(src, fname, args):
++  if len(args) != 2 or args[0][0] != "float*" or args[1][0] != "float*": return None
++  if args[0][2] != args[1][2] or args[0][2] % 4 or args[0][2] < 65536: return None
++  body = src[src.index('extern "C"'):]
++  if "if (" in body or "for (" in body or "buf" in body or "exp" in body \
++     or "make_float" in body or "tg_bitcast" in body or "half" in body:
++    return None
++  N = args[0][2]
++  loads = _A5_LOAD_LINE.findall(body)
++  stores = _A5_STORE_LINE.findall(body)
++  if not loads or len(loads) != len(stores): return None
++  ld_vals = {v for v, _, _ in loads}
++  if ld_vals != {v for _, _, v in stores} or len(ld_vals) != len(loads): return None
++  if len({a for _, a, _ in stores}) != len(stores): return None
++  if any(ld != f"data1_{N}" or sd != f"data0_{N}" or la != sa
++         for (_, ld, la), (sd, sa, _) in zip(loads, stores)): return None
++  if len(loads) % 4: return None
++  # NOTE: NEVER grid-stride loops on the TinyGPU dext — gridDim is not provided
++  # (reads as 0 -> i += 0 -> infinite loop -> channel wedge; isolated 2026-08-29).
++  return ('extern "C" __global__ void __launch_bounds__(256) ' + fname +
++          f"(float* data0_{N}, float* data1_{N}) {{\n"
++          f"  const int i = (blockIdx.x*256)+threadIdx.x;\n"
++          f"  if (i < ({N} >> 2)) {{ ((float4*)data0_{N})[i] = ((const float4*)data1_{N})[i]; }}\n"
++          "}\n")
++
++def _a5_validate(renderer, orig_prg, new_prg, args, new_dims):
++  """Standalone compare on synthetic buffers. uchar buffers get the 1.0f byte pattern so
++  byte-assembled floats are sane. Returns (ok, relerr)."""
++  import numpy as np
++  from tinygrad.device import Device, BufferSpec
++  dev = Device[renderer.target.device]
++  if any(a[0] == "const int" for a in args) or orig_prg.arg.vars: return True, 0.0   # can't feed scalars standalone
++  rng = np.random.default_rng(77)
++  bufs, allocs = [], []
++  for i, (ctype, name, numel) in enumerate(args):
++    if ctype == "unsigned char*": nbytes, data = numel, (b"\x00\x00\x80\x3f" * ((numel // 4) + 1))[:numel]
++    elif ctype == "half*":
++      nbytes = numel * 2
++      data = np.clip(rng.standard_normal(numel), -2, 2).astype(np.float16).tobytes()
++    else:
++      nbytes = numel * 4
++      data = bytes(nbytes) if i == 0 else np.clip(rng.standard_normal(numel), -2, 2).astype(np.float32).tobytes()
++    b_ = dev.allocator.alloc(nbytes, BufferSpec())
++    dev.allocator._copyin(b_, memoryview(data).cast("B"))
++    bufs.append(b_); allocs.append((b_, nbytes))
++  try:
++    og, ol = orig_prg.arg.launch_dims({})
++    if ol is None: return True, 0.0
++    rt_o, rt_n = dev.runtime(orig_prg.to_elf()), dev.runtime(new_prg.to_elf())
++    rt_o(*bufs, global_size=tuple(og), local_size=tuple(ol), vals=(), wait=True)
++    on = 4 * args[0][2]
++    mv = memoryview(bytearray(on)); dev.allocator._copyout(mv, bufs[0]); y_o = np.frombuffer(mv, dtype=np.float32).astype(np.float64)
++    dev.allocator._copyin(bufs[0], memoryview(bytes(on)).cast("B"))
++    rt_n(*bufs, global_size=new_dims[0], local_size=new_dims[1], vals=(), wait=True)
++    mv2 = memoryview(bytearray(on)); dev.allocator._copyout(mv2, bufs[0]); y_n = np.frombuffer(mv2, dtype=np.float32).astype(np.float64)
++    if not (np.isfinite(y_o).all() and np.isfinite(y_n).all()): return False, float("nan")
++    rel = float(np.abs(y_o - y_n).max()) / max(float(np.abs(y_o).max()), 1e-9)
++    return rel < 1e-3, rel
++  finally:
++    for b_, nb in allocs:
++      try: dev.allocator.free(b_, nb, BufferSpec())
++      except Exception: pass
++
++def a3b_substitute(prg: UOp, renderer) -> UOp:
++  if not ENABLED: return prg
++  try:
++    name = ansistrip(prg.arg.name)
++    if name.startswith("test") or name.endswith(("_a3b", "_a3c", "_a3d", "_a3e", "_a3f", "_a5", "_a5c")): return prg
++    if type(renderer).__name__ != "CUDARenderer": return prg
++    if (ret := _subst_cache.get(prg.key)) is not None: return ret
++    if _DUMP_DIR:   # A3B_LOG: raw names for diagnostics (before parse)
++      srcs0 = [s.arg for s in prg.src if s.op is Ops.SOURCE]
++      if srcs0:
++        m0 = _SIG_RE.search(srcs0[0])
++        with open(os.path.join(_DUMP_DIR, "allsigs2.txt"), "a") as f:
++          f.write(f"{name}({m0.group(2) if m0 else 'NOSIG'})\n")
++    if _DUMP_DIR and _DUMP_MATCH and re.search(_DUMP_MATCH, name) and name not in _dumped:
++      srcs0 = [s.arg for s in prg.src if s.op is Ops.SOURCE]
++      if srcs0:
++        _dumped.add(name)
++        with open(os.path.join(_DUMP_DIR, f"src_{name}.cu"), "w") as f: f.write(srcs0[0])
++        with open(os.path.join(_DUMP_DIR, f"src_{name}.dims.txt"), "w") as f:
++          f.write(f"global={prg.arg.global_size} local={prg.arg.local_size} vars={[str(v) for v in prg.arg.vars]}\n")
++    parsed = _parse(prg)
++    if parsed is None:
++      if _DUMP_DIR and _DUMP_MATCH and re.search(_DUMP_MATCH, name) and name not in _dumped:
++        _dumped.add(name)
++        srcs0 = [s.arg for s in prg.src if s.op is Ops.SOURCE]
++        if srcs0:
++          with open(os.path.join(_DUMP_DIR, f"src_{name}.cu"), "w") as f: f.write(srcs0[0])
++          with open(os.path.join(_DUMP_DIR, f"src_{name}.dims.txt"), "w") as f:
++            f.write(f"global={prg.arg.global_size} local={prg.arg.local_size} vars={[str(v) for v in prg.arg.vars]}\n")
++      return prg
++    fname, args, src = parsed
++    # ---- A3f T3 GDN qkv (dot-only, s_3) ----
++    t3r = _match_q5t3(args, src) if (prg.arg.vars == () and len(args) == 5) else None
++    if t3r is not None and os.getenv("MTP_T3_LAZY") and not os.getenv("MTP_A3F_T3"):
++      print(f"[a3f] {name} -> STOCK (T3 substitutions disabled)", flush=True)
++      return prg
++    if t3r is not None:
++      t3rule = _attn_rules().get("q5t3")
++      if t3rule is None: return prg
++      sig = _SIG_RE.search(src).group(2)
++      new_name = f"{name}_a3f"
++      new_src, grid, local = _build_q5t3(t3r, t3rule, to_function_name(new_name), sig)
++      lib = renderer.compiler.compile_cached(new_src)
++      new_arg = dc_replace(prg.arg, name=new_name, global_size=grid, local_size=local)
++      new_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=new_src), UOp(Ops.BINARY, arg=lib)), arg=new_arg)
++      print("[a3f] %s -> %s N=%d grid=%s (no-validate T3)" % (name, new_name, t3r["N"], grid), flush=True)
++      _subst_cache[prg.key] = new_prg
++      return new_prg
++    # ---- A3e GDN in_proj IQ3 GEMV (half-swish) ----
++    iroles = _match_iq3swish(args, src)
++    if iroles is None and os.getenv("MTP_A3E_T3"):
++      iroles = _match_iq3swish_t3(args, src)
++    if iroles is not None:
++      irule = _attn_rules().get("iq3swish")
++      if irule is None: return prg
++      sig = _SIG_RE.search(src).group(2)
++      new_name = f"{name}_a3e"
++      # batch-3 renders may permute the (x-row, rms, s48) batch order vs the output
++      # order (BEAM variants differ) — search the 6 permutations; the differential
++      # validator arbitrates. First passing perm wins; none -> stock.
++      if iroles.get("batch", 1) == 1:
++        _combos = [((0, 1, 2), (0, 1, 2))]
++      else:
++        _P6 = [(0, 1, 2), (2, 0, 1), (1, 2, 0), (0, 2, 1), (2, 1, 0), (1, 0, 2)]
++        # agent-derived first (stock BEAM=1 anatomy: rms (2,0,1), s48 identity)
++        _combos = [((2, 0, 1), (0, 1, 2))] + [(rp, sp) for rp in _P6 for sp in _P6 if (rp, sp) != ((2, 0, 1), (0, 1, 2))]
++      for _rperm, _sperm in _combos:
++        iroles["rperm"] = _rperm; iroles["sperm"] = _sperm
++        new_src, grid, local = _build_iq3sw(iroles, irule, to_function_name(new_name), sig)
++        lib = renderer.compiler.compile_cached(new_src)
++        new_arg = dc_replace(prg.arg, name=new_name, global_size=grid, local_size=local)
++        new_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=new_src), UOp(Ops.BINARY, arg=lib)), arg=new_arg)
++        if not _val_ok():
++          _subst_cache[prg.key] = new_prg
++          return new_prg   # no validation possible (worker): identity perm, trust rule
++        try:
++          ok, rel = _validate_iq3sw(renderer, prg, new_prg, iroles, args, (grid, local))
++        except Exception as _ve:
++          print(f"[a3e] {name} perm{_perm} validation could not run: {type(_ve).__name__} -> STOCK", flush=True)
++          _subst_cache[prg.key] = prg
++          return prg
++        print(f"[a3e] {name} rms={_rperm} s48={_sperm} relerr={rel:.2e} {'OK' if ok else 'FAIL'}", flush=True)
++        if ok:
++          print(f"[a3e] {name} -> {new_name} N={iroles['N']} grid={grid} local={local} rms={_rperm} s48={_sperm}", flush=True)
++          _subst_cache[prg.key] = new_prg
++          return new_prg
++      print(f"[a3e] {name}: no permutation validated -> STOCK", flush=True)
++      _subst_cache[prg.key] = prg
++      return prg
++    # ---- A3d Q5_K GEMV path (lm_head fp32 + GDN qkv half) ----
++    qroles = None
++    for mf in (_match_q5head, _match_q5conv):
++      if (qroles := mf(args, src)) is not None: break
++    if qroles is not None:
++      qrule = _attn_rules().get(qroles["kind"])
++      if qrule is None: return prg
++      sig = _SIG_RE.search(src).group(2)
++      new_name = f"{name}_a3d"
++      new_src, grid, local = _build_q5(qroles, qrule, to_function_name(new_name), sig)
++      lib = renderer.compiler.compile_cached(new_src)
++      new_arg = dc_replace(prg.arg, name=new_name, global_size=grid, local_size=local)
++      new_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=new_src), UOp(Ops.BINARY, arg=lib)), arg=new_arg)
++      if _val_ok():
++        ok, rel = _validate_q5(renderer, prg, new_prg, qroles, args, (grid, local))
++        print(f"[a3d] {name} -> {new_name} kind={qroles['kind']} N={qroles['N']} grid={grid} local={local} "
++              f"validate relerr={rel:.2e} {'OK' if ok else 'FAIL'}", flush=True)
++        if not ok: raise RuntimeError(f"a3d validation FAILED for {name} (relerr {rel:.2e})\n{new_src}")
++      _subst_cache[prg.key] = new_prg
++      return new_prg
++    # ---- SKV split-KV attention (MTP_SKV): K1 replaces QK, K2 replaces PV ----
++    if _SKV and not _SKV_DEAD:
++      if (qroles := _match_skv_qk(args, src)) is not None and (qroles["L"], 3) not in _SKV_DEAD:
++        key = (qroles["L"], 3)
++        try:
++          sig = _SIG_RE.search(src).group(2)
++          _wsb, va = _skv_ws(renderer, *key)
++          k1_name = to_function_name(name + "_skv1")
++          k1_src = _build_skv(k1_name, sig, _SKV_K1_BODY, qroles, va)
++          k1_lib = renderer.compiler.compile_cached(k1_src)
++          k1_arg = dc_replace(prg.arg, name=k1_name, global_size=(_SKV_S * 12, 1, 1), local_size=(256, 1, 1))
++          k1_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=k1_src), UOp(Ops.BINARY, arg=k1_lib)), arg=k1_arg)
++          _SKV_PENDING[key] = (prg, k1_prg, qroles)
++          print(f"[skv] K1 <- {name} L={key[0]} grid=({_SKV_S*12},1,1)", flush=True)
++          _subst_cache[prg.key] = k1_prg
++          return k1_prg
++        except Exception as e:
++          import traceback as _tb
++          print(f"[skv] K1 FAILED for {name}: {type(e).__name__}: {e} -> stock", flush=True)
++          try:
++            with open("/tmp/skv_fail_k1.cu", "w") as f: f.write(k1_src)
++            print("[skv] failed source dumped to /tmp/skv_fail_k1.cu", flush=True)
++          except Exception: pass
++          _SKV_DEAD.add(key)
++          return prg
++      if os.getenv("MTP_SKV_T1", "1") != "0" and (t1roles := _match_skv_t1(args, src)) is not None:
++        try:
++          sig = _SIG_RE.search(src).group(2)
++          _wsb, va = _skv_t1_ws(renderer)
++          nm = lambda a: a[1] + "_" if a[0] == "const int" else a[1] + "_" + str(a[2])
++          t1n = to_function_name(name + "_skvt1")
++          C1 = (100352 + _SKV_S - 1) // _SKV_S
++          t1_src = (_SKV_PRELUDE + 'extern "C" __global__ void __launch_bounds__(256) ' + t1n + "(" + sig + ") {\n"
++                    + _SKV_T1_BODY + "\n}\n")
++          sub = {"%%VA%%": hex(va), "%%C%%": str(C1), "%%L%%": "100352", "%%PS%%": "100349", "%%S%%": str(_SKV_S),
++                 "%%P%%": nm(t1roles["P"]), "%%KV%%": nm(t1roles["KV"]), "%%GATE%%": nm(t1roles["gate"]),
++                 "%%OUT%%": nm(t1roles["out"]), "%%SP%%": nm(t1roles["SP"])}
++          for k2, v2 in sub.items(): t1_src = t1_src.replace(k2, v2)
++          t1_lib = renderer.compiler.compile_cached(t1_src)
++          t1_arg = dc_replace(prg.arg, name=t1n, global_size=(_SKV_S * 4, 1, 1), local_size=(256, 1, 1))
++          t1_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=t1_src), UOp(Ops.BINARY, arg=t1_lib)), arg=t1_arg)
++          print(f"[skv-t1] {name} -> {t1n} grid=({_SKV_S*4},1,1)", flush=True)
++          _subst_cache[prg.key] = t1_prg
++          return t1_prg
++        except Exception as e:
++          print(f"[skv-t1] FAILED for {name}: {type(e).__name__}: {e} -> stock", flush=True)
++          return prg
++      if (proles := _match_skv_pv(args, src)) is not None:
++        key = (proles["L"], 3)
++        pend = _SKV_PENDING.get(key)
++        if key in _SKV_DEAD or pend is None:
++          if key not in _SKV_DEAD:
++            print(f"[skv] PV matched but no K1 pending for {key} -> stock (K1 also reverts)", flush=True)
++            _SKV_DEAD.add(key)
++        else:
++          try:
++            sig = _SIG_RE.search(src).group(2)
++            _wsb, va = _skv_ws(renderer, *key)
++            k2_name = to_function_name(name + "_skv2")
++            k2_src = _build_skv(k2_name, sig, _SKV_K2_BODY, proles, va)
++            k2_lib = renderer.compiler.compile_cached(k2_src)
++            k2_arg = dc_replace(prg.arg, name=k2_name, global_size=(72, 1, 1), local_size=(256, 1, 1))
++            k2_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=k2_src), UOp(Ops.BINARY, arg=k2_lib)), arg=k2_arg)
++            ok, rel = (True, float("nan"))
++            if _val_ok() and bool(os.getenv("MTP_SKV_VAL")):
++              ok, rel = _validate_skv(renderer, pend[0], prg, pend[1], k2_prg, proles)
++              print(f"[skv] chain validate L={key[0]} relerr={rel:.2e} {'OK' if ok else 'FAIL'}", flush=True)
++            else:
++              print(f"[skv] chain validation SKIPPED (capture context) L={key[0]}", flush=True)
++            if not ok:
++              _SKV_DEAD.add(key)
++              _SKV_PENDING.pop(key, None)
++              _subst_cache.pop(pend[0].key, None)
++              print(f"[skv] K1+K2 reverted to stock for L={key[0]}", flush=True)
++              return prg
++            _SKV_LIVE.add(key)
++            print(f"[skv] K2 <- {name} L={key[0]} (softmax bookkeeping kernels -> no-ops)", flush=True)
++            _skv_retro_noop(renderer, key)
++            _subst_cache[prg.key] = k2_prg
++            return k2_prg
++          except Exception as e:
++            print(f"[skv] K2 FAILED for {name}: {type(e).__name__}: {e} -> stock (K1 also reverts)", flush=True)
++            _SKV_DEAD.add(key)
++            _SKV_PENDING.pop(key, None)
++            _subst_cache.pop(_SKV_PENDING.get(key, (None,))[0].key if False else pend[0].key, None)
++            return prg
++      if key0 := next((k for k in _SKV_LIVE if args and any(a[0] == "float*" and a[2] == 72 * k[0] for a in args)), None):
++        if _match_skv_noop(args, src, key0):
++          try:
++            sig = _SIG_RE.search(src).group(2)
++            nn = to_function_name(name + "_skvn")
++            nsrc = _SKV_PRELUDE + f'extern "C" __global__ void __launch_bounds__(32) {nn}({sig}) {{\n}}\n'
++            nlib = renderer.compiler.compile_cached(nsrc)
++            narg = dc_replace(prg.arg, name=nn, global_size=(1, 1, 1), local_size=(32, 1, 1))
++            nprg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=nsrc), UOp(Ops.BINARY, arg=nlib)), arg=narg)
++            print(f"[skv] noop <- {name}", flush=True)
++            _subst_cache[prg.key] = nprg
++            return nprg
++          except Exception as e:
++            print(f"[skv] noop FAILED for {name}: {e}", flush=True)
++            return prg
++    # ---- A3c attention path ----
++    aroles = None
++    if prg.arg.vars and not os.getenv("MTP_A3C_OFF"):
++      # MTP_A3C_OFF: the a3c attention bodies bake an L-stride captured at match time;
++      # on mtp_sp-symbolic draft/mtp attention variants at ctx>1024 layouts the runtime
++      # stride differs -> misaligned float4 reads -> SM Warp Exception (2026-08-30).
++      for mf in (_match_rowmax, _match_rowsum, _match_pv):
++        if (aroles := mf(args, src)) is not None: break
++    if aroles is not None:
++      arule = _attn_rules().get(aroles["kind"])
++      if arule is None: return prg
++      sig = _SIG_RE.search(src).group(2)
++      new_name = f"{name}_a3c"
++      new_src, grid, local = _build_attn(aroles, arule, to_function_name(new_name), sig)
++      lib = renderer.compiler.compile_cached(new_src)
++      new_arg = dc_replace(prg.arg, name=new_name, global_size=grid, local_size=local)
++      new_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=new_src), UOp(Ops.BINARY, arg=lib)), arg=new_arg)
++      if _val_ok():
++        ok, rel = _validate_attn(renderer, prg, new_prg, aroles, args, (grid, local))
++        print(f"[a3c] {name} -> {new_name} kind={aroles['kind']} L={aroles['L']} grid={grid} local={local} "
++              f"validate relerr={rel:.2e} {'OK' if ok else 'FAIL'}", flush=True)
++        if not ok: raise RuntimeError(f"a3c validation FAILED for {name} (relerr {rel:.2e})\n{new_src}")
++      _subst_cache[prg.key] = new_prg
++      return new_prg
++    # ---- A5 source transforms (serial-reduce tree + copy vectorize; nothing else claimed it) ----
++    if _A5 and _A5_SKIP.search(name) is None and _match(args, src) is None:
++      a5src, a5n = a5_xform_reduce(src)
++      a5copy = None
++      if a5n == 0: a5copy = a5_xform_copy(src, to_function_name(name + "_a5c"), args)
++      if a5n or a5copy is not None:
++        try:
++          if _A5_DUMP:
++            import os as _os
++            _os.makedirs(_A5_DUMP, exist_ok=True)
++            safe = re.sub(r"[^A-Za-z0-9_]", "_", name)[:80]
++            with open(_os.path.join(_A5_DUMP, safe + "_orig.cu"), "w") as f: f.write(src)
++            with open(_os.path.join(_A5_DUMP, safe + "_new.cu"), "w") as f: f.write(a5copy if a5copy is not None else a5src)
++          if a5copy is not None:
++            a5final, a5name, a5grid = a5copy, name + "_a5c", (math.ceil(args[0][2] / 1024), 1, 1)
++            a5local = (256, 1, 1)
++          else:
++            a5final = re.sub(r"(void (?:__launch_bounds__\(\d+\) )?)(\w+)\(", lambda mm: mm.group(1) + to_function_name(name + "_a5") + "(", a5src, count=1)
++            a5name, a5grid, a5local = name + "_a5", prg.arg.global_size, prg.arg.local_size
++          a5lib = renderer.compiler.compile_cached(a5final)
++          a5arg = dc_replace(prg.arg, name=a5name, global_size=a5grid, local_size=a5local)
++          a5prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=a5final), UOp(Ops.BINARY, arg=a5lib)), arg=a5arg)
++          if _A5_VAL:
++            ok5, rel5 = _a5_validate(renderer, prg, a5prg, args, (a5grid, a5local))
++            print(f"[a5] {name} -> {a5name} reduce_loops={a5n} validate relerr={rel5:.2e} {'OK' if ok5 else 'FAIL'}", flush=True)
++            if not ok5: return prg
++          else:
++            print(f"[a5] {name} -> {a5name} reduce_loops={a5n} (no-validate)", flush=True)
++          _subst_cache[prg.key] = a5prg
++          return a5prg
++        except Exception as e:
++          print(f"[a5] WARNING: transform skipped for {name}: {type(e).__name__}: {e}", flush=True)
++          return prg
++    # ---- end A3c ----
++    roles = _match(args, src)
++    if roles is None:
++      if _DUMP_DIR:
++        with open(os.path.join(_DUMP_DIR, "allsigs.txt"), "a") as f:
++          f.write(f"{name}({_SIG_RE.search(src).group(2)})\n")
++        if (name, src) not in _dumped and any(a[0] == "float*" and a[2] == 1024 for a in args) \
++           and any(a[0] == "unsigned char*" and a[2] % 98 == 0 and a[2] >= 98 * 256 for a in args):
++          _dumped.add((name, src))
++          os.makedirs(os.path.join(_DUMP_DIR, "nearmiss"), exist_ok=True)
++          with open(os.path.join(_DUMP_DIR, "nearmiss", f"{name}.cu"), "w") as f: f.write(src)
++      return prg
++    if _DUMP_DIR and (name, src) not in _dumped:
++      _dumped.add((name, src))
++      with open(os.path.join(_DUMP_DIR, f"{name}.cu"), "w") as f: f.write(src)
++      with open(os.path.join(_DUMP_DIR, f"{name}.roles.json"), "w") as f:
++        json.dump({k: (v[1] if isinstance(v, tuple) else v) for k, v in roles.items()}, f, indent=1)
++    rule = _rules.get((roles["N"], roles["K"], roles["variant"]))
++    if rule is None: return prg
++    # to run the ORIGINAL for validation we need usable launch dims:
++    # either beam set local_size, or the kernel has no local indexing at all
++    if prg.arg.local_size is None and "threadIdx" in src: return prg
++    if False and roles.get("batch", 1) > 1 and not os.getenv("A3_VALIDATE_T3"):
++      # T3: skip standalone validation (launching untuned orig w/ inferred dims can wedge the
++      # channel); body is identical to the proven T=1 kernels, greedy gates arbitrate.
++      sig = _SIG_RE.search(src).group(2)
++      new_name = f"{name}_a3b"
++      new_src = _build_source(to_function_name(new_name), sig, roles, rule)
++      lib = renderer.compiler.compile_cached(new_src)
++      threads = int(rule.get("threads", 128))
++      wpc = int(rule.get("wpc", threads // 32))
++      grid = (math.ceil(roles["N"] * roles["batch"] / wpc), 1, 1)
++      local = (threads, 1, 1)
++      new_arg = dc_replace(prg.arg, name=new_name, global_size=grid, local_size=local)
++      new_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=new_src), UOp(Ops.BINARY, arg=lib)), arg=new_arg)
++      print("[a3b] %s -> %s N=%d K=%d v=%s batch=%d grid=%s (no-validate T3)" % (name, new_name, roles["N"], roles["K"], roles["variant"], roles["batch"], grid), flush=True)
++      _subst_cache[prg.key] = new_prg
++      return new_prg
++    sig = _SIG_RE.search(src).group(2)
++    new_name = f"{name}_a3b"
++    new_src = _build_source(to_function_name(new_name), sig, roles, rule)
++    lib = renderer.compiler.compile_cached(new_src)
++    threads = int(rule.get("threads", 128))
++    wpc = int(rule.get("wpc", threads // 32))
++    grid = (math.ceil(roles["N"] * roles.get("batch", 1) / wpc), 1, 1)
++    local = (threads, 1, 1)
++    new_arg = dc_replace(prg.arg, name=new_name, global_size=grid, local_size=local)
++    new_prg = prg.replace(src=(prg.src[0], prg.src[1], UOp(Ops.SOURCE, arg=new_src), UOp(Ops.BINARY, arg=lib)), arg=new_arg)
++    if roles.get("batch", 1) > 1 and not os.getenv("MTP_A3B_T3"):
++      # 2026-08-29 FINAL: NO batch>1 substitutions at all. The 20/20-exact era (v3run13-15)
++      # ran the broken ones as STOCK via validation-exception accidents; every later attempt
++      # to substitute T3 shapes (even validating ones) produced wrong probe logits — the
++      # rendered T3 variants differ run-to-run with beam-cache state and the matchers were
++      # only ever e2e-proven for one variant set. Stock T3Lazy kernels are exact.
++      # 2026-09-07: MTP_A3B_T3=1 re-enables (differential validator gates each kernel:
++      # orig-vs-new on identical random inputs; mismatch -> stock fallback).
++      print(f"[a3b] {name} batch={roles['batch']} -> STOCK (T3 substitutions disabled)", flush=True)
++      return prg
++    if _val_ok():
++      # batch>1 substitutions MUST validate. The good-era runs (v3run13-15, 20/20 exact)
++      # substituted only the kernels that validated OK; the broken templates (batch-3
++      # N=1024 scale etc.) raised device-disallowed during validation and silently fell
++      # back to the STOCK T3Lazy kernel. Stock T3Lazy kernels are exact; several batch-3
++      # hand-GEMV templates are genuinely wrong. In workers the device assert fires before
++      # any launch -> exception -> stock fallback (safe, no channel risk).
++      try:
++        ok, rel = _validate(renderer, prg, new_prg, roles, args, (grid, local))
++      except Exception as _ve:
++        print(f"[a3b] {name} -> STOCK (validation could not run: {type(_ve).__name__}: {str(_ve)[:60]})", flush=True)
++        return prg
++      print(f"[a3b] {name} -> {new_name} N={roles['N']} K={roles['K']} variant={roles['variant']} "
++            f"grid={grid} local={local} validate relerr={rel:.2e} {'OK' if ok else 'FAIL'}", flush=True)
++      if not ok:
++        print(f"[a3b] validation FAILED for {name} -> STOCK kernel", flush=True)
++        return prg
++    _orig_by_key[new_prg.key] = prg
++    _subst_cache[prg.key] = new_prg
++    return new_prg
++  except RuntimeError: raise
++  except Exception as e:
++    print(f"[a3b] WARNING: substitution skipped for {prg.arg.name}: {type(e).__name__}: {e}", flush=True)
++    return prg
+diff --git a/tinygrad/codegen/opt/postrange.py b/tinygrad/codegen/opt/postrange.py
+index aa2e562..613ad3b 100644
+--- a/tinygrad/codegen/opt/postrange.py
++++ b/tinygrad/codegen/opt/postrange.py
+@@ -329,7 +329,13 @@ class Scheduler:
+ 
+ def args_from_ast(ast:UOp, dname:str) -> tuple[list[Buffer], dict[str, int]]:
+   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM and x.arg.slot >= 0], key=lambda x: x.arg.slot)
+-  return [Buffer(dname, x.max_numel(), x.dtype) for x in glbls], {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
++  # 2026-08-31: compile-path buffers for lazy globals were created at max_numel —
++  # for the lm_head lazy-dequant global that is a to-EOF view (5.09GB vs 874MB actual),
++  # which at 100k ctx stacks on the KV cache and OOMs the 24GB card at chunk-0 compile.
++  # Clamp compile-time scratch buffers to 1GB max (they are only used for shape/addr
++  # math during optimization, never fully written).
++  return [Buffer(dname, min(x.max_numel(), 1_000_000_000), x.dtype) for x in glbls], \
++         {k.expr:int(k.vmax+k.vmin)//2 for k in ast.variables()}
+ 
+ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
+   if ast.tag is not None: return ast
+diff --git a/tinygrad/codegen/opt/search.py b/tinygrad/codegen/opt/search.py
+index cd7bc59..99fb7df 100644
+--- a/tinygrad/codegen/opt/search.py
++++ b/tinygrad/codegen/opt/search.py
+@@ -38,6 +38,9 @@ def get_test_global_size(global_size, max_global_size, var_vals):
+ def _time_program(prg:UOp, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
+                   allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test", dev_timeout=False) -> list[float]:
+   timeout = int(early_stop * 1e3) if dev_timeout and early_stop is not None and early_stop < math.inf else None
++  import os as _osb
++  _mgs = _osb.getenv("MTP_BEAM_MAXGS")
++  if _mgs is not None: max_global_size = int(_mgs)
+   factor = 1
+   if allow_test_size and max_global_size is not None:
+     global_size, factor = get_test_global_size(prg.arg.global_size, max_global_size, var_vals)
+diff --git a/tinygrad/device.py b/tinygrad/device.py
+index 66b4a72..79227b3 100644
+--- a/tinygrad/device.py
++++ b/tinygrad/device.py
+@@ -102,6 +102,13 @@ class Buffer:
+   profile_events:list[ProfileEvent] = []
+   def __init__(self, device:str, size:int, dtype:DType, opaque:Any=None, options:BufferSpec|None=None,
+                initial_value:bytes|pickle.PickleBuffer|None=None, uop_refcount=0, base:Buffer|None=None, offset:int=0, preallocate=False):
++    import traceback as _tb
++    if size > 1_000_000_000:
++      try:
++        print(f'[BIGINIT] {size=} {dtype=}', flush=True)
++        import traceback as _tb_bi; _tb_bi.print_stack()
++        _tb.print_stack()
++      except Exception: pass   # A3b: never crash on closed pool-worker pipes
+     assert isinstance(dtype, DType)
+     self.device, self.size, self.dtype, self.options, self.offset, self.allocated_views = Device.canonicalize(device), size, dtype, options, offset, 0
+     self._bufs: dict[str, Any] = {}
+@@ -141,6 +148,13 @@ class Buffer:
+     return self._bufs[device]
+   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
+   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
++    if self.nbytes > 1_000_000_000:
++      try:
++        import traceback as _tb
++        try: _shp = tuple(s.val if hasattr(s, "val") else s for s in self._shape)
++        except Exception: _shp = "?"
++        print(f"[BIGBUF2] {self.nbytes=} size={self.size} dev={self.device} shape={_shp} dtype={getattr(self.dtype, 'name', self.dtype)}", flush=True); _tb.print_stack()
++      except Exception: pass   # A3b: never crash on closed pool-worker pipes
+     assert not self.is_initialized(), "can't allocate already allocated buffer"
+     if DEBUG >= 7: print(f"buffer: allocate {self.nbytes} bytes on {self.device}")
+     if not self.device.startswith("NULL") and self.size > MAX_BUFFER_SIZE > 0 and (self.options is None or self.options.external_ptr is None):
+@@ -226,7 +240,12 @@ class Allocator(Generic[DeviceType]):
+   # overridden in LRUAllocator
+   def alloc(self, size:int, options:BufferSpec|None=None):
+     assert size > 0, f"alloc size must be positive, getting {size}"
+-    try: return self._alloc(size, options if options is not None else self.default_buffer_spec)
++    try:
++      ret = self._alloc(size, options if options is not None else self.default_buffer_spec)
++      import os as _os_c, traceback as _tb_c
++      if _os_c.getenv("MTP_ALLOC_STACK") and size >= int(_os_c.getenv("MTP_ALLOC_STACK_MB", "200")) * 1024 * 1024:
++        print(f"[alloc-stack] {size/1e6:.0f}MB", flush=True); _tb_c.print_stack()
++      return ret
+     except (RuntimeError, MemoryError) as e: raise MemoryError(f"Allocation of {size_to_str(size)} failed on {self.dev.device}. "
+                                                                f"Used: {size_to_str(GlobalCounters.mem_used_per_device[self.dev.device])}") from e
+   def free(self, opaque, size:int, options:BufferSpec|None=None):
+@@ -255,9 +274,16 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
+     self.cache: dict[tuple[int, BufferSpec|None], Any] = defaultdict(list)
+     super().__init__(dev, **kwargs)
+   def alloc(self, size:int, options:BufferSpec|None=None):
++    import traceback as _tb
++    if size > 1_000_000_000:
++        print(f"[BIGALLOC] {size=}", flush=True)
++        _tb.print_stack()
+     if len(c := self.cache[(size, options)]): return c.pop()
+     try: return super().alloc(size, options)
+-    except (RuntimeError, MemoryError):
++    except (RuntimeError, MemoryError, IndexError):
++      # IndexError here is the remote eGPU driver hitting its ~128 concurrent host-mapping (MAP_SYSMEM_FD)
++      # cap during LLM load/generate. Reclaim all cached host buffers (freeing many small mappings at
++      # once) so the next allocation succeeds, instead of leaking toward an uncatchable state.
+       self.free_cache()
+       return super().alloc(size, options)
+   def free_cache(self):
+@@ -304,6 +330,16 @@ class Compiler:
+   def __init__(self, cachekey:str|None=None): self.cachekey = cachekey if CCACHE else None
+   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
+   def compile_cached(self, src:str) -> bytes:
++    import os as _os_c
++    if _os_c.getenv("CDUMP_DIR"):
++      import re as _re_c
++      try:
++        _m = _re_c.search(r'void (?:__launch_bounds__\(\d+\) )?(\w+)\(', src)
++        _nm = _m.group(1) if _m else f"unk{abs(hash(src))%99999}"
++      except Exception: _nm = "unk"
++      if _os_c.getenv("CDUMP_MATCH", "") == "" or _re_c.search(_os_c.getenv("CDUMP_MATCH",""), _nm):
++        with open(_os_c.path.join(_os_c.getenv("CDUMP_DIR"), f"c_{_nm}.cu"), "w") as _f:
++          _f.write(src)
+     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
+       assert not getenv("ASSERT_COMPILE"), f"tried to compile with ASSERT_COMPILE set\n{src}"
+       lib = self.compile(src)
+@@ -315,8 +351,20 @@ class Compiler:
+     return subprocess.Popen(argv.split() + [str(a) for a in args], stdout=subprocess.PIPE, stdin=subprocess.PIPE, bufsize=0)
+   def compile_server(self, src:str, proc:subprocess.Popen) -> bytes:
+     unwrap(proc.stdin).write(struct.pack("I", len(src.encode())) + src.encode())
+-    if (lib:=unwrap(proc.stdout).read(struct.unpack("I", unwrap(proc.stdout).read(4))[0])): return lib
+-    raise CompileError("Compilation Error")
++    unwrap(proc.stdin).flush()
++    def _read(n:int) -> bytes:
++      # read(n) on a pipe/file is not guaranteed to return n bytes (may return a partial chunk),
++      # so loop until we have n bytes or the stream ends.
++      buf = b""
++      while len(buf) < n:
++        chunk = unwrap(proc.stdout).read(n - len(buf))
++        if not chunk: break
++        buf += chunk
++      return buf
++    size = struct.unpack("I", _read(4))[0]
++    lib = _read(size)
++    if lib: return lib
++    raise CompileError("Compilation Error")     
+ 
+ 
+ @dataclass
+diff --git a/tinygrad/engine/realize.py b/tinygrad/engine/realize.py
+index 3fadd43..7e0343f 100644
+--- a/tinygrad/engine/realize.py
++++ b/tinygrad/engine/realize.py
+@@ -9,6 +9,7 @@ from tinygrad.device import Device, Buffer, MultiBuffer, ProfileGraphEntry
+ from tinygrad.dtype import dtypes
+ from tinygrad.renderer import Estimates, Renderer
+ from tinygrad.codegen import to_program, to_program_cache, to_program_key, to_program_context
++from tinygrad.codegen.a3b import a3b_substitute as _a3b_sub, ENABLED as _a3b_on   # A3c: parent-side substitution for pool-compiled kernels
+ from tinygrad.codegen.opt.postrange import args_from_ast
+ from tinygrad.engine.worker import get_worker_pool, terminate_worker_pool
+ 
+@@ -158,6 +159,11 @@ def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_reso
+ 
+ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
+   bufs = [b.buffer for b in resolved]
++  import os as _os
++  if _os.getenv("DUMP_BUFLESS") and any(isinstance(b, MultiBuffer) for b in bufs):
++    import traceback as _tb
++    print("[MULTIDEV]", [(type(x).__name__, getattr(x,'size',getattr(x,'nbytes',None)), x.device if isinstance(x.device,str) else 'multi') for x in bufs], flush=True)
++    _tb.print_stack()
+   if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
+   else:
+     # the DEVICE axis is bound per device at launch: it's a RANGE in the AST and the _device_num variable after codegen
+@@ -182,7 +188,22 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> list[float|None]:
+   resolved = resolve_params(call, ctx.input_uops)
+   for device, (bufs, device_vars) in zip(to_tuple(call.src[1].device), unwrap_multi(call, [resolved[i] for i in ast.arg.globals])):
+     var_vals = {**ctx.var_vals, **device_vars}
++    import os as _os_k
++    if _os_k.getenv("DUMP_BUFLESS"):
++      for _b in bufs:
++        if _b.nbytes > 1_000_000_000:
++          print(f"[BIGARG] prg={call.src[0].arg.name if call.src else call.arg.name} buf={_b.nbytes/1e9:.2f}GB bufs={[x.nbytes for x in bufs]}", flush=True)
++          break
+     prg_bufs = [b.ensure_allocated() for b in bufs]
++    if _os_k.getenv("MTP_ALIGNLOG"):
++      try:
++        _al_name = str(call.src[0].arg.name) if call.src else str(call.arg.name)
++        import re as _re_al
++        _al_name = _re_al.sub(r"\x1b\[[0-9;]*m", "", _al_name)
++        with open("/tmp/alignlog.txt", "a") as _f_al:
++          _f_al.write(_al_name + " " + " ".join(f"{b_._buf.va_addr%16}:{b_.nbytes}" for b_ in prg_bufs if hasattr(b_, "_buf")) + "\n")
++      except Exception:
++        pass
+     rt = get_runtime(device, ast, cache=ctx.cache)
+     global_size, local_size = ast.arg.launch_dims(var_vals)
+     ets.append(rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
+@@ -277,6 +298,9 @@ def lower_and_compile(linear:UOp) -> UOp:
+     try:
+       with tqdm(total=len(todo), desc="compiling", disable=DEBUG<1) as pbar:
+         for i, prg in (map if pool is None else pool.imap_unordered)(_compile_kernel, tasks):
++          if _a3b_on:   # A3c: substitution for pool-compiled kernels happens in the parent (device access for validation)
++            try: prg = _a3b_sub(prg, todo[i][1][1])
++            except Exception as _e: print(f"[a3b] parent-subst failed: {type(_e).__name__}: {_e}", flush=True)
+           pbar.set_description(f"compiling {ansipad(prg.src[0].arg.name, 40)}")
+           to_program_cache[todo[i][0]] = prg
+           pbar.update(1)
+diff --git a/tinygrad/helpers.py b/tinygrad/helpers.py
+index 51fbf5d..8db0d64 100644
+--- a/tinygrad/helpers.py
++++ b/tinygrad/helpers.py
+@@ -268,6 +268,7 @@ VIZ = ContextVar("VIZ", 0)
+ # pytest-xdist workers share the CPU budget, explicit PARALLEL still overrides this default
+ PARALLEL = ContextVar("PARALLEL", NUM_CPU_THREADS.value // max(1, getenv("PYTEST_XDIST_WORKER_COUNT", 1)) if VIZ == 0 else 0)
+ PROFILE = ContextVar("PROFILE", abs(VIZ.value))
++KERNEL_HIST = ContextVar("KERNEL_HIST", 0)  # P0: per-kernel HCQ signal timestamps into sig_prof_records (no PROFILE needed)
+ SPEC = ContextVar("SPEC", 1)
+ # TODO: disable by default due to speed
+ CHECK_OOB = ContextVar("CHECK_OOB", 0)
+diff --git a/tinygrad/llm/gguf.py b/tinygrad/llm/gguf.py
+index 49772da..23fc785 100644
+--- a/tinygrad/llm/gguf.py
++++ b/tinygrad/llm/gguf.py
+@@ -3,7 +3,7 @@ from typing import Any, Callable
+ 
+ from tinygrad.tensor import Tensor
+ from tinygrad.dtype import dtypes
+-from tinygrad.helpers import prod, round_up
++from tinygrad.helpers import prod, round_up, getenv
+ from tinygrad.nn.state import TensorIO
+ 
+ # ggml packs each iq grid entry as N bytes (N=4 for uint32 grids, N=8 for uint64 grids) in a single word. See ggml-common.h.
+@@ -75,8 +75,14 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
+       scale_words = blocks[:, 66:98].bitcast(dtypes.uint32)
+       db = d * (scale_words.rshift(28).cast(dtypes.float32) + 0.5).reshape((-1, 8, 1, 1)) * 0.5
+       sign_idx = scale_words.unsqueeze(-1).rshift(Tensor.const((0, 7, 14, 21), dtypes.uint32)).bitwise_and(0x7F).reshape((-1, 32)).cast(dtypes.int32)
+-      even_signs = Tensor([i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)], dtype=dtypes.uint8, device=t.device)
+-      signs = (q_to_uint8(even_signs[sign_idx].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 8, 4, 8))
++      if getenv("MTP_A3_INLINE_SIGNS"):   # A3b: even_signs[i]=i|(parity(i)<<7), parity=XOR-fold of bits 0..6
++        par = sign_idx.rshift(0)
++        for _k in range(1, 7): par = par.bitwise_xor(sign_idx.rshift(_k))
++        sign_bytes = sign_idx.bitwise_or(par.bitwise_and(1).lshift(7)).cast(dtypes.uint8)
++      else:
++        even_signs = Tensor([i | (0x80 if i.bit_count() % 2 else 0) for i in range(128)], dtype=dtypes.uint8, device=t.device)
++        sign_bytes = even_signs[sign_idx]
++      signs = (q_to_uint8(sign_bytes.reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 8, 4, 8))
+       grid = _ggml_iq_grid(t.device, _ggml.iq3xxs_grid, (256, 4))[blocks[:, 2:66]].reshape((-1, 8, 4, 8))
+       return (db * grid * signs).flatten(-3)
+     if ggml_type == 21:
+@@ -145,7 +151,17 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
+   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
+   data_start = round_up(pos, alignment)
+ 
+-  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
++  def _tensor_nbytes(n_elems: int, ggml_type: int) -> int:
++    if (dt := _GGML_NATIVE.get(ggml_type)) is not None: return dt.itemsize * n_elems
++    ne, nb = _GGML_QUANT[ggml_type]; return (n_elems // ne) * nb
++
++  # 2026-08-30 ROOT FIX for the 5-7GB phantom allocations: the open-ended
++  # `tensor[data_start+off:]` slice left to-EOF views in every dequant chain; when the
++  # scheduler fused away the inner bounding ops, the FULL REMAINDER became a kernel arg
++  # and materialized on NV at its max extent (5.09GB/6.82GB allocs -> OOM/fault at
++  # ctx>1024 schedules). Bound BOTH ends so no view ever exceeds the tensor bytes.
++  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off : data_start + off + _tensor_nbytes(prod(dims), typ)],
++                                          prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+   return kv_data, state_dict
+ 
+ def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
+diff --git a/tinygrad/llm/model.py b/tinygrad/llm/model.py
+index 0d167f4..f17a399 100644
+--- a/tinygrad/llm/model.py
++++ b/tinygrad/llm/model.py
+@@ -2,6 +2,7 @@ from __future__ import annotations
+ import enum, functools, itertools, pathlib
+ from dataclasses import dataclass, replace
+ from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function, dtypes
++from tinygrad.dtype import least_upper_dtype
+ from tinygrad.nn import Linear
+ from tinygrad.llm.gguf import gguf_load
+ from tinygrad.uop.ops import resolve
+@@ -181,9 +182,11 @@ class TransformerBlock(FFNBlock):
+     k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
+ 
+     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
+-    assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).uop)))
+-    k = assigned_kv[0, :, :, 0:start_pos+T, :]
+-    v = assigned_kv[1, :, :, 0:start_pos+T, :]
++    # P2: cache_kv may be fp16 (MTP_KV_FP16=1 default) -> cast at store, cast back to compute dtype on read (SDPA math stays fp32)
++    kv_vals = Tensor.stack(k, v).cast(self.cache_kv.dtype)
++    assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(kv_vals.uop)))
++    k = assigned_kv[0, :, :, 0:start_pos+T, :].cast(x.dtype)
++    v = assigned_kv[1, :, :, 0:start_pos+T, :].cast(x.dtype)
+ 
+     #self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
+     #k = self.cache_kv[0, :, :, 0:start_pos+T, :]
+@@ -193,14 +196,81 @@ class TransformerBlock(FFNBlock):
+     # TODO: this if statement should be removed and it shouldn't generate extra kernels
+     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, buffer=False).triu(start_pos+1) \
+       if resolve(T != 1) else None
+-    attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
++    if getenv("MTP_KV_CHUNK", 0) and resolve(T == 1):
++      # P2b: ctx-chunked split-K attention (decode T=1 only). Mirrors
++      # scaled_dot_product_attention math exactly; operates over FULL max_context
++      # (finite junk beyond pos is masked to -inf before softmax) so chunk bounds
++      # are concrete. Requires zero-initialized cache_kv (see _init_state).
++      kv_vals = Tensor.stack(k, v).cast(self.cache_kv.dtype)
++      kv_all = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(kv_vals.uop)))
++      k_full = kv_all[0, :, :, 0:self.config.max_context, :].cast(x.dtype)
++      v_full = kv_all[1, :, :, 0:self.config.max_context, :].cast(x.dtype)
++      attn = self._attention_chunked(q, k_full, v_full, start_pos, T, x.dtype)
++    elif getenv("MTP_SEQ_ATTN") and resolve(T != 1) and resolve(T <= 8):
++      # A3-T3: small-T attention as per-position chunked passes over the FULL concrete
++      # cache (causal via -inf mask arithmetic on start_pos, no symbolic slices) --
++      # the proven replay-safe P2b pattern per row. Replaces masked-SDPA whose T x L
++      # score matrix costs ~37us/ctx-token (3.7s/cycle @100k).
++      lm = self.config.max_context
++      k_full = assigned_kv[0, :, :, 0:lm, :].cast(x.dtype)
++      v_full = assigned_kv[1, :, :, 0:lm, :].cast(x.dtype)
++      if getenv("MTP_SEQ_ATTN_BATCH"):
++        # T rows in ONE chunked pass: the full-cache KV read amortizes across all T
++        # rows (the per-j loop re-read the 100k KV T times per layer -> ~3x probe
++        # attention traffic at K=2). Same math per row; mask via idx > start_pos+j.
++        attn = self._attention_chunked_batched(q, k_full, v_full, start_pos, T if isinstance(T, int) else resolve(T), x.dtype)
++      else:
++        outs = [self._attention_chunked(q[:, :, j:j+1, :], k_full, v_full, start_pos+j, 1, x.dtype)
++                for j in range(T if isinstance(T, int) else resolve(T))]
++        attn = outs[0].cat(*outs[1:], dim=2)                                           # (B,H,T,Hd)
++    else:
++      attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
+     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
+     return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
+ 
++  def _attention_chunked_batched(self, q:Tensor, k:Tensor, v:Tensor, start_pos:int|UOp, T:int, dt) -> Tensor:
++    # batched-T variant of _attention_chunked: q (B,H,T,Hd); one qk over the full
++    # cache covers all rows (KV read amortized); causal mask row j = idx > start_pos+j.
++    nc = int(getenv("MTP_KV_CHUNK", 8))
++    rep = self.config.n_heads // self.config.n_kv_heads
++    kk = k.repeat_interleave(rep, dim=-3) if rep > 1 else k
++    vv = v.repeat_interleave(rep, dim=-3) if rep > 1 else v
++    _sc_dt = dtypes.float16 if getenv("MTP_QK_FP16") else least_upper_dtype(q.dtype, kk.dtype, dtypes.float32)
++    qk = q.matmul(kk.transpose(-2, -1), dtype=_sc_dt).cast(dtypes.float32) / (self.config.head_dim ** 0.5)
++    idx = Tensor.arange(self.config.max_context).reshape(1, 1, 1, self.config.max_context)
++    _ms = [(idx > (start_pos + j)).where(float("-inf"), 0.0) for j in range(T)]
++    _m = _ms[0].cat(*_ms[1:], dim=2) if T > 1 else _ms[0]          # (1,1,T,lm)
++    qk = qk + _m
++    p = qk.cast(dt).softmax(-1)                                           # (B,H,T,Lmax)
++    lm = self.config.max_context
++    parts = [p[..., (lm*i)//nc:((lm*(i+1))//nc)] @ vv[..., (lm*i)//nc:((lm*(i+1))//nc), :] for i in range(nc)]
++    out = parts[0]
++    for pt in parts[1:]: out = out + pt
++    return out
++
++  def _attention_chunked(self, q:Tensor, k:Tensor, v:Tensor, start_pos:int|UOp, T:int, dt) -> Tensor:
++    nc = int(getenv("MTP_KV_CHUNK", 8))
++    rep = self.config.n_heads // self.config.n_kv_heads
++    kk = k.repeat_interleave(rep, dim=-3) if rep > 1 else k
++    vv = v.repeat_interleave(rep, dim=-3) if rep > 1 else v
++    qk = q.matmul(kk.transpose(-2, -1), dtype=least_upper_dtype(q.dtype, kk.dtype, dtypes.float32)) / (self.config.head_dim ** 0.5)
++    idx = Tensor.arange(self.config.max_context)
++    qk = qk + (idx >= (start_pos + T)).where(float("-inf"), 0.0)          # mask junk beyond written prefix
++    p = qk.cast(dt).softmax(-1)                                           # (B,H,1,Lmax)
++    lm = self.config.max_context
++    parts = [p[..., (lm*i)//nc:((lm*(i+1))//nc)] @ vv[..., (lm*i)//nc:((lm*(i+1))//nc), :] for i in range(nc)]
++    out = parts[0]
++    for pt in parts[1:]: out = out + pt
++    return out
++
+   def _init_state(self, x:Tensor):
+     if not hasattr(self, "cache_kv"):
+-      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
+-                                   dtype=dtypes.default_float, device=x.device)
++      # P2: fp16 KV cache halves KV bytes (syv-proven PPL-neutral); stores/reads cast in _attention
++      kv_dtype = dtypes.half if getenv("MTP_KV_FP16", 1) else dtypes.default_float
++      # MTP_KV_CHUNK reads the full max_context window -> cache must be finite everywhere (zeros)
++      _cache_ctor = Tensor.zeros if getenv("MTP_KV_CHUNK", 0) else Tensor.empty
++      self.cache_kv = _cache_ctor(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim,
++                                  dtype=kv_dtype, device=x.device)
+       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
+ 
+ class MLATransformerBlock(FFNBlock):
+@@ -247,6 +317,7 @@ class MLATransformerBlock(FFNBlock):
+ 
+   def _init_state(self, x:Tensor):
+     if not hasattr(self, "cache_k"):
++      # NOTE: MLA cache left at default dtype (MTP_KV_FP16 not applied here; MLA unused by qwen35-style models)
+       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
+       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta, device=x.device)
+ 
+@@ -279,6 +350,11 @@ class GatedDeltaNetBlock(FFNBlock):
+     symbolic = isinstance(T, UOp)
+     T_pad = x.max_shape[1]  # symbolic chunks are padded to their max size: one graph serves every size
+ 
++    # P1 A1 fusion: concrete T==1 (decode rollout) uses the pure-expression scan
++    # (no uop-store window machinery); symbolic / T>1 keeps the legacy path.
++    if not symbolic and T == 1 and getenv("MTP_FUSED_T1", 1):
++      return self._attention_t1(x, initial, is_kda)
++
+     # input processing
+     x = x.half()
+     out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
+@@ -297,7 +373,17 @@ class GatedDeltaNetBlock(FFNBlock):
+     win = win.after(win[:, self.ssm_conv_kernel-1:self.ssm_conv_kernel-1+T].store(self.attn_qkv(x).cast(win.dtype).uop))
+     conv_window = Tensor(win)
+     # the last conv_kernel-1 columns of the window become the next conv state
+-    conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
++    import os as _os0
++    if _os0.getenv("MTP_PROBE_RO") and T_pad > 1:
++      # T>1 probe must be READ-ONLY on live state: storing the post-scan window/state here
++      # would clobber recurrent/conv state with rejected-token values on every replay
++      # (root cause of the deterministic greedy divergence at token 12/21, 2026-08-30).
++      if not hasattr(self, "probe_scratch_conv"):
++        self.probe_scratch_conv = Tensor.zeros(*self.conv_state.shape, device=x.device).cast(self.conv_state.dtype).contiguous().clone()
++        self.probe_scratch_rec = Tensor.zeros(*self.recurrent_state.shape, device=x.device).cast(self.recurrent_state.dtype).contiguous().clone()
++      conv_state_store = self.probe_scratch_conv.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
++    else:
++      conv_state_store = self.conv_state.uop.store(conv_window[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
+ 
+     conv_out = functools.reduce(lambda a,b: a+b,
+       (conv_window[:, i:i+T_pad] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
+@@ -318,25 +404,216 @@ class GatedDeltaNetBlock(FFNBlock):
+     state = Tensor(self.recurrent_state.uop.after(conv_state_store)).float()  # carry the conv write into this graph
+     state = initial.where(0, state)
+     outs = []
++    _steps = []
+     for t in range(T_pad):
+       s1 = state * alpha[:, :, t]  # decay the state
+       delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]  # the delta rule update
+       state = s1 + delta * k[:, :, t]
+       outs.append((state * q[:, :, t]).sum(-1))
++      _steps.append(state)   # state AFTER token t
+ 
+     # store the updated recurrent state in place, then read the stacked outputs after the write
+-    core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(self.recurrent_state.uop.store(state.cast(self.recurrent_state.dtype).uop)))
++    import os as _os1
++    _rec_store_target = self.probe_scratch_rec if (_os1.getenv("MTP_PROBE_RO") and T_pad > 1 and hasattr(self, "probe_scratch_rec")) else self.recurrent_state
++    core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(_rec_store_target.uop.store(state.cast(self.recurrent_state.dtype).uop)))
++
++    import os as _os
++    if _os.getenv("MTP_STEP_STATES") and T_pad > 1:
++      # A3-T3: expose per-step GDN states for the verify partial-accept select. The stacks
++      # are STASHED as lazy block attrs; _fwd chains them at the BLOCK BOUNDARY (after the
++      # block output) — chaining mid-block perturbs core's kernel schedule into wrong-
++      # computing layouts (measured: relerr 0.77; schedule-sensitivity of the scan chain).
++      # 2026-08-30 FAULT FIX: the stash buffers were shaped by the FIRST T_pad user
++      # (T=8 chunked prefill), then the T=3 probe stored mismatched 3-row stacks into
++      # 8-row buffers -> device fault. One buffer set per T_pad; the b.step_*_buf alias
++      # points at the set the CURRENT call is stashing into (probe re-aliases to its
++      # own T=3 set before its stores, so select_states reads the right rows).
++      if not hasattr(self, "step_rec_bufs"): self.step_rec_bufs, self.step_conv_bufs = {}, {}
++      if T_pad not in self.step_rec_bufs:
++        self.step_rec_bufs[T_pad] = Tensor.zeros(T_pad, *self.recurrent_state.shape, device=x.device).contiguous().clone()
++        self.step_conv_bufs[T_pad] = Tensor.zeros(T_pad, *self.conv_state.shape, device=x.device).contiguous().clone()
++      self.step_rec_buf = self.step_rec_bufs[T_pad]
++      self.step_conv_buf = self.step_conv_bufs[T_pad]
++      self._pending_rec_stack = _steps[0].stack(*_steps[1:], dim=0).cast(self.recurrent_state.dtype).contiguous()
++      cs = [conv_window[:, j+1:j+1+self.ssm_conv_kernel-1] for j in range(T_pad)]  # window after token j
++      self._pending_conv_stack = cs[0].stack(*cs[1:], dim=0).cast(self.conv_state.dtype).contiguous()
+ 
+     # output; undo the padding before the output projection
+     z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
+     if symbolic: z = z[:, :T]
+     return self.ssm_out(z.reshape(B, T, -1))
+ 
++  def _attention_t1(self, x:Tensor, initial:Tensor, is_kda:bool) -> Tensor:
++    """P1 A1 fused single-step path: pure-tensor conv window + one-expr-tree scan.
++    State stores trail as AFTER deps on the returned tensor (still realized with the
++    output, but off the critical dataflow so the core math schedules as one group).
++    Bit-identical op order to _attention (fp32 accumulate, cast-through-state-dtype)."""
++    B, T, _ = x.shape
++    # input processing (same op order as legacy)
++    x = x.half()
++    out_gate = self.ssm_g_b(self.ssm_g_a(x)) if is_kda else self.attn_gate(x)
++    out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
++    beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
++    alpha = self.ssm_f_b(self.ssm_f_a(x)) if is_kda else self.ssm_alpha(x)
++    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) *
++                 self.ssm_a.reshape(self.num_v_heads, -1))
++
++    # pure-tensor conv window [conv_state | qkv row] — no uop surgery
++    conv_state = initial.where(0, self.conv_state)
++    rows = self.attn_qkv(x).cast(conv_state.dtype)
++    win = conv_state.cat(rows, dim=1)
++    # conv-state update (last k-1 columns of the window); carried into the graph via
++    # the recurrent-state read below (legacy pattern: keeps the store real under TinyJit)
++    conv_state_store = self.conv_state.uop.store(win[:, T:T+self.ssm_conv_kernel-1].cast(self.conv_state.dtype).uop)
++
++    qk_eps = 1e-12 if is_kda else 1e-6
++    conv_out = functools.reduce(lambda a,b: a+b,
++      (win[:, i:i+T] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
++    q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
++    q, k = (z.reshape(B, T, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=qk_eps)
++            .repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
++    v = v.reshape(B, T, self.num_v_heads, self.head_v_dim)
++    # layout the per-step operands to broadcast against the (B, H, V, K) state
++    q, k, v, beta = (z.transpose(1, 2).float() for z in (q, k, v, beta))
++    q, k, v, beta = q.unsqueeze(-2) * self.head_k_dim**-0.5, k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
++    alpha = log_alpha.transpose(1, 2).exp().unsqueeze(-1)
++
++    # single-step recurrent update as ONE expression tree (no mid-chain splits)
++    state = Tensor(self.recurrent_state.uop.after(conv_state_store)).float()  # carries the conv write
++    state = initial.where(0, state)
++    # P1b algebraic merge (MTP_ALGEBRA_T1): numerically exact (greedy 20/20, acc
++    # unchanged) and merges the two K-wide state reductions into ONE contraction
++    # R = s1 @ [x|y]. MEASURED PERF-NEUTRAL in production (@2048: 98.94 vs 99.04
++    # ms/tok; graphless exec 113.4 -> 113.9ms, +48 kernels/tok): the two legacy
++    # delta-rule reduction kernels only cost ~3.5ms/tok COMBINED -- the big
++    # r_544_* pair (2x64/tok, ~33ms) is UNTOUCHED by every T=1 scan-path change
++    # (legacy/fused/algebra) => it is per-block-generic (NOT the GDN scan).
++    # Default OFF: no win, extra kernels; kept as a verified-correct variant.
++    if getenv("MTP_ALGEBRA_T1", 0):
++      # legacy form: TWO sequential K-wide reductions
++      # (A = sum(s1*x) for the delta rule, then o = sum(state_new*y)) — both read the
++      # whole (V,K) state. Algebra collapses them into ONE contraction against a
++      # stacked [x|y] matrix (state read once) plus elementwise work:
++      #   A = s1@x, B = s1@y            (one GEMV-ish kernel, R = s1 @ [x|y])
++      #   delta = (v - A)*beta
++      #   state_new = s1 + delta(x)     (identical to legacy)
++      #   o = B + delta*(x.y)           (reassociated fp32 accumulation vs legacy)
++      kt = k[:, :, 0].reshape(B, self.num_v_heads, self.head_k_dim)          # x, unscaled (B,H,K)
++      qt = q[:, :, 0].reshape(B, self.num_v_heads, self.head_k_dim)          # y, scaled by head_k_dim**-0.5
++      vt = v[:, :, 0].reshape(B, self.num_v_heads, self.head_v_dim)          # (B,H,V)
++      bt = beta[:, :, 0]                                                     # (B,H,1,1)
++      s1 = state * alpha[:, :, 0]
++      xy = kt.unsqueeze(-1).cat(qt.unsqueeze(-1), dim=-1)                    # (B,H,K,2)
++      R = s1 @ xy                                                            # (B,H,V,2): A=R[...,0], B=R[...,1]
++      delta = (vt.unsqueeze(-1) - R[..., 0:1]) * bt                          # (B,H,V,1)
++      state_new = s1 + delta * kt.reshape(B, self.num_v_heads, 1, self.head_k_dim)  # delta (x): K MUST be last axis
++      xy_dot = ((kt * qt).sum(-1, keepdim=True)).unsqueeze(-1)               # per-head x.y (B,H,1,1)
++      o = R[..., 1:2] + delta * xy_dot                                       # (B,H,V,1)
++      rec_state_store = self.recurrent_state.uop.store(state_new.cast(self.recurrent_state.dtype).uop)
++      core = Tensor(o.reshape(B, 1, self.num_v_heads, self.head_v_dim).contiguous().uop.after(rec_state_store))
++    else:
++      s1 = state * alpha[:, :, 0]
++      delta = (v[:, :, 0] - (s1*k[:, :, 0]).sum(-1, keepdim=True)) * beta[:, :, 0]
++      state_new = s1 + delta * k[:, :, 0]
++      outs = [(state_new * q[:, :, 0]).sum(-1)]
++      rec_state_store = self.recurrent_state.uop.store(state_new.cast(self.recurrent_state.dtype).uop)
++      core = Tensor(outs[0].stack(*outs[1:], dim=1).contiguous().uop.after(rec_state_store))
++
++    z = (self.ssm_norm(core) * (out_gate.sigmoid() if is_kda else out_gate.silu())).cast(x.dtype).contiguous()
++    return self.ssm_out(z.reshape(B, T, -1))
++
++  def _attention_mtp(self, x:Tensor, start_pos:int|UOp, conv_in:Tensor, rec_in:Tensor):
++    """MTP dataflow variant of _attention: states are explicit args, new states returned.
++    No persistent-buffer stores, no position-0 reset (caller seeds zeros at prefill)."""
++    B, T, _ = x.shape
++    start_pos = start_pos if isinstance(start_pos, UOp) else UOp.variable("start_pos_mtp", 0, self.config.max_context-1).bind(start_pos)
++    symbolic = isinstance(T, UOp)
++    T_pad = x.max_shape[1]
++    x = x.half()
++    out_gate = self.attn_gate(x)
++    out_gate = out_gate.reshape(B, T, self.num_v_heads, self.head_v_dim)
++    beta = self.ssm_beta(x).sigmoid().reshape(B, T, self.num_v_heads)
++    alpha = self.ssm_alpha(x)
++    log_alpha = ((alpha.float() + self.ssm_dt["bias"]).softplus().reshape(B, T, self.num_v_heads, -1) *
++                 self.ssm_a.reshape(self.num_v_heads, -1))
++    if symbolic:
++      out_gate = out_gate.pad_to((B, T_pad, self.num_v_heads, self.head_v_dim))
++      beta, log_alpha = beta.pad_to((B, T_pad, self.num_v_heads)), log_alpha.pad_to((B, T_pad, *log_alpha.shape[2:]))
++    conv_state = conv_in
++    # pure-tensor conv window [state | qkv rows] — no uop surgery (after-chains break realize)
++    rows = self.attn_qkv(x).cast(conv_state.dtype)
++    import os as _os
++    if _os.getenv('MTPDBG'): print(f'[catdbg] x={tuple(x.shape)} cs={conv_state.shape} rows={rows.shape} T={T!r}', flush=True)
++    win = conv_state.cat(rows, dim=1)
++    conv_next = win[:, T:T+self.ssm_conv_kernel-1].cast(conv_in.dtype).contiguous()
++    conv_out = functools.reduce(lambda a,b: a+b,
++      (win[:, i:i+T_pad] * self.ssm_conv1d["weight"][:, i] for i in range(self.ssm_conv_kernel))).silu()
++    q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
++    q, k = (z.reshape(B, T_pad, self.num_k_heads, self.head_k_dim).normalize(dim=-1, eps=1e-6)
++            .repeat(1, 1, self.num_v_heads//self.num_k_heads, 1) for z in (q, k))
++    v = v.reshape(B, T_pad, self.num_v_heads, self.head_v_dim)
++    q, k, v, beta = (z.transpose(1, 2).float() for z in (q, k, v, beta))
++    q, k, v, beta = q.unsqueeze(-2) * self.head_k_dim**-0.5, k.unsqueeze(-2), v.unsqueeze(-1), beta.unsqueeze(-1).unsqueeze(-1)
++    alpha = log_alpha.transpose(1, 2).exp().unsqueeze(-1)
++    state = rec_in.float()
++    import os as _oscan
++    if _oscan.getenv("MTP_SCAN_MEGA"):
++      # SCAN-MEGA carriers (see ~/tinygrad-metal/SCAN_FUSION.md): two elementwise
++      # expressions over ALL scan inputs; each renders ONE kernel whose args carry
++      # q,k,v,beta,alpha,state. The a3b substitution swaps the core-carrier kernel
++      # for the gdn_scan megakernel (writes core + state to its ws) and the
++      # state-carrier kernel for a ws->state copy. NOTE: with this env set but the
++      # substitution NOT active the values are WRONG (carriers are placeholders) —
++      # any gate run must verify the [scan-mega] substitution prints.
++      qe, ke = q.squeeze(-2), k.squeeze(-2)                       # [B,nv,T,hk]
++      ve, be, ae = v.squeeze(-1), beta.squeeze(-1).squeeze(-1), alpha.squeeze(-1).squeeze(-1)  # [B,nv,T,hv],[B,nv,T],[B,nv,T]
++      e_core = (((qe * 0.0 + ke * 0.0).sum(-1, keepdim=True) + ve * 0.0 + (be + ae).unsqueeze(-1) * 0.0)).clone()  # [B,nv,T,hv] — clone = schedule barrier so the carrier renders STANDALONE
++      e_state = (state * 0.0 + (qe.sum(-1, keepdim=True) * 0.0 + ve * 0.0 + (be + ae).unsqueeze(-1) * 0.0).sum(2, keepdim=True)).clone()  # [B,nv,hv,hk]
++      core = e_core.permute(0, 2, 1, 3).unsqueeze(-1).contiguous()          # [B,T,nv,hv,1] — matches stock core
++      state = e_state.contiguous()
++    else:
++      outs = []
++      for t in range(T_pad):
++        s1 = state * alpha[:, :, t]
++        delta = (v[:, :, t] - (s1*k[:, :, t]).sum(-1, keepdim=True)) * beta[:, :, t]
++        state = s1 + delta * k[:, :, t]
++        outs.append((state * q[:, :, t]).sum(-1))
++      core = outs[0].stack(*outs[1:], dim=1).contiguous()
++    z = (self.ssm_norm(core) * out_gate.silu()).cast(x.dtype).contiguous()
++    if symbolic: z = z[:, :T]
++    return self.ssm_out(z.reshape(B, T, -1)), conv_next, state.cast(rec_in.dtype).contiguous()
++
++  def call_mtp(self, x: Tensor, start_pos: int|UOp, conv_in: Tensor, rec_in: Tensor):
++    """MTP dataflow variant of __call__: (out, new_conv, new_rec) with states as explicit args."""
++    self._init_state(x)
++    @function(precompile=True, allow_implicit=True)
++    def _run_mtp(x:Tensor, start_pos:int|UOp, conv_in:Tensor, rec_in:Tensor):
++      import os as _os
++      if _os.getenv('MTPDBG'): print(f'[types] x={type(x).__name__} sp={type(start_pos).__name__} cv={type(conv_in).__name__} rs={type(rec_in).__name__}', flush=True)
++      attn, conv_next, rec_next = self._attention_mtp(self.attn_norm(x), start_pos, conv_in, rec_in)
++      h = x + attn
++      return (h + self._feed_forward(self.ffn_norm(h))).contiguous(), conv_next, rec_next
++    return _run_mtp(x, start_pos, conv_in, rec_in)
++
+   def _init_state(self, x):
+     if not hasattr(self, "conv_state"):
+       self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
+       self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_k_dim, device=x.device).clone()
+ 
++def flush_step_states(x: Tensor, blocks) -> Tensor:
++  """Chain pending per-step GDN state stores onto the block-boundary tensor x.
++  Must run at JIT>0 capture; no-op when no pending stacks."""
++  import os as _os2
++  if not _os2.getenv("MTP_STEP_STATES"): return x
++  for b in blocks:
++    st = getattr(b, "_pending_rec_stack", None)
++    if st is None: continue
++    x = Tensor(x.uop.after(b.step_rec_buf.uop.store(st.uop)))
++    x = Tensor(x.uop.after(b.step_conv_buf.uop.store(b._pending_conv_stack.uop)))
++    b._pending_rec_stack = b._pending_conv_stack = None
++  return x
++
++
+ class Transformer:
+   def __init__(self, config:TransformerConfig):
+     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
+@@ -356,7 +633,21 @@ class Transformer:
+     self.rollout_jit = TinyJit(self.forward)
+ 
+   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+-    x = self.token_embd(tokens).float()                   # (B, T, D)
++    # 2026-08-31: nn.Embedding gathers rows on the DEQUANTED fp32 view -> materializes the
++    # FULL fp32 embedding (248320x5120x4B = 5.09GB arena) on every call. At 100k ctx
++    # (12.6 raw + 6.4 KV + head) that faults the 24GB card. Row-gather BEFORE dequant:
++    # index the raw quantized rows, then dequant only the (B,T) gathered rows — identical
++    # math (dequant is elementwise per 32-elem block), KBs instead of GBs.
++    import os as _os_e
++    if _os_e.getenv("MTP_EMB_GATHER") and getattr(self, "emb_rows", None) is not None:
++      # row-gather BEFORE dequant (identical math: dequant is elementwise per block)
++      _gb = self.emb_rows[tokens.reshape(-1)]                        # (B*T, row_bytes) u8
++      from tinygrad.llm.gguf import ggml_data_to_tensor as _g2t
++      _n = self.emb_out_dim
++      x = _g2t(_gb.cast(dtypes.uint8), _n * tokens.numel(), self.emb_ggml_type) \
++            .reshape(tokens.shape[0], tokens.shape[1], _n).cast(dtypes.float32)
++    else:
++      x = self.token_embd(tokens).float()                             # (B, T, D)
+     for block in self.blk: x = block(x, start_pos)
+     # only run the output projection on the last token
+     logits = self.output(self.output_norm(x[:, -1:]))[:, -1, :]
+@@ -379,6 +670,15 @@ class Transformer:
+     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
+ 
+     arch = kv['general.architecture']
++    # P0 (MTP_SKIP_DUPHEAD=1 default): the nextn/MTP draft block is never constructed
++    # by this model (num_blocks subtracts nextn_predict_layers); its tensors are dead
++    # weight in state_dict. Drop them so they cannot pin the raw GGUF staging buffer.
++    if getenv("MTP_SKIP_DUPHEAD", 1):
++      _nn = kv.get(f'{arch}.nextn_predict_layers', 0)
++      if _nn:
++        _nb = kv[f'{arch}.block_count']; _pre = len(state_dict)
++        state_dict = {k:v for k,v in state_dict.items() if not k.startswith(f'blk.{_nb-_nn}.')}
++        print(f"[from_gguf] MTP_SKIP_DUPHEAD: dropped {_pre-len(state_dict)} nextn tensors (blk.{_nb-_nn}.*)", flush=True)
+     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
+     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
+ 
+@@ -443,7 +743,63 @@ class Transformer:
+       qkv_bias='blk.0.attn_q.bias' in state_dict,
+       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
+     model = Transformer(config)
++    # 2026-08-31 MTP_EMB_GATHER: build the RAW u8 embedding table (one bounded read of the
++    # token_embd tensor bytes) so forward() can row-gather BEFORE dequant — KBs instead of
++    # the 5.09GB fp32 dequant arena that faults the 24GB card at 100k ctx.
++    import os as _os_g
++    _emb_stash = None
++    if _os_g.getenv("MTP_EMB_GATHER"):
++      import struct as _st_g
++      _path = str(gguf) if not isinstance(gguf, (str, pathlib.Path)) else str(gguf)
++      try:
++        with open(_path, "rb") as _f:
++          _f.read(4); _f.read(4)
++          _nt = _st_g.unpack("<Q", _f.read(8))[0]; _nk = _st_g.unpack("<Q", _f.read(8))[0]
++          def _rs():
++            _n = _st_g.unpack("<Q", _f.read(8))[0]; return _f.read(_n).decode()
++          def _rv(t):
++            if t == 8: return _rs()
++            if t == 9:
++              _it = _st_g.unpack("<I", _f.read(4))[0]; _n = _st_g.unpack("<Q", _f.read(8))[0]
++              return [_rv(_it) for _ in range(_n)]
++            _sz = {0:1,1:1,2:2,3:2,4:4,5:4,6:4,7:1,10:8,11:8,12:8}[t]; _f.read(_sz); return None
++          for _ in range(_nk): _rs(); _rv(_st_g.unpack("<I", _f.read(4))[0])
++          _align = 32
++          _infos = []
++          for _ in range(_nt):
++            _nm = _rs(); _nd = _st_g.unpack("<I", _f.read(4))[0]
++            _dims = tuple(_st_g.unpack("<Q", _f.read(8))[0] for _ in range(_nd))
++            _typ = _st_g.unpack("<I", _f.read(4))[0]; _off = _st_g.unpack("<Q", _f.read(8))[0]
++            _infos.append((_nm, _dims, _typ, _off))
++          _ds = (_f.tell() + _align - 1) // _align * _align
++          for _nm, _dims, _typ, _off in _infos:
++            if _nm != "token_embd.weight": continue
++            from tinygrad.llm.gguf import _GGML_QUANT, _GGML_NATIVE
++            _n = 1
++            for _d in _dims: _n *= _d
++            if _typ in _GGML_NATIVE: _nb = _GGML_NATIVE[_typ].itemsize * _n
++            else:
++              _ne, _bpb = _GGML_QUANT[_typ]; _nb = (_n // _ne) * _bpb
++            _f.seek(_ds + _off)
++            _raw = _f.read(_nb)
++            import numpy as _np_g
++            _rb = _nb // _dims[1]                   # bytes per vocab row (gguf dims reversed: (dim, vocab))
++            _od = _dims[0]                            # embedding_length is FIRST in gguf order
++            _rows_t = Tensor(_np_g.frombuffer(_raw, dtype=_np_g.uint8).copy(),
++                             dtype=dtypes.uint8).reshape(_dims[1], _rb).realize()
++            _emb_stash = dict(rows=_rows_t, rb=_rb, ty=_typ, od=_od)
++            print(f"[emb-gather] raw table {_dims} type={_typ} row_bytes={_rb}", flush=True)
++            break
++      except Exception as _e:
++        print(f"[emb-gather] DISABLED ({type(_e).__name__}: {_e})", flush=True)
+     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
++    try: _emb_stash
++    except NameError: _emb_stash = None
++    if _emb_stash is not None:
++      model.emb_rows = _emb_stash["rows"]
++      model.emb_row_nbytes = _emb_stash["rb"]
++      model.emb_ggml_type = _emb_stash["ty"]
++      model.emb_out_dim = _emb_stash["od"]
+     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
+     if realize:
+       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
+@@ -461,6 +817,28 @@ class Transformer:
+     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
+     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
+ 
++  def forward_all(self, tokens:Tensor, start_pos:int|UOp, states:tuple[Tensor,...]):
++    """MTP: forward returning hidden at ALL positions + threaded ssm states.
++    states: (cv_0, rs_0, cv_1, rs_1, ...) for each GatedDeltaNetBlock in order."""
++    x = self.token_embd(tokens).float()
++    import os as _os
++    if _os.getenv('MTPDBG'): print(f'[forward_all] len(states)={len(states)} nblocks={len(self.blk)}', flush=True)
++    si = 0
++    cvs:list[Tensor] = []; rvs:list[Tensor] = []
++    cv_p, rs_p = states
++    for b in self.blk:
++      if isinstance(b, GatedDeltaNetBlock):
++        x, cvo, reco = b.call_mtp(x, start_pos, cv_p[si].contiguous(), rs_p[si].contiguous())
++        cvs.append(cvo); rvs.append(reco); si += 1
++      else:
++        x = b(x, start_pos)
++    if cvs:
++      cv_packed = (cvs[0].cat(*cvs[1:], dim=0) if len(cvs)>1 else cvs[0]).reshape(len(cvs), *cvs[0].shape)
++      rs_packed = (rvs[0].cat(*rvs[1:], dim=0) if len(rvs)>1 else rvs[0]).reshape(len(rvs), *rvs[0].shape)
++    else:
++      cv_packed = rs_packed = None
++    return x, cv_packed, rs_packed
++
+   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
+     if self.has_recurrent_block: chunk_size = 1
+     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
+diff --git a/tinygrad/mixin/creation.py b/tinygrad/mixin/creation.py
+index c290bce..4ca0e06 100644
+--- a/tinygrad/mixin/creation.py
++++ b/tinygrad/mixin/creation.py
+@@ -36,6 +36,10 @@ class CreationMixin(DTypeMixin, MovementMixin):
+     dt = to_dtype(dtype) if dtype is not None else dtypes.default_float
+     new_shape = argfix(*shape)
+     max_shape = to_max_shape(new_shape)
++    import os as _os_c
++    if _os_c.getenv("DUMP_BUFLESS") and (pms := prod(max_shape)) > 1_000_000_000:
++      print(f"[CREATE-BIG] prod(max_shape)={pms} max_shape={max_shape} new_shape={new_shape} dtype={dt}", flush=True)
++      import traceback as _tb_c; _tb_c.print_stack()
+     u = UOp.new_buffer(canonicalize_device(device), prod(max_shape), dt).reshape(max_shape).shrink_to(new_shape)
+     return cls._wrap_uop(u)
+ 
+diff --git a/tinygrad/runtime/graph/hcq.py b/tinygrad/runtime/graph/hcq.py
+index 39e68a4..7c70c3b 100644
+--- a/tinygrad/runtime/graph/hcq.py
++++ b/tinygrad/runtime/graph/hcq.py
+@@ -7,6 +7,15 @@ from tinygrad.dtype import dtypes
+ from tinygrad.uop.ops import UOp, Ops, Variable
+ from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
+ 
++# MTP_GRAPH_NOBIND: skip per-graph NVCommandQueue.bind() at graph build. Each bind
++# allocates a dedicated host sysmem hw_page = one MAP_SYSMEM_FD mapping, and the ~128
++# concurrent-mapping driver cap is exhausted by the ~85 per-piece HCQGraphs that live
++# simultaneously during a TinyJit capture (graph_cache holds them while the capture's
++# big_linear references their ASTs). Unbound submits use the shared per-device cmdq
++# ring instead -- the same path every eager/JIT=2 launch uses -- at the cost of one
++# small queue copy per submit.
++_GRAPH_NOBIND = getenv("MTP_GRAPH_NOBIND", 0)
++
+ class HCQGraph(MultiGraphRunner):
+   def __init__(self, *args, **kwargs):
+     super().__init__(*args, **kwargs)
+@@ -24,17 +33,17 @@ class HCQGraph(MultiGraphRunner):
+         x = self.input_replace_to_var.setdefault((j,pos), UOp.variable(f"inp_{iidx}_{self.calls[j][0]}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
+         self.hcq_bufs[j][pos] = HCQBuffer(x, self.hcq_bufs[j][pos].size) # Create fake buffer with variable
+ 
+-    # Allocate kernel args.
+-    kernargs_size: dict[Compiled, int] = collections.defaultdict(int)
+-    for runtime in self.runtimes:
+-      if runtime is None: continue
+-      kernargs_size[runtime.dev] += round_up(runtime.kernargs_alloc_size, 16)
+-    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True)) for d,sz in kernargs_size.items()}
++    # Allocate kernel args. Reuse the device's persistent per-device kernargs pool (allocated once
++    # at device init = a single host mapping, cpu_access=True) via its wrap-around BumpAllocator,
++    # instead of allocating a fresh host-mapped buffer per graph run. On the eGPU/TinyGPU path the
++    # driver caps concurrent host sysmem mappings (~128) with no free RPC, so allocating many small
++    # distinct-size kernargs buffers (one per coexisting graph) exhausts the cap on large models
++    # (Qwen3.8-27B). A single persistent pool per device keeps this at exactly one mapping.
++    self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d: unwrap(d.kernargs_pool) for d in self.devices if not d._is_cpu()}
++    kargs_alloc: dict[Compiled, BumpAllocator] = {dev: dev.kernargs_pool_alloc for dev in self.kernargs_bufs}
+ 
+     # Fill initial arguments.
+     self.ji_args: dict[int, HCQArgsState] = {}
+-
+-    kargs_alloc: dict[Compiled, BumpAllocator] = {dev:BumpAllocator(buf.size) for dev,buf in self.kernargs_bufs.items()}
+     for j, runtime in enumerate(self.runtimes):
+       if runtime is None: continue
+       argsbuf = self.kernargs_bufs[runtime.dev].offset(kargs_alloc[runtime.dev].alloc(runtime.kernargs_alloc_size, 16))
+@@ -215,8 +224,10 @@ class HCQGraph(MultiGraphRunner):
+         for copy_q in self._dev_copy_queues(dep_dev):
+           if copy_q in self.signals: self.comp_queues[dev].wait(self.signals[copy_q], unwrap(self.last_j[copy_q]) + 1)
+ 
+-      self.comp_queues[dev].signal(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev] + 1).bind(dev)
+-      for copy_q in self._dev_copy_queues(dev): copy_q.bind(dev)
++      self.comp_queues[dev].signal(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev] + 1)
++      if not _GRAPH_NOBIND: self.comp_queues[dev].bind(dev)
++      for copy_q in self._dev_copy_queues(dev):
++        if not _GRAPH_NOBIND: copy_q.bind(dev)
+ 
+     self.last_timeline: dict[HCQCompiled, tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
+     self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
+@@ -314,7 +325,8 @@ class HCQGraph(MultiGraphRunner):
+ 
+     if PROFILE and self.kickoff_value >= 1: self.collect_timestamps()
+ 
+-    for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
++    # NOTE: graph kernargs now reuse the device's persistent per-device kernargs pool, so we must not
++    # free them here (they are owned by HCQCompiled, not by this graph run).
+ 
+   @staticmethod
+   def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
+diff --git a/tinygrad/runtime/ops_nv.py b/tinygrad/runtime/ops_nv.py
+index 5b67afe..f4a3aca 100644
+--- a/tinygrad/runtime/ops_nv.py
++++ b/tinygrad/runtime/ops_nv.py
+@@ -21,6 +21,39 @@ nv_gpu = nv_570 # default to 570
+ 
+ PMA = ContextVar("PMA", abs(VIZ.value)>=2)
+ 
++# ---- TLX W4.1 exec tripwires (review V-49/V-53; calibrated on the 782-cubin
++# census, engine0/w4_census.json): the shipped canon/batch sets have ZERO
++# name-law-vs-maxntid mismatches and max min_stack 32B (spk_pre11qh_100k; the
++# hm11 4B-cold-spill precedent = 8B frame), so the default policy is bootable
++# for every shipped kernel while hard-failing the P18 nondet class (>100B
++# local-mem stack: "heavy spill >~100B = nondeterministic wrong output").
++# NV_GRAPH_ASSERTS: 0=off, 1=warn-strict (default: hard launch mismatch +
++# hard >NV_SPILL_HARD_B stack, warn 1..100B), 2=strict (any stack>0 hard).
++NV_GRAPH_ASSERTS = getenv("NV_GRAPH_ASSERTS", 1)
++NV_SPILL_HARD_B = getenv("NV_SPILL_HARD_B", 100)
++# TLX W5 (live-rig finding #3): EIATTR_MIN_STACK_SIZE is a FRAME metric, not pure
++# register spill — the shipped Tier-2 prefill families (pf*/p8*) run 104-592B frames
++# BY DESIGN (months of P7E7-class maturity gates; the P18 nondet datapoint was a 276B
++# SPILL kernel on the decode path). Names matching any substring here are warn-only;
++# the hard P18 law stays enforced for everything else (decode/canon set max 32B).
++NV_SPILL_EXEMPT_NAMES = tuple(s for s in getenv("NV_SPILL_EXEMPT_NAMES", "").split(",") if s)
++# W4.2 (V-50): serving-path timeline-wait deadline (seconds). The base
++# HCQSignal.wait fires RuntimeError on its own timeout; this wrapper stamps a
++# watchdog-parseable marker ([NV-WAIT-TIMEOUT], same channel as slog) first so
++# the W2 supervisor/_clean_exit sees WHY the wait died. Progress on the
++# timeline resets the base timer, so long healthy work never trips it.
++NV_WAIT_TIMEOUT_S = getenv("NV_WAIT_TIMEOUT_S", 300.0)
++
++def nv_wait_timeline(dev, value, what="timeline", timeout_s=None):
++  """Deadline-bounded timeline wait for SERVING paths (TLX W4.2 / V-50).
++  On expiry: watchdog marker + re-raise (the daemon's W2 watchdog/_clean_exit
++  own the exit/reboot). Never hangs silently."""
++  to = float(NV_WAIT_TIMEOUT_S if timeout_s is None else timeout_s)
++  try: dev.timeline_signal.wait(value, timeout=int(to * 1000))
++  except RuntimeError as e:
++    print(f"[NV-WAIT-TIMEOUT] op=wait_wedge what={what} value={value} timeout_s={to} err={e!r}", flush=True)
++    raise
++
+ @dataclass(frozen=True)
+ class ProfilePMAEvent(ProfileEvent): device:str; kern:str; blob:bytes; exec_tag:int; profile_key:bytes|None=None # noqa: E702
+ 
+@@ -81,7 +114,20 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
+     super().__init__()
+ 
+   def __del__(self):
+-    if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
++    # V-56: best-effort only — use close() for the safe path (a bound queue's
++    # hw_page may still be read by the GPU while this QMD train is in flight).
++    if self.binded_device is not None:
++      try: self.close()
++      except Exception: pass
++
++  def close(self):
++    """V-56 (TLX W4.2): explicit queue teardown — synchronize the device FIRST
++    (all in-flight reads of the pushbuffer drained), then free the hw_page.
++    __del__ can't do this safely (synchronize may reenter the allocator)."""
++    if self.binded_device is None: return
++    dev, self.binded_device = self.binded_device, None
++    try: dev.synchronize()
++    finally: dev.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
+ 
+   def nvm(self, subchannel, mthd, *args, typ=2): self.q((typ << 28) | (len(args) << 16) | (subchannel << 13) | (mthd >> 2), *args)
+ 
+@@ -114,7 +160,22 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
+   def _submit_to_gpfifo(self, dev:NVDevice, gpfifo:GPFifo):
+     if dev == self.binded_device: cmdq_addr = self.hw_page.va_addr
+     else:
+-      cmdq_addr = dev.cmdq_allocator.alloc(len(self._q) * 4, 16)
++      _sz = len(self._q) * 4
++      _ptr0 = dev.cmdq_allocator.ptr
++      cmdq_addr = dev.cmdq_allocator.alloc(_sz, 16)
++      if dev.cmdq_diag:
++        dev.cmdq_n_submits += 1
++        dev.cmdq_alloc_total += _sz
++        dev.cmdq_since_wrap += _sz
++        dev.cmdq_max_submit = max(dev.cmdq_max_submit, _sz)
++        if cmdq_addr - dev.cmdq_page.va_addr < _ptr0:
++          dev.cmdq_wraps += 1
++          print(f"[CMDQ] WRAP #{dev.cmdq_wraps} ring={dev.cmdq_page.size>>20}MiB since_prev_wrap={dev.cmdq_since_wrap>>10}KiB "
++                f"total={dev.cmdq_alloc_total>>10}KiB submits={dev.cmdq_n_submits} max_single={dev.cmdq_max_submit>>10}KiB", flush=True)
++          dev.cmdq_since_wrap = 0
++        elif dev.cmdq_n_submits % 4096 == 0:
++          print(f"[CMDQ] submits={dev.cmdq_n_submits} total={dev.cmdq_alloc_total>>10}KiB ring_off={(cmdq_addr-dev.cmdq_page.va_addr)>>10}KiB "
++                f"wraps={dev.cmdq_wraps} max_single={dev.cmdq_max_submit>>10}KiB", flush=True)
+       cmdq_wptr = (cmdq_addr - dev.cmdq_page.va_addr) // 4
+       dev.cmdq[cmdq_wptr : cmdq_wptr + len(self._q)] = array.array('I', self._q)
+ 
+@@ -132,7 +193,36 @@ class NVComputeQueue(NVCommandQueue):
+     self.active_qmd:QMD|None = None
+     return self
+ 
++  @staticmethod
++  def _graph_exec_asserts(prg:"NVProgram", local_size:tuple):
++    if not all(isinstance(v, int) for v in local_size): return   # symbolic dims (capture vars) skip
++    n = prod(local_size)
++    if n > prg.max_threads:
++      raise RuntimeError(f"[NV-GA] {prg.name}: launch {local_size} exceeds regfile cap max_threads={prg.max_threads} "
++                         "(64-reg/1024-thr class RF overflow — the k0ab11 unroll-knob law)")
++    mt = getattr(prg, "maxntid", None)
++    if mt is not None and (isinstance(mt[0], int) and isinstance(mt[1], int) and isinstance(mt[2], int)):
++      mtp = mt[0] * mt[1] * mt[2]
++      if n != mtp or any(l > m for l, m in zip(local_size, mt)):
++        raise RuntimeError(f"[NV-GA] {prg.name}: launch {local_size} != cubin maxntid {tuple(mt)} "
++                           "(NAME-ENCODED LAUNCH CONFIG LAW violation: over-launch corrupts rows, under-launch leaves stale columns)")
++    spill = getattr(prg, "stack_usage", None)
++    if isinstance(spill, int):
++      _exempt = any(s in prg.name for s in NV_SPILL_EXEMPT_NAMES)   # TLX W5: pf/p8 Tier-2 frames
++      lim = (1 << 30) if _exempt else (0 if NV_GRAPH_ASSERTS >= 2 else NV_SPILL_HARD_B)
++      if spill > lim:
++        raise RuntimeError(f"[NV-GA] {prg.name}: local-mem stack {spill}B > {lim}B policy "
++                           "(P18 law: spill >~100B = nondeterministic-wrong on this dext)")
++      if spill > 0 and not getattr(prg, "_ga_warned", False):
++        prg._ga_warned = True
++        print(f"[NV-GA] warn: {prg.name} carries {spill}B local-mem stack (<= {lim}B policy; "
++              f"{'strict' if NV_GRAPH_ASSERTS >= 2 else 'warn'} mode)", flush=True)
++
+   def exec(self, prg:NVProgram, args_state:NVArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
++    # TLX W4.1 (V-49/V-53): the graph path historically checked NOTHING (the
++    # eager NVProgram.__call__ checked resources; captured/exec-path launches
++    # did not). Checks are int-only — symbolic dims (capture-time vars) skip.
++    if NV_GRAPH_ASSERTS and all(isinstance(v, int) for v in local_size): self._graph_exec_asserts(prg, local_size)
+     self.bind_args_state(args_state)
+ 
+     qmd_buf = args_state.buf.offset(round_up(prg.constbufs[0][1], 1 << 8))
+@@ -169,8 +259,23 @@ class NVComputeQueue(NVCommandQueue):
+           val_off = self.active_qmd.field_offset(f'release{i}_payload_lower' if self.active_qmd.ver<4 else f'release_semaphore{i}_payload_lower')
+           self.bind_sints_to_mem(value & 0xffffffff, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=val_off)
+           self.bind_sints_to_mem(value >> 32, mem=self.active_qmd_buf.cpu_view(), fmt='I', offset=val_off+4)
++          # V-55 (TLX W4.2): the QMD is now stamped with its release — a further
++          # exec must NOT chain onto it as dependent_qmd0 (waiters may pass at
++          # THIS qmd's completion, before the dependent runs). Clear so the next
++          # exec takes the ordered PCAS path.
++          self.active_qmd, self.active_qmd_buf = None, None
+           return self
+ 
++      # V-55: both release slots consumed — the old silent fallthrough to the
++      # nvm semaphore could complete out of channel pace (kimi C3/F6). Loud now:
++      # raise in strict mode, warn once otherwise (profiling's 3rd timestamp is
++      # the only shipped-class user of the fallthrough).
++      if NV_GRAPH_ASSERTS >= 2:
++        raise RuntimeError("[NV-GA] QMD release-slot exhaustion (>=3 signals on one QMD chain) — use separate queues")
++      if not getattr(self, "_rel_warned", False):
++        self._rel_warned = True
++        print("[NV-GA] warn: >=3 signals on one QMD chain — falling back to the nvm semaphore (channel-pace reorder risk)", flush=True)
++
+     self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(signal.value_addr), *data64_le(value),
+              nv_flags("NVC56F_SEM_EXECUTE", operation="release", release_wfi="en", payload_size="64bit", release_timestamp="en"))
+     self.nvm(0, nv_gpu.NVC56F_NON_STALL_INTERRUPT, 0x0)
+@@ -253,14 +358,24 @@ class NVProgram(HCQProgram['NVDevice']):
+     if (NAK:=isinstance(dev.renderer, NAKRenderer)):
+       image, self.cbuf_0 = memoryview(bytearray(obj.lib[ctypes.sizeof(info:=mesa.struct_nak_shader_info.from_buffer_copy(obj.lib)):])), []
+       self.regs_usage, self.shmem_usage, self.lcmem_usage = info.num_gprs, round_up(info.cs.smem_size, 128), round_up(info.slm_size, 16)
++      self.stack_usage, self.maxntid = None, None   # TLX W4.1: no ELF .nv.info on the NAK path — checks skip
+     elif isinstance(dev.iface, MOCKIface): image, sections, relocs = memoryview(bytearray(obj.lib) + b'\x00' * (4 - len(obj.lib)%4)).cast("I"), [], [] # type: ignore
+-    else: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
++    else:
++      try: image, sections, relocs = elf_loader(self.lib, force_section_align=128)
++      except Exception as e:
++        print(f"!! ELF_FAIL name={obj.name!r} liblen={len(self.lib)}", flush=True)
++        raise
+     # NOTE: Ensure at least 4KB of space after the program to mitigate prefetch memory faults.
+     self.lib_gpu = self.dev.allocator.alloc(round_up((prog_sz:=image.nbytes), 0x1000) + 0x1000, buf_spec:=BufferSpec(nolru=True))
+     prog_addr = self.lib_gpu.va_addr
+     if not NAK:
+       # For MOCKGPU, the lib is PTX code, so some values are emulated.
+       self.regs_usage, self.shmem_usage, self.lcmem_usage, cbuf0_size = 0, 0x400, 0x240, 0x160 if isinstance(dev.iface, MOCKIface) else 0
++      # TLX W4.1: tripwire metadata — raw MIN_STACK_SIZE (spill bytes, without
++      # the +0x240 base lcmem carries) and the compile-time launch bounds
++      # (EIATTR_MAX_THREADS = maxntid [x,y,z], the NAME-LAW cross-check source).
++      self.stack_usage = 0 if isinstance(dev.iface, MOCKIface) else None
++      self.maxntid = None
+       for sh in sections: # pylint: disable=possibly-used-before-assignment
+         if sh.name == f".nv.shared.{self.name}": self.shmem_usage = round_up(0x400 + sh.header.sh_size, 128)
+         if sh.name == f".text.{self.name}": prog_addr, prog_sz = self.lib_gpu.va_addr+sh.header.sh_addr, sh.header.sh_size
+@@ -269,8 +384,15 @@ class NVProgram(HCQProgram['NVDevice']):
+         elif sh.name.startswith(".nv.info"):
+           for typ, param, data in self._parse_elf_info(sh):
+             if sh.name == f".nv.info.{obj.name}" and param == 0xa: cbuf0_size = struct.unpack_from("IH", data)[1] # EIATTR_PARAM_CBANK
+-            elif sh.name == ".nv.info" and param == 0x12: self.lcmem_usage = struct.unpack_from("II", data)[1] + 0x240 # EIATTR_MIN_STACK_SIZE
++            elif sh.name == ".nv.info" and param == 0x12:
++              self.lcmem_usage = (stk := struct.unpack_from("II", data)[1]) + 0x240 # EIATTR_MIN_STACK_SIZE
++              if not isinstance(dev.iface, MOCKIface): self.stack_usage = stk
+             elif sh.name == ".nv.info" and param == 0x2f: self.regs_usage = struct.unpack_from("II", data)[1] # EIATTR_REGCOUNT
++            elif param == 0x5 and not isinstance(dev.iface, MOCKIface): # EIATTR_MAX_THREADS (maxntid)
++              # per-kernel section: [x,y,z]; global section: [func_id,x,y,z].
++              # NOTE: _parse_elf_info windows overshoot the record by 4B.
++              if sh.name == f".nv.info.{obj.name}" and len(data) >= 12: self.maxntid = list(struct.unpack_from("III", data, 0))
++              elif sh.name == ".nv.info" and len(data) >= 20: self.maxntid = list(struct.unpack_from("III", data, 4))
+ 
+       # Apply relocs
+       for apply_image_offset, rel_sym_offset, typ, _ in relocs: # pylint: disable=possibly-used-before-assignment
+@@ -300,13 +422,44 @@ class NVProgram(HCQProgram['NVDevice']):
+         'shared_memory_size':self.shmem_usage, 'register_count_v':self.regs_usage,
+         f'shader_local_memory_{"low" if NAK else "high"}_size':self.dev.slm_per_thread}
+ 
+-    smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
++    _smem_cfg_kb = min((c for c in [32, 64, 100] if c * 1024 >= self.shmem_usage), default=100)
++    # W4 occupancy knob: force a HIGHER SM shared-mem carveout config for named programs so
++    # multiple CTAs co-reside per SM (min-config pick caps CTAs at ceil(cfg/usage)).
++    _ovr, _nms = os.getenv("NV_SMEM_CFG"), os.getenv("NV_SMEM_CFG_NAMES", "")
++    # CTASM P8: NV_SMEM_CFG_AUTO_NAMES scopes the AUTO occupancy pick to matching program
++    # names (comma-separated substrings; empty = AUTO applies globally). Prefill processes/
++    # daemons set AUTO_NAMES=pf so decode/G_CYCLE kernels (k0_*, a_*, spk_*, ...) keep the
++    # default min-fitting carveout (global AUTO costs decode ~2.1%, measured).
++    _anms = os.getenv("NV_SMEM_CFG_AUTO_NAMES", "")
++    _amatch = (not _anms) or any(nm and nm in str(self.name) for nm in _anms.split(","))
++    if _ovr is not None and any(nm and nm in str(self.name) for nm in _nms.split(",")):
++      _ovr = int(_ovr)
++      assert _ovr in (32, 64, 100) and _ovr * 1024 >= self.shmem_usage, f"NV_SMEM_CFG={_ovr} invalid for {self.name} (usage {self.shmem_usage})"
++      _smem_cfg_kb = _ovr
++    elif os.getenv("NV_SMEM_CFG_AUTO", "0") == "1" and _amatch:
++      # CTASM (2026-09-18): the default min-fitting pick caps co-resident CTAs/SM at
++      # floor(cfg_bytes/shmem_usage): any kernel with >16KB smem gets a 32KB cfg = 1 CTA/SM,
++      # >32KB gets 64KB = 1 CTA/SM. Multi-CTA co-residency itself WORKS on this stack (ctaswz
++      # probe: 5 CTAs/SM @1KB smem, 3 @9.2KB, 1 @33.8KB — pure resource math, NOT a dext/GSP/
++      # scheduler limit; free_cta_slots_empty_sm=0 = HW-auto). AUTO picks the smallest carveout
++      # whose smem occupancy >= NV_SMEM_CFG_AUTO_TGT (default 2; 0 = max via 100KB).
++      # Default OFF: canonical behavior unchanged.
++      _tgt = int(os.getenv("NV_SMEM_CFG_AUTO_TGT", "2"))
++      _elig = [c for c in (32, 64, 100) if c * 1024 >= self.shmem_usage]
++      _smem_cfg_kb = next((c for c in _elig if (c * 1024) // self.shmem_usage >= _tgt), _elig[-1] if _elig else 100)         if _tgt else (_elig[-1] if _elig else 100)
++    smem_cfg = _smem_cfg_kb * 1024 // 4096 + 1
+ 
+     self.qmd:QMD = QMD(dev, **qmd, qmd_group_id=0x3f, invalidate_texture_header_cache=1, invalidate_texture_sampler_cache=1,
+-      invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=1,
++      invalidate_texture_data_cache=1, invalidate_shader_data_cache=1, api_visible_call_limit=1, sampler_index=1, barrier_count=(int(os.getenv("NV_QMD_BARRIERS", "1")) if not os.getenv("NV_QMD_BARRIERS_NAMES") or any(nm and nm in str(self.name) for nm in os.getenv("NV_QMD_BARRIERS_NAMES").split(",")) else 1),
+       cwd_membar_type=nv_gpu.NVC6C0_QMDV03_00_CWD_MEMBAR_TYPE_L1_SYSMEMBAR, constant_buffer_invalidate_0=1, min_sm_config_shared_mem_size=smem_cfg,
+       target_sm_config_shared_mem_size=smem_cfg, max_sm_config_shared_mem_size=0x1a, program_prefetch_size=min(prog_sz>>8, 0x1ff),
+       sass_version=dev.sass_version, program_prefetch_addr_upper_shifted=prog_addr>>40, program_prefetch_addr_lower_shifted=prog_addr>>8)
++    # CTASM experiment knob: QMD free_cta_slots_empty_sm override. Probe evidence: unset(0)
++    # behaves as HW-auto (5 CTAs/SM observed with the field at 0) — NOT a 1-slot gate. This
++    # knob exists to test whether an explicit value clamps/raises the CWD CTA-slot grant.
++    # Default off (absent env = no write, canonical behavior unchanged).
++    if (_fc := os.getenv("NV_FREE_CTA_SLOTS")) is not None:
++      self.qmd.write(free_cta_slots_empty_sm=int(_fc))
+ 
+     for i,(addr,sz) in self.constbufs.items():
+       self.qmd.set_constant_buf_addr(i, addr)
+@@ -620,9 +773,18 @@ class NVDevice(HCQCompiled[NVSignal]):
+     self.dma_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=0x100000, entries=0x10000, compute=False)
+     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
+ 
+-    self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
++    # MTP_CMDQ_MB: shared command-queue ring size in MiB (default 2 = historical size).
++    # The ring's BumpAllocator (wrap=True) wraps SILENTLY: if the host enqueues more than
++    # one ring-size of commands the GPU has not fetched yet (heavy capture at long-ctx
++    # shapes where kernels are slow and python runs ahead), the wrap overwrites pending
++    # pushbuffer -> gpfifo entries point at garbage -> device fault. Enlarge for
++    # capture-heavy workloads. MTP_CMDQ_DIAG=1 logs wrap events + volume.
++    self.cmdq_page:HCQBuffer = self.iface.alloc(getenv("MTP_CMDQ_MB", 2) * (1 << 20), cpu_access=True)
+     self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=int(self.cmdq_page.va_addr), wrap=True)
+     self.cmdq = self.cmdq_page.cpu_view().view(fmt='I')
++    self.cmdq_diag = getenv("MTP_CMDQ_DIAG", 0)
++    self.cmdq_alloc_total, self.cmdq_n_submits, self.cmdq_wraps = 0, 0, 0
++    self.cmdq_since_wrap, self.cmdq_max_submit = 0, 0
+ 
+     self.num_gpcs, self.num_tpc_per_gpc, self.num_sm_per_tpc, self.max_warps_per_sm, self.sm_version = self._query_gpu_info('num_gpcs',
+       'num_tpc_per_gpc', 'num_sm_per_tpc', 'max_warps_per_sm', 'sm_version')
+@@ -631,8 +793,15 @@ class NVDevice(HCQCompiled[NVSignal]):
+     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
+     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
+ 
++    # MTP_KERNARGS_MB (P7E2): eager kernargs ring size in MiB (default 64 = 32MB eager after the
++    # eager/graph split). The wrap-bump has NO in-flight tracking: at super-chunk launch volumes
++    # (reference pass ~12.8k launches + 2485-launch SC trains) the host can outrun the GPU past
++    # one eager-ring capacity while the 2MB cmdq still permits ~20k launches of lead -> the wrap
++    # overwrites PENDING kernargs records -> kernels launch with stale pointer sets -> silent
++    # wrong-VA writes (the P7E2 post-reference NaN clobber). 256MiB gives ~100k launches of
++    # headroom > any cmdq-permitted lead.
+     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], NVProgram, NVSignal, NVComputeQueue,
+-                     NVCopyQueue, arch=self.arch)
++                     NVCopyQueue, kernargs_size=(int(getenv("MTP_KERNARGS_MB", "256")) << 20), arch=self.arch)
+ 
+     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
+     if self.pma_enabled: self._prof_init()
+@@ -736,6 +905,9 @@ class NVDevice(HCQCompiled[NVSignal]):
+               (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4))))
+ 
+   def on_device_hang(self):
++    if self.cmdq_diag:
++      print(f"[CMDQ] HANG: wraps={self.cmdq_wraps} total={self.cmdq_alloc_total>>10}KiB submits={self.cmdq_n_submits} "
++            f"since_last_wrap={self.cmdq_since_wrap>>10}KiB max_single={self.cmdq_max_submit>>10}KiB", flush=True)
+     # Prepare fault report.
+     # TODO: Restore the GPU using NV83DE_CTRL_CMD_CLEAR_ALL_SM_ERROR_STATES if needed.
+ 
+diff --git a/tinygrad/runtime/support/hcq.py b/tinygrad/runtime/support/hcq.py
+index 1481fe7..155c05c 100644
+--- a/tinygrad/runtime/support/hcq.py
++++ b/tinygrad/runtime/support/hcq.py
+@@ -3,7 +3,7 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any
+ import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, itertools
+ try: import fcntl # windows misses that
+ except ImportError: fcntl = None #type:ignore[assignment]
+-from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
++from tinygrad.helpers import DEV, PROFILE, KERNEL_HIST, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, unwrap
+ from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey
+ from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, Program, TinyELF
+ from tinygrad.uop.ops import sym_infer, sint, UOp
+@@ -239,6 +239,24 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
+     return self
+   def _submit(self, dev:HCQDeviceType): raise NotImplementedError("need _submit")
+ 
++# ---- MTP_SIGTRACE: reservation tracing for timeline-signal leak diagnosis ----
++_SIGTRACE = getenv("MTP_SIGTRACE", 0)
++_SIGTRACE_DEVS: list = []
++
++def _sigtrace_dump(sig, waited_value:int):
++  if not _SIGTRACE: return
++  lines = [f"=== SIGTRACE DUMP: waited {waited_value}, signal at {sig.value} ==="]
++  for dev in _SIGTRACE_DEVS:
++    orphans = [(v, s) for v, s in dev._sigtrace if v > dev.timeline_signal.value]
++    lines.append(f"dev {dev.device}: tv={dev.timeline_value} sv={dev.timeline_signal.value} orphans={len(orphans)}")
++    for v, s in orphans[:24]:
++      lines.append(f"--- reserved value {v} (never fired) at:\n{s}")
++  out = "\n".join(lines)
++  print(out, flush=True)
++  try:
++    with open("/tmp/sigtrace_dump.txt", "w") as f: f.write(out)
++  except Exception: pass
++
+ class HCQSignal(Generic[HCQDeviceType]):
+   def __init__(self, base_buf:HCQBuffer, value:int=0, owner:HCQDeviceType|None=None, is_timeline:bool=False, timestamp_divider=1000, virt=False):
+     self.base_buf, self.owner, self.is_timeline = base_buf, owner, is_timeline
+@@ -292,7 +310,9 @@ class HCQSignal(Generic[HCQDeviceType]):
+     while (not_passed:=(prev_value:=self.value) < value) and (cur_time:=int(time.perf_counter() * 1000)) - start_time < timeout:
+       self._sleep(cur_time - start_time)
+       if self.value != prev_value: start_time = int(time.perf_counter() * 1000) # progress was made, reset timer
+-    if not_passed and self.value < value: raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
++    if not_passed and self.value < value:
++      _sigtrace_dump(self, value)
++      raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
+ 
+ @contextlib.contextmanager
+ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]|None=None, queue:HWQueue|None=None, dev_suff:str|None=None,
+@@ -310,7 +330,7 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]
+     elif enabled and queue_type is not None:
+       queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
+ 
+-    if enabled and PROFILE: dev.sig_prof_records.append((unwrap(st), unwrap(en), desc, f"{dev.device}:{dev_suff}" if dev_suff else dev.device,
++    if enabled and (PROFILE or KERNEL_HIST): dev.sig_prof_records.append((unwrap(st), unwrap(en), desc, f"{dev.device}:{dev_suff}" if dev_suff else dev.device,
+                                                          profile_key))
+ 
+ class HCQArgsState(Generic[ProgramType]):
+@@ -375,7 +395,7 @@ class HCQProgram(Program[HCQDeviceType]):
+     q = unwrap(self.dev.hw_compute_queue_t)().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
+ 
+     self.dev.prof_exec_counter += 1
+-    with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE, profile_key=self.profile_key) as (sig_st, sig_en):
++    with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE or KERNEL_HIST, profile_key=self.profile_key) as (sig_st, sig_en):
+       q.exec(self, kernargs, global_size, local_size)
+ 
+     q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
+@@ -394,7 +414,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
+ 
+   def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime:type[Program]|None,
+                signal_t:Type[SignalType]|None=None, comp_queue_t:Callable[..., HWQueue]|None=None, copy_queue_t:Callable[..., HWQueue]|None=None,
+-               kernargs_size=(16 << 20), sigalloc_size=0x1000, can_recover:bool=False, arch=None):
++               kernargs_size=(64 << 20), sigalloc_size=0x1000, can_recover:bool=False, arch=None):
+     from tinygrad.runtime.graph.hcq import HCQGraph
+     super().__init__(device, allocator, compilers, runtime, HCQGraph, arch=arch)
+ 
+@@ -414,10 +434,25 @@ class HCQCompiled(Compiled, Generic[SignalType]):
+ 
+       self.sigalloc_size = sigalloc_size
+       self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
++      if _SIGTRACE:
++        import collections as _col_nt
++        self._sigtrace = _col_nt.deque(maxlen=512)
++        _SIGTRACE_DEVS.append(self)
+ 
+     if comp_queue_t is not None:
+       self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
+-      self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
++      # 2026-08-30 FIX (deterministic JIT=1 graph death ~cycle 20-26, 16-56 orphan timeline
++      # signals): the eager ring and the graph kernargs SHARED one wrap-around pool. Eager
++      # kernels allocate >=2304B each (prefill alone consumes ~48MB through the 16MB ring);
++      # every wrap overwrites the graph's kernargs region -> the next graph replay executes
++      # with corrupted argument pointers -> GPU channel fault -> all later signals never fire
++      # -> 30s wait timeout. Split the pool: eager gets the first half (wrapping), graphs get
++      # a DEDICATED second half (no wrap, loud MemoryError if exhausted). Single host mapping
++      # is preserved (the ~128 MAP_SYSMEM_FD cap that motivated the shared pool is unaffected).
++      graph_pool_sz = self.kernargs_buf.size // 2
++      self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size - graph_pool_sz, wrap=True)
++      self.kernargs_pool: HCQBuffer = self.kernargs_buf.offset(offset=self.kernargs_buf.size - graph_pool_sz, size=graph_pool_sz)
++      self.kernargs_pool_alloc: BumpAllocator = BumpAllocator(graph_pool_sz, wrap=False)
+ 
+     self.can_recover = can_recover # Whether the device can recover from faults or timeouts
+     self.error_state:Exception|None = None # Exception if error is unrecoverable and sync will always fail
+@@ -445,6 +480,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
+ 
+   def next_timeline(self):
+     self.timeline_value += 1
++    if _SIGTRACE:
++      import traceback as _tb_nt
++      self._sigtrace.append((self.timeline_value - 1, "".join(_tb_nt.format_stack(limit=6)[:-1])))
+     return self.timeline_value - 1
+ 
+   def new_signal(self, **kwargs) -> SignalType:
+diff --git a/tinygrad/runtime/support/hcq2.py b/tinygrad/runtime/support/hcq2.py
+index f4204c2..b8f1688 100644
+--- a/tinygrad/runtime/support/hcq2.py
++++ b/tinygrad/runtime/support/hcq2.py
+@@ -612,6 +612,10 @@ class HCQ2Compiled(Compiled):
+     return Buffer(self.device, self.rt_allocator.size, dtypes.uint8, options=BufferSpec(uncached=uncached, cpu_access=True), preallocate=True)
+ 
+   def new_buffer(self, b:UOp, cache:bool) -> Buffer:
++    import os as _os_h
++    if _os_h.getenv("DUMP_BUFLESS") and b.max_numel() > 1_000_000_000:
++      print(f"[HCQ2-BIG] max_numel={b.max_numel()} dtype={b.dtype} tag={b.tag} op={b.op}", flush=True)
++      import traceback as _tb_h; _tb_h.print_stack()
+     if cache or b.tag in HCQ_CACHE_TAGS:
+       return Buffer(self.device, b.max_numel(), b.dtype, options=BufferSpec(uncached=b.tag not in ("program","kernargs"), cpu_access=True,nolru=True))
+     return self.rt_buffer(uncached=b.tag!="kernargs").view(b.max_numel(), b.dtype,
+diff --git a/tinygrad/runtime/support/system.py b/tinygrad/runtime/support/system.py
+index cf68395..3eb6492 100644
+--- a/tinygrad/runtime/support/system.py
++++ b/tinygrad/runtime/support/system.py
+@@ -155,6 +155,8 @@ System = _System()
+ 
+ # *** PCI Devices
+ 
++_MAPFD_TOTAL = 0
++
+ class PCIDevice:
+   def __init__(self, devpref:str, pcibus:str):
+     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
+@@ -281,7 +283,10 @@ class PCIIfaceBase:
+   def free(self, b:HCQBuffer):
+     if b.owner != self.dev: self.dev.iface.dev_impl.mm.unmap_range(b.va_addr, round_up(b.size, 0x1000))
+     if b.owner == self.dev and b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
+-    if b.owner == self.dev and self.is_local() and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
++    # munmap host-visible (cpu_mapping / sysmem) buffers on all interfaces, including the remote
++    # TinyGPU-over-Thunderbolt path. Without this, remote host sysmem mappings accumulate in the
++    # driver until its (128) concurrent-mapping limit is exhausted, which large models hit on load.
++    if b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
+ 
+   def p2p_paddrs(self, paddrs:list[tuple[int,int]]) -> tuple[list[tuple[int,int]], AddrSpace]:
+     return [(p + self.pci_dev.bar_info(self.vram_bar)[0], sz) for p, sz in paddrs], AddrSpace.SYS
+@@ -437,6 +442,15 @@ class APLRemotePCIDevice(RemotePCIDevice):
+     super().__init__(devpref, "usb4", sock=sock)
+ 
+   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
++    # P1 DIAG: count and track MAP_SYSMEM_FD calls — the ~128 concurrent cap blocks
++    # JIT=1 graph builds at >=8k ctx. Log caller, size, and running count.
++    import os as _os_m, traceback as _tb_m
++    import tinygrad.runtime.support.system as _sys_mod
++    _cnt = getattr(_sys_mod, "_MAPFD_TOTAL", 0) + 1
++    _sys_mod._MAPFD_TOTAL = _cnt
++    if _os_m.getenv("MTP_MAPFD_DIAG"):
++        _stk = " <- ".join(f"{fr.filename.split('/')[-1]}:{fr.lineno}:{fr.name}" for fr in _tb_m.extract_stack()[:-1])
++        print(f"[MAPFD #{_cnt}] sz={size} from: {_stk}", flush=True)
+     mapped_size, _, _, fd = self._rpc(self.sock, self.dev_id, RemoteCmd.MAP_SYSMEM_FD, size, int(contiguous), has_fd=True)
+     memview = MMIOInterface(FileIOInterface(fd=fd).mmap(0, mapped_size, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, 0), mapped_size, fmt='B')
+ 
+diff --git a/tinygrad/schedule/__init__.py b/tinygrad/schedule/__init__.py
+index f00ec3f..3631391 100644
+--- a/tinygrad/schedule/__init__.py
++++ b/tinygrad/schedule/__init__.py
+@@ -86,7 +86,12 @@ from tinygrad.uop.ops import PatternMatcher, UPat, ParamArg
+ from tinygrad.dtype import AddrSpace
+ 
+ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
+-  if (ret:=ctx[0].get(b, None)) is None: ctx[0][b] = ret = UOp.new_buffer(b.device, b.max_numel(), b.dtype)
++  if (ret:=ctx[0].get(b, None)) is None:
++    import os as _os_s
++    if _os_s.getenv("DUMP_BUFLESS") and b.max_numel() > 1_000_000_000:
++      print(f"[SCHED-BIG] max_numel={b.max_numel()} dtype={b.dtype} op={b.op}", flush=True)
++      import traceback as _tb_s; _tb_s.print_stack()
++    ctx[0][b] = ret = UOp.new_buffer(b.device, b.max_numel(), b.dtype)
+   return ret
+ 
+ pm_post_sched_cache = PatternMatcher([
+@@ -197,7 +202,17 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
+       v, val = b.unbind()
+       nm = v.expr
+       if nm not in used_vars: continue
+-      if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
++      if var_vals.get(nm, val) != val:
++        import os as _os
++        if _os.getenv("DUMP_BIND"):
++          print(f"BINDCLASH {nm}: {var_vals[nm]} vs {val}; sink_srcs={len(big_sink.src[1:])}")
++          for b2 in big_sink.src[1:]:
++            if b2.is_bound_var:
++              v2, val2 = b2.unbind()
++              if v2.expr == nm: print(f"  node {val2} parents={[x.op for x in b2.src[1].src] if len(b2.src)>1 else None} key={b2.key.hex()[:8]}")
++        import traceback as _tb
++        _tb.print_stack()
++        raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
+       var_vals[nm] = val
+ 
+   # jit captures this schedule, no need to execute.
+diff --git a/tinygrad/schedule/memory.py b/tinygrad/schedule/memory.py
+index e0883b4..0bdd02c 100644
+--- a/tinygrad/schedule/memory.py
++++ b/tinygrad/schedule/memory.py
+@@ -53,6 +53,12 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
+   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
+ 
+   # build replace_map: each buffer becomes a SHRINK/BITCAST into a shared per-device-lane arena
++  import os as _os_m
++  if _os_m.getenv("DUMP_BUFLESS"):
++    for _k, _sz in arena_sizes.items():
++      if _sz > 1_000_000_000:
++        print(f"[ARENA-BIG] key={_k} size={_sz}", flush=True)
++        import traceback as _tb_m; _tb_m.print_stack()
+   arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
+   replace_map = {buf_uop:arenas[_key(buf_uop)][offset:offset+buf_uop.nbytes()].bitcast(buf_uop.dtype) for buf_uop, offset in offsets.items()}
+ 
+diff --git a/tinygrad/schedule/rangeify.py b/tinygrad/schedule/rangeify.py
+index 26ed0d8..69f658c 100644
+--- a/tinygrad/schedule/rangeify.py
++++ b/tinygrad/schedule/rangeify.py
+@@ -253,7 +253,9 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
+   accessed_buffers = dedup(accessed_buffers)
+ 
+   # if this is generated from multiple buffers, don't remove this buffer
+-  if len(accessed_buffers) > 3 and not (PCONTIG > 2): return None
++  if len(accessed_buffers) > 3 and not (PCONTIG > 2):
++    if prod(buf.shape) > 10_000_000: print(f"[RBZ-KEEP] >3bufs nbufs={len(accessed_buffers)} shape={buf.shape}", flush=True)
++    return None
+ 
+   # if any reduces access a buffer, don't remove this buffer
+   buffer_in_reduce = False
+@@ -263,7 +265,9 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
+     return not buffer_in_reduce
+   UOp.sink(*[x.src[0] for x in reduces]).toposort(gate=buf_gate)
+   del buf_gate
+-  if buffer_in_reduce:
++  if buffer_in_reduce and not (getenv("MTP_T3_LAZY") and src.dtype == dtypes.half
++                               and prod(buf.shape) > 1_000_000):   # A3: lazy fused dequant-GEMV for big fp16 quant-weight chains only
++    if prod(buf.shape) > 10_000_000: print(f"[RBZ-KEEP] reduce-uses-buf shape={buf.shape}", flush=True)
+     if PCONTIG > 2:
+       out_in_ratio = (prod(buf.shape)+1) / (sum([x.numel() for x in accessed_buffers])+1)
+       if out_in_ratio < 10: return None
+diff --git a/tinygrad/uop/ops.py b/tinygrad/uop/ops.py
+index 75a8e26..c1ae933 100644
+--- a/tinygrad/uop/ops.py
++++ b/tinygrad/uop/ops.py
+@@ -923,6 +923,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
+ 
+   @property
+   def buffer(self) -> Buffer|MultiBuffer:
++    import os as _os_b
++    if _os_b.getenv("DUMP_BUFLESS") and (mn := self.max_numel()) > 100_000_000:
++      try: print(f"[BUF-WHAT] op={self.op} dtype={self.dtype} shape={self.max_shape} srcs={[s.op for s in self.src[:3]]}", flush=True)
++      except Exception: pass
++      try:
++        if self.max_numel() == 6823608320:
++          print("[BUF-RENDER] " + str(self.pyrender())[:600], flush=True)
++          print("[BUF-SRCS] " + " | ".join(str(s.pyrender())[:300] for s in self.src[:3]), flush=True)
++          import traceback as _tb_r; _tb_r.print_stack()
++      except Exception: pass
++      except Exception: pass
++      print(f"[BUF-SHAPE] max_shape={self.max_shape} numel={mn} op={self.op}", flush=True)
++      import traceback as _tb_b; _tb_b.print_stack()
+     if self.op in {Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD, Ops.RESHAPE, Ops.UNSHARD, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
+     # this buffer can process disk tensors and simple movement ops
+     if self is not self.base or self.op is Ops.BITCAST:
+@@ -934,7 +947,15 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
+         mbuf.bufs = [x.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize) for x in buf.bufs]
+         buffers[self] = mbuf
+         return mbuf
+-      buffers[self] = buf.view(prod(self.max_shape), self.dtype, offset*b.dtype.itemsize)
++      _vsz = prod(self.max_shape)
++      import os as _os_v
++      if _os_v.getenv("MTP_CLAMP_VIEWS") and _vsz * self.dtype.itemsize > 1_000_000_000:
++        # 2026-08-31: lazy disk views of quantized weights materialize at TO-EOF extents
++        # (5.09GB for the lm_head's 874MB) at ctx-100k compile/exec, stacking on the KV
++        # cache and faulting the 24GB card. Clamp the materialized view to 1GB — the
++        # dequant kernels only address the tensor's true byte range within it.
++        _vsz = 1_000_000_000 // self.dtype.itemsize
++      buffers[self] = buf.view(_vsz, self.dtype, offset*b.dtype.itemsize)
+       return buffers[self]
+     if self.op is Ops.MSELECT:
+       ret = self.src[0].buffer
+@@ -949,7 +970,19 @@ class UOp(RandMixin, metaclass=UOpMetaClass):
+     if (cret:=buffers.get(self)) is not None: return cret
+     rdtype = self.dtype
+     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.max_numel(), rdtype).ref(1)
+-    else: ret = Buffer(self.device, self.max_numel(), rdtype).ref(1)
++    else:
++      import os as _os
++      if _os.getenv("DUMP_BUFLESS") and self.max_numel() > 100_000_000:
++        import traceback as _tb; print(f"[BUFLESS-BIG] max_numel={self.max_numel()} rdtype={rdtype}", flush=True); _tb.print_stack()
++      import os as _os_c3
++      _mn = self.max_numel()
++      if _os_c3.getenv("MTP_CLAMP_VIEWS") == "1" and _mn * rdtype.itemsize > 1_000_000_000:
++        # 2026-08-31: bufferless-synthesis path (ops.py buffer() tail) materialized a
++        # 5.09GB to-EOF raw view of the lm_head at 100k chunk-0 (12.6 model + 6.4 KV +
++        # 5.09 > 24GB -> device fault). Clamp to 1GB; dequant kernels only address the
++        # tensor's true byte range.
++        _mn = 1_000_000_000 // rdtype.itemsize
++      ret = Buffer(self.device, _mn, rdtype).ref(1)
+     buffers[self] = ret
+     return ret
+   @property

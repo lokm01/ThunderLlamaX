@@ -1,0 +1,16 @@
+{
+ "y": "data0",
+ "x": "data2",
+ "s": null,
+ "nw": null,
+ "aux": "data1",
+ "W": "data3",
+ "S": null,
+ "grid": "data4",
+ "batch": 3,
+ "N": 5120,
+ "K": 17408,
+ "B": 68,
+ "xhalf": false,
+ "variant": "add"
+}

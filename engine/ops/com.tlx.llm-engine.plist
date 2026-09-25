@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.tlx.llm-engine</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>~/tinygrad-metal/engine0/ops/engine_daemon.sh</string>
+  </array>
+  <key>UserName</key><string>%USER%</string>
+  <key>WorkingDirectory</key><string>~/tinygrad-metal/engine0</string>
+  <!-- TLX W2 (V-27): this plist deliberately carries NO env dict — the
+       wrapper sources ops/env.canonical (the single source of truth). A
+       stale plist env subset was the LOOKUP_K=0-class silent slow-path
+       relaunch bug. -->
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>30</integer>
+  <key>StandardOutPath</key><string>~/tinygrad-metal/logs/llm-engine-launchd.log</string>
+  <key>StandardErrorPath</key><string>~/tinygrad-metal/logs/llm-engine-launchd.log</string>
+  <key>ProcessType</key><string>Background</string>
+</dict>
+</plist>

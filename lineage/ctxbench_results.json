@@ -1,0 +1,76 @@
+{
+ "date": "2026-08-24",
+ "config": "BEAM=1 cache, JIT=1, stock rollout_jit T=1, fp32 KV, synthetic-fill timing method",
+ "rows": [
+  {
+   "L": 2048,
+   "ms": 100.45,
+   "toks": 9.96,
+   "vram_gb": 13.11,
+   "kv_gb": 0.27
+  },
+  {
+   "L": 4096,
+   "ms": 102.5,
+   "toks": 9.76,
+   "vram_gb": 13.38,
+   "kv_gb": 0.54
+  },
+  {
+   "L": 8192,
+   "ms": 109.24,
+   "toks": 9.15,
+   "vram_gb": 13.92,
+   "kv_gb": 1.07
+  },
+  {
+   "L": 16384,
+   "ms": 120.96,
+   "toks": 8.27,
+   "vram_gb": 14.99,
+   "kv_gb": 2.15
+  },
+  {
+   "L": 32768,
+   "ms": 142.75,
+   "toks": 7.01,
+   "vram_gb": 17.15,
+   "kv_gb": 4.29
+  },
+  {
+   "L": 65536,
+   "ms": 192.89,
+   "toks": 5.18,
+   "vram_gb": 21.45,
+   "kv_gb": 8.59
+  },
+  {
+   "L": 77824,
+   "ms": 217.1,
+   "toks": 4.61,
+   "vram_gb": 23.06,
+   "kv_gb": 10.2
+  },
+  {
+   "L": 81920,
+   "ms": 223.83,
+   "toks": 4.47,
+   "vram_gb": 23.6,
+   "kv_gb": 10.74
+  },
+  {
+   "L": 100000,
+   "ms": null,
+   "toks": null,
+   "vram_gb": null,
+   "kv_gb": 13.11
+  }
+ ],
+ "notes": [
+  "100k OOM at load: needed ~25.7GB (12.63 model + 13.1 KV), pool 23.62GB",
+  "fit: ms/tok = 99.3 + 1.52e-3 * L (R2 ~0.999)",
+  "KV increment 1.56ms/1k tok = 5.4x ideal read cost -> attn KV GEMV ~83 GB/s effective",
+  "base (ctx-independent) 99-100ms matches 67ms non-GEMV gap + ~30ms GEMV floor",
+  "with draft module loaded (+0.85GB) ceiling ~76k; fp16 KV would roughly double it"
+ ]
+}

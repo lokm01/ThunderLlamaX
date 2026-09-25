@@ -1,0 +1,42 @@
+{
+ "K": 5,
+ "M": 6,
+ "accept": "accept6k",
+ "acceptsel": "acceptsel6k",
+ "amds_grid": 6,
+ "attn_deep": [
+  "spk_pre6qh_100k",
+  "spk_g4nw32hm6_100k",
+  "spk_c6g_100k"
+ ],
+ "dr7_cu": [],
+ "drings": 5,
+ "emit_stop_off": 8,
+ "emit_words": 11,
+ "lookup": "lookup6_nw32",
+ "rung": "deep-k5",
+ "scratch_conv": [
+  "conv5x",
+  "conv6x"
+ ],
+ "scratch_rec": [
+  "rec6x"
+ ],
+ "trunk_cu": {
+  "ao8nw32_6": 1024,
+  "aq3k8v6": 256,
+  "aq6k8v6": 256,
+  "down8nw32_6": 1024,
+  "ffn8v6": 256,
+  "h_embed6": 256,
+  "head8v6": 256,
+  "hh6": 256,
+  "k0ab6": 256,
+  "k0n6": 256,
+  "k2s6": 256,
+  "k3aonw32_6": 1024,
+  "op38nw32_6": 1024,
+  "q5g8v6": 256
+ },
+ "trunk_gemvv_alt": {}
+}

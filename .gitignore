@@ -1,0 +1,35 @@
+# weights, derived weight packs, snapshots — all regenerable, all large
+*.gguf
+*.npy
+*.npz
+packed/
+packed_t/
+packed4/
+packed5/
+draft_pack/
+models/
+snap*/
+*_state_*.npz
+
+# compiled artifacts (sm_86-specific, rebuild via engine/build_*.py)
+*.cubin
+*.ptx
+
+# run outputs
+*.log
+*.done
+spec_out.json
+accept.jsonl
+alignlog.txt
+sigtrace_dump.txt
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# local configuration
+.env
+
+# runtime logs dir (rig: ~/tinygrad-metal/logs)
+logs/

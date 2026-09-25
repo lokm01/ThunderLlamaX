@@ -1,0 +1,115 @@
+// ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 lokm01
+typedef unsigned int uint;
+#define INFINITY (__int_as_float(0x7f800000))
+#define NAN (__int_as_float(0x7fffffff))
+template <class T, class F> __device__ __forceinline__ T tg_bitcast(F v) { union U { F f; T t; }; U u; u.f = v; return u.t; }
+#include <cuda_fp16.h>
+extern "C" __global__ void __launch_bounds__(64) r_544_8_8_4_20_4_2_4(float* data0_17408, float* data1_5120, float* data2_1, unsigned char* data3_20480, unsigned char* data4_34119680, float* data5_1024, unsigned char* data6_11141120) {
+  float buf0[4];
+  float buf1[4];
+  __shared__ __align__(16) float buf2[256];
+  int gidx0 = blockIdx.x; /* 544 */
+  int lidx0 = threadIdx.x; /* 8 */
+  int lidx1 = threadIdx.y; /* 8 */
+  *(buf0+0) = 0.0f;
+  *(buf0+1) = 0.0f;
+  *(buf0+2) = 0.0f;
+  *(buf0+3) = 0.0f;
+  for (int Ridx1_0_0 = 0; Ridx1_0_0 < 20; Ridx1_0_0++) {
+    int alu4 = ((gidx0*62720)+(lidx0*7840)+(Ridx1_0_0*98));
+    unsigned char val0 = (*(data4_34119680+(alu4+1)));
+    unsigned char val1 = (*(data4_34119680+(alu4+1960)));
+    unsigned char val2 = (*(data4_34119680+(alu4+1961)));
+    unsigned char val3 = (*(data4_34119680+(alu4+3920)));
+    unsigned char val4 = (*(data4_34119680+(alu4+3921)));
+    unsigned char val5 = (*(data4_34119680+(alu4+5880)));
+    unsigned char val6 = (*(data4_34119680+(alu4+5881)));
+    unsigned char val7 = (*(data4_34119680+alu4));
+    for (int Ridx1_0_1 = 0; Ridx1_0_1 < 4; Ridx1_0_1++) {
+      int alu5 = (Ridx1_0_1<<3);
+      int alu6 = (alu4+((lidx1>>2)<<2)+alu5);
+      unsigned char val8 = (*(data4_34119680+(alu6+66)));
+      unsigned char val9 = (*(data4_34119680+(alu6+67)));
+      unsigned char val10 = (*(data4_34119680+(alu6+68)));
+      unsigned char val11 = (*(data4_34119680+(alu6+69)));
+      unsigned char val12 = (*(data4_34119680+(alu6+2026)));
+      unsigned char val13 = (*(data4_34119680+(alu6+2027)));
+      unsigned char val14 = (*(data4_34119680+(alu6+2028)));
+      unsigned char val15 = (*(data4_34119680+(alu6+2029)));
+      unsigned char val16 = (*(data4_34119680+(alu6+3986)));
+      unsigned char val17 = (*(data4_34119680+(alu6+3987)));
+      unsigned char val18 = (*(data4_34119680+(alu6+3988)));
+      unsigned char val19 = (*(data4_34119680+(alu6+3989)));
+      unsigned char val20 = (*(data4_34119680+(alu6+5946)));
+      unsigned char val21 = (*(data4_34119680+(alu6+5947)));
+      unsigned char val22 = (*(data4_34119680+(alu6+5948)));
+      unsigned char val23 = (*(data4_34119680+(alu6+5949)));
+      int alu7 = (lidx1+alu5+(gidx0*20480)+(lidx0*2560)+(Ridx1_0_0<<5));
+      unsigned char val24 = (*(data6_11141120+alu7));
+      unsigned char val25 = (*(data6_11141120+(alu7+640)));
+      unsigned char val26 = (*(data6_11141120+(alu7+1280)));
+      unsigned char val27 = (*(data6_11141120+(alu7+1920)));
+      for (int Ridx1_1_0 = 0; Ridx1_1_0 < 2; Ridx1_1_0++) {
+        int alu8 = (alu4+(lidx1<<1)+(Ridx1_0_1<<4)+Ridx1_1_0);
+        unsigned char val28 = (*(data4_34119680+(alu8+2)));
+        unsigned char val29 = (*(data4_34119680+(alu8+1962)));
+        unsigned char val30 = (*(data4_34119680+(alu8+3922)));
+        unsigned char val31 = (*(data4_34119680+(alu8+5882)));
+        for (int Ridx1_1_1 = 0; Ridx1_1_1 < 4; Ridx1_1_1++) {
+          int alu9 = ((lidx1<<5)+(Ridx1_0_1<<8)+(Ridx1_0_0<<10)+(Ridx1_1_0<<4)+(Ridx1_1_1<<2));
+          unsigned char val32 = (*(data3_20480+(alu9+1)));
+          unsigned char val33 = (*(data3_20480+(alu9+2)));
+          unsigned char val34 = (*(data3_20480+(alu9+3)));
+          unsigned char val35 = (*(data3_20480+alu9));
+          int alu10 = ((Ridx1_1_0<<2)+Ridx1_1_1);
+          float val36 = (*(data1_5120+((lidx1<<3)+(Ridx1_0_1<<6)+(Ridx1_0_0<<8)+alu10)));
+          float val37 = (*(data5_1024+((((int)(val28))<<2)+Ridx1_1_1)));
+          float val38 = (*(data5_1024+((((int)(val29))<<2)+Ridx1_1_1)));
+          float val39 = (*(data5_1024+((((int)(val30))<<2)+Ridx1_1_1)));
+          float val40 = (*(data5_1024+((((int)(val31))<<2)+Ridx1_1_1)));
+          float alu11 = (val36*tg_bitcast<float>((uint)(((((uint)(val35))<<0u)+(((uint)(val32))<<8u)+(((uint)(val33))<<16u)+(((uint)(val34))<<24u)))));
+          unsigned char alu12 = ((alu10!=6)?((unsigned char)(128u)):((unsigned char)(64u)));
+          unsigned char alu13 = ((alu10!=5)?alu12:((unsigned char)(32u)));
+          unsigned char alu14 = ((alu10!=4)?alu13:((unsigned char)(16u)));
+          unsigned char alu15 = ((alu10!=3)?alu14:((unsigned char)(8u)));
+          unsigned char alu16 = ((alu10!=2)?alu15:((unsigned char)(4u)));
+          unsigned char alu17 = ((alu10!=1)?alu16:((unsigned char)(2u)));
+          unsigned char alu18 = ((alu10!=0)?alu17:((unsigned char)(1u)));
+          float alu19 = ((((val24/alu18)&((unsigned char)(1u)))!=((unsigned char)(0u)))?-1.0f:1.0f);
+          float alu20 = ((((val25/alu18)&((unsigned char)(1u)))!=((unsigned char)(0u)))?-1.0f:1.0f);
+          float alu21 = ((((val26/alu18)&((unsigned char)(1u)))!=((unsigned char)(0u)))?-1.0f:1.0f);
+          float alu22 = ((((val27/alu18)&((unsigned char)(1u)))!=((unsigned char)(0u)))?-1.0f:1.0f);
+          *(buf0+0) = ((*(buf0+0))+(((float)(tg_bitcast<half>((unsigned short)(((((unsigned short)(val7))<<((unsigned short)(0u)))+(((unsigned short)(val0))<<((unsigned short)(8u))))))))*(((float)((((((uint)(val8))<<0u)+(((uint)(val9))<<8u)+(((uint)(val10))<<16u)+(((uint)(val11))<<24u))>>28u)))+0.5f)*val37*alu19*alu11*0.5f));
+          *(buf0+1) = ((*(buf0+1))+(((float)(tg_bitcast<half>((unsigned short)(((((unsigned short)(val1))<<((unsigned short)(0u)))+(((unsigned short)(val2))<<((unsigned short)(8u))))))))*(((float)((((((uint)(val12))<<0u)+(((uint)(val13))<<8u)+(((uint)(val14))<<16u)+(((uint)(val15))<<24u))>>28u)))+0.5f)*val38*alu20*alu11*0.5f));
+          *(buf0+2) = ((*(buf0+2))+(((float)(tg_bitcast<half>((unsigned short)(((((unsigned short)(val3))<<((unsigned short)(0u)))+(((unsigned short)(val4))<<((unsigned short)(8u))))))))*(((float)((((((uint)(val16))<<0u)+(((uint)(val17))<<8u)+(((uint)(val18))<<16u)+(((uint)(val19))<<24u))>>28u)))+0.5f)*val39*alu21*alu11*0.5f));
+          *(buf0+3) = ((*(buf0+3))+(((float)(tg_bitcast<half>((unsigned short)(((((unsigned short)(val5))<<((unsigned short)(0u)))+(((unsigned short)(val6))<<((unsigned short)(8u))))))))*(((float)((((((uint)(val20))<<0u)+(((uint)(val21))<<8u)+(((uint)(val22))<<16u)+(((uint)(val23))<<24u))>>28u)))+0.5f)*val40*alu22*alu11*0.5f));
+        }
+      }
+    }
+  }
+  int alu31 = (lidx0<<5);
+  *((float4*)((buf2+(alu31+(lidx1<<2))))) = make_float4((*(buf0+0)),(*(buf0+1)),(*(buf0+2)),(*(buf0+3)));
+  __syncthreads();
+  *(buf1+0) = 0.0f;
+  *(buf1+1) = 0.0f;
+  *(buf1+2) = 0.0f;
+  *(buf1+3) = 0.0f;
+  for (int Ridx104 = 0; Ridx104 < 8; Ridx104++) {
+    float4 val41 = (*((float4*)((buf2+(alu31+(Ridx104<<2))))));
+    *(buf1+0) = ((*(buf1+0))+val41.x);
+    *(buf1+1) = ((*(buf1+1))+val41.y);
+    *(buf1+2) = ((*(buf1+2))+val41.z);
+    *(buf1+3) = ((*(buf1+3))+val41.w);
+  }
+  float val42 = (*(data2_1+0));
+  float val43 = (*(buf1+0));
+  float val44 = (*(buf1+1));
+  float val45 = (*(buf1+2));
+  float val46 = (*(buf1+3));
+  float alu43 = (1/val42);
+  if ((lidx1==0)) {
+    *((float4*)((data0_17408+((gidx0<<5)+(lidx0<<2))))) = make_float4((val43*(1/(val42*(1.0f+exp2((val43*alu43*-1.4426950216293335f)))))),(val44*(1/(val42*(1.0f+exp2((val44*alu43*-1.4426950216293335f)))))),(val45*(1/(val42*(1.0f+exp2((val45*alu43*-1.4426950216293335f)))))),(val46*(1/(val42*(1.0f+exp2((val46*alu43*-1.4426950216293335f)))))));
+  }
+}

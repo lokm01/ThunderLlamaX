@@ -1,0 +1,14 @@
+{
+ "a_naive_perlayer": {
+  "ms": 21.952,
+  "gbps": 97.8
+ },
+ "b_chunk_ctx": {
+  "ms": 16.693,
+  "gbps": 128.6
+ },
+ "c_stacked": {
+  "ms": 44.923,
+  "gbps": 47.8
+ }
+}

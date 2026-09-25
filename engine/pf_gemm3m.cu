@@ -1,0 +1,450 @@
+// ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 lokm01
+// P7-B pf_gemm3m: merged multi-segment twin of pf_gemm3 — 2-3 weight classes
+// one launch, segment selected by flat blockIdx, with the M-GRID FOLDED IN:
+//   bid = blockIdx.x; mb = bid / TGRID; nbseg = bid % TGRID (TGRID = sum of
+//   per-seg N/NTILE, compile-time). Per segment: repacked (IQ3 packed7 unit
+//   loads + DBUF register ring) or classic (strided stage_w, VERBATIM P6).
+// All segments share KDIM/KCH/NTHR/NTILE/MTILE and the same x16 rows.
+// Plain fp16 epilogue only (the twins' contract).
+// Build: -DKNAME -DSEGN(2|3) -DKDIM -DNTHR -DNTILE -DKCH -DMTILE
+//   -DQCA -DNDA -DGRID_A -DRPA  (, B, C)   RPx=1 -> segment reads packed7.
+// LAWS: as pf_gemm3 (flat indexing, hardcoded sizes, single smem array,
+// compile-time-indexed acc, per-kernel cubins + warp-token names).
+#include <cuda_fp16.h>
+#if !HMMA
+#error "pf_gemm3m: HMMA only"
+#endif
+#define FULL 0xffffffffu
+
+#define XS_LD (KCH + 8)
+#define WS_LD (KCH + 8)
+#define NWARP (NTHR / 32)
+#define RPT (NTILE / NWARP)
+#if RPT != 8
+#error "pf_gemm3m: NTILE/NWARP must be 8"
+#endif
+#define NCL (KCH / 32)
+#define KSTEPS (KCH / 16)
+#define NCH (KDIM / KCH)
+#define NGRP (NTILE / 8)
+#define MRG (MTILE / 16)
+#define XTPR ((MTILE * KCH + NTHR * 4 - 1) / (NTHR * 4))
+#if SEGN > 2
+#define TGRID (GRID_A + GRID_B + GRID_C)
+#else
+#define TGRID (GRID_A + GRID_B)
+#endif
+#if KCH != 128
+#error "pf_gemm3m: KCH 128 only"
+#endif
+#if NCL != 4
+#error "pf_gemm3m: NCL 4"
+#endif
+#if RING4 && (NCH % 4)
+#error "pf_gemm3m RING4: NCH % 4 != 0 (unroll-by-4 group cycle)"
+#endif
+
+__device__ __forceinline__ void hmma16816(float &c0, float &c1, float &c2, float &c3,
+                                          const unsigned a0, const unsigned a1,
+                                          const unsigned a2, const unsigned a3,
+                                          const unsigned b0, const unsigned b1) {
+  asm volatile(
+    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 "
+    "{%0,%1,%2,%3}, {%4,%5,%6,%7}, {%8,%9}, {%0,%1,%2,%3};\n"
+    : "+f"(c0), "+f"(c1), "+f"(c2), "+f"(c3)
+    : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1));
+}
+
+// ---- classic per-class decode (VERBATIM from pf_gemm2.cu) ----
+__device__ __forceinline__ void dq_c1(const unsigned char* rowp, const float* gridf,
+                                      int b, int lc, __half* w8) {
+  const unsigned short* qsp = (const unsigned short*)(rowp);
+  const unsigned int* scp = (const unsigned int*)(rowp + 64*(KDIM >> 8));
+  const unsigned short* dpp = (const unsigned short*)(rowp + 96*(KDIM >> 8));
+  const float d = __half2float(__ushort_as_half(dpp[b]));
+  const unsigned int sw = scp[8*b + (lc>>2)];
+  const float db = d * (((float)(sw >> 28)) + 0.5f) * 0.5f;
+  const unsigned int sidx = (sw >> (7u * (unsigned int)(lc & 3))) & 0x7Fu;
+  const unsigned int spar = (sidx ^ (sidx>>1) ^ (sidx>>2) ^ (sidx>>3) ^ (sidx>>4) ^ (sidx>>5) ^ (sidx>>6)) & 1u;
+  const unsigned int q = qsp[32*b + lc];
+  const float4 g0 = *((const float4*)(gridf + ((q & 0xFFu) << 2)));
+  const float4 g1 = *((const float4*)(gridf + ((q >> 8) << 2)));
+  const float sg0 = ((sidx>>0)&1) ? -1.f : 1.f, sg1 = ((sidx>>1)&1) ? -1.f : 1.f;
+  const float sg2 = ((sidx>>2)&1) ? -1.f : 1.f, sg3 = ((sidx>>3)&1) ? -1.f : 1.f;
+  const float sg4 = ((sidx>>4)&1) ? -1.f : 1.f, sg5 = ((sidx>>5)&1) ? -1.f : 1.f;
+  const float sg6 = ((sidx>>6)&1) ? -1.f : 1.f, sg7 = spar ? -1.f : 1.f;
+  w8[0] = __float2half(db*g0.x*sg0); w8[1] = __float2half(db*g0.y*sg1);
+  w8[2] = __float2half(db*g0.z*sg2); w8[3] = __float2half(db*g0.w*sg3);
+  w8[4] = __float2half(db*g1.x*sg4); w8[5] = __float2half(db*g1.y*sg5);
+  w8[6] = __float2half(db*g1.z*sg6); w8[7] = __float2half(db*g1.w*sg7);
+}
+
+__device__ __forceinline__ void dq_c2(const unsigned char* rowp, int b, int lc, __half* w8) {
+  const unsigned char* blk = rowp + b*176;
+  const float d = __half2float(*((const __half*)blk));
+  const float dm = __half2float(*((const __half*)(blk+2)));
+  const int s = lc >> 2;
+  float sc, mn;
+  if (s < 4) { sc = (float)(blk[4+s] & 63); mn = (float)(blk[8+s] & 63); }
+  else { sc = (float)((blk[8+s] & 0xF) | ((blk[s] >> 6) << 4));
+         mn = (float)((blk[8+s] >> 4) | ((blk[s+4] >> 6) << 4)); }
+  const unsigned char* lo = blk + 48 + ((lc>>3)<<5) + ((lc&3)<<3);
+  const unsigned char* qh = blk + 16 + ((lc&3)<<3);
+  const int nsh = ((lc>>2)&1) << 2;
+  _Pragma("unroll")
+  for (int j = 0; j < 8; ++j) {
+    int qv = (lo[j] >> nsh) & 0xF;
+    qv += (int)(((qh[j] >> s) & 1u) << 4);
+    w8[j] = __float2half(d*sc*(float)qv - dm*mn);
+  }
+}
+
+__device__ __forceinline__ void dq_c3(const unsigned char* rowp, int b, int lc, __half* w8) {
+  const unsigned char* blk = rowp + b*212;
+  const float d = __half2float(*((const __half*)(blk+2)));
+  const bool nib_hi = ((lc&15) >= 8);
+  const int c2 = (lc>>2)&3;
+  const unsigned char* lo = blk + 20 + ((lc>>4)<<6) + ((lc&7)<<3);
+  const unsigned char* qh = blk + 148 + ((lc>>4)<<5) + ((lc&3)<<3);
+  const int sc8 = (signed char)blk[4 + (lc>>1)];
+  _Pragma("unroll")
+  for (int j = 0; j < 8; ++j) {
+    const int xl = nib_hi ? (lo[j] >> 4) & 0xF : lo[j] & 0xF;
+    const int xh2 = ((qh[j] >> (c2<<1)) & 3) << 4;
+    w8[j] = __float2half(d * (float)sc8 * (float)((signed char)((xl | xh2) - 32)));
+  }
+}
+
+__device__ __forceinline__ void dq_c4(const unsigned char* rowp, int b, int lc, __half* w8) {
+  const unsigned char* blk = rowp + b*144;
+  const float d = __half2float(*((const __half*)blk));
+  const float dm = __half2float(*((const __half*)(blk+2)));
+  const int s = lc >> 2;
+  float sc, mn;
+  if (s < 4) { sc = (float)(blk[4+s] & 63); mn = (float)(blk[8+s] & 63); }
+  else { sc = (float)((blk[8+s] & 0xF) | ((blk[s] >> 6) << 4));
+         mn = (float)((blk[8+s] >> 4) | ((blk[s+4] >> 6) << 4)); }
+  const unsigned char* lo = blk + 16 + ((lc>>3)<<5) + ((lc&3)<<3);
+  const int nsh = ((lc>>2)&1) << 2;
+  _Pragma("unroll")
+  for (int j = 0; j < 8; ++j) {
+    const float qv = (float)((lo[j] >> nsh) & 0xF);
+    w8[j] = __float2half(d*sc*qv - dm*mn);
+  }
+}
+
+__device__ __forceinline__ void dq_seg(int cls, const unsigned char* rowp, const float* gridf,
+                                       int b, int lc, __half* w8) {
+  if (cls == 1)      dq_c1(rowp, gridf, b, lc, w8);
+  else if (cls == 2) dq_c2(rowp, b, lc, w8);
+  else if (cls == 3) dq_c3(rowp, b, lc, w8);
+  else               dq_c4(rowp, b, lc, w8);
+}
+
+__device__ __forceinline__ int rowb_seg(int cls) {
+  if (cls == 1) return 98 * (KDIM >> 8);
+  if (cls == 2) return 176 * (KDIM >> 8);
+  if (cls == 3) return 212 * (KDIM >> 8);
+  return 144 * (KDIM >> 8);
+}
+
+// ---- P8: packed5 (Q5_K true-16B) unit decode ----
+// w5[group][chunk][48 uint4]: unit u<32 = LO unit for lane u (r_local=u>>2,
+// qc_=u&3): 32 nibbles, nibble(w) at bits 4w. unit 32+t = META for the lane
+// pair (r_local=t>>1, m=t&1): me[0]=hi-bits(qc_=2m), me[1]=hi-bits(qc_=2m+1),
+// me[2]=scA|mnA<<6|scB<<12|mnB<<18 (6-bit ints, the dq_c2 extraction
+// VERBATIM), me[3]=d|dm<<16 (fp16 VERBATIM). Per weight: SAME ints and the
+// SAME fp expression as dq_c2 -> outputs BIT-IDENTICAL.
+#define WCM5(R) do { \
+  const unsigned* lo5 = (const unsigned*)&l##R; \
+  const unsigned* me5 = (const unsigned*)&m##R; \
+  const unsigned qh5 = (qc_ & 1) ? me5[1] : me5[0]; \
+  const unsigned sx5 = (me5[2] >> (12u * (unsigned)(qc_ & 1))) & 0xFFFu; \
+  const float sc5 = (float)(sx5 & 0x3Fu); \
+  const float mn5 = (float)((sx5 >> 6) & 0x3Fu); \
+  const float d5 = __half2float(__ushort_as_half((unsigned short)(me5[3] & 0xFFFFu))); \
+  const float dm5 = __half2float(__ushort_as_half((unsigned short)(me5[3] >> 16))); \
+  _Pragma("unroll") \
+  for (int cc = 0; cc < NCL; ++cc) { \
+    __half w8[8]; \
+    _Pragma("unroll") \
+    for (int j = 0; j < 8; ++j) { \
+      int qv = (int)((lo5[cc] >> (4*j)) & 0xFu); \
+      qv += (int)(((qh5 >> (cc*8 + j)) & 1u) << 4); \
+      w8[j] = __float2half(d5*sc5*(float)qv - dm5*mn5); \
+    } \
+    const int kk = (qc_*NCL + cc)*8; \
+    _Pragma("unroll") \
+    for (int j = 0; j < 8; ++j) ws[(size_t)(warp*8 + r_)*WS_LD + kk + j] = w8[j]; \
+  } \
+} while (0)
+
+// ---- repacked unit decode (pf_gemm3 dq_iq3_r verbatim) ----
+__device__ __forceinline__ void dq_iq3_r(const float* gridf, const unsigned int qv,
+    const unsigned int swv, const unsigned int dv, const int cc, __half* w8) {
+  const float d = __half2float(__ushort_as_half((unsigned short)dv));
+  const float db = d * (((float)(swv >> 28)) + 0.5f) * 0.5f;
+  const unsigned int sidx = (swv >> (7u * (unsigned int)(cc & 3))) & 0x7Fu;
+  const unsigned int spar = (sidx ^ (sidx>>1) ^ (sidx>>2) ^ (sidx>>3) ^ (sidx>>4) ^ (sidx>>5) ^ (sidx>>6)) & 1u;
+  const float4 g0 = *((const float4*)(gridf + ((qv & 0xFFu) << 2)));
+  const float4 g1 = *((const float4*)(gridf + ((qv >> 8) << 2)));
+  const float sg0 = ((sidx>>0)&1) ? -1.f : 1.f, sg1 = ((sidx>>1)&1) ? -1.f : 1.f;
+  const float sg2 = ((sidx>>2)&1) ? -1.f : 1.f, sg3 = ((sidx>>3)&1) ? -1.f : 1.f;
+  const float sg4 = ((sidx>>4)&1) ? -1.f : 1.f, sg5 = ((sidx>>5)&1) ? -1.f : 1.f;
+  const float sg6 = ((sidx>>6)&1) ? -1.f : 1.f, sg7 = spar ? -1.f : 1.f;
+  w8[0] = __float2half(db*g0.x*sg0); w8[1] = __float2half(db*g0.y*sg1);
+  w8[2] = __float2half(db*g0.z*sg2); w8[3] = __float2half(db*g0.w*sg3);
+  w8[4] = __float2half(db*g1.x*sg4); w8[5] = __float2half(db*g1.y*sg5);
+  w8[6] = __float2half(db*g1.z*sg6); w8[7] = __float2half(db*g1.w*sg7);
+}
+
+__device__ __forceinline__ void dq_unit(const float* gridf, const uint4 U, const int cc, __half* w8) {
+  const unsigned int qv = (cc == 0) ? (U.x & 0xFFFFu) : (cc == 1) ? (U.x >> 16)
+                       : (cc == 2) ? (U.y & 0xFFFFu) : (U.y >> 16);
+  dq_iq3_r(gridf, qv, U.z, U.w & 0xFFFFu, cc, w8);
+}
+
+// ---- shared mma over xs/ws (acc compile-time indexed) ----
+#define MMAR() do { \
+  const int g = lane >> 2, tp = (lane & 3) * 2; \
+  _Pragma("unroll") \
+  for (int s = 0; s < KSTEPS; ++s) { \
+    const int kb = s*16; \
+    _Pragma("unroll") \
+    for (int rg = 0; rg < MRG; ++rg) { \
+      const unsigned a0 = *(const unsigned*)(xs + (size_t)(rg*16 + g)*XS_LD + kb + tp); \
+      const unsigned a1 = *(const unsigned*)(xs + (size_t)(rg*16 + g + 8)*XS_LD + kb + tp); \
+      const unsigned a2 = *(const unsigned*)(xs + (size_t)(rg*16 + g)*XS_LD + kb + tp + 8); \
+      const unsigned a3 = *(const unsigned*)(xs + (size_t)(rg*16 + g + 8)*XS_LD + kb + tp + 8); \
+      const __half* wr = ws + (size_t)(warp*8 + g)*WS_LD + kb + tp; \
+      const unsigned b0 = *(const unsigned*)(wr); \
+      const unsigned b1 = *(const unsigned*)(wr + 8); \
+      hmma16816(acc[rg][0], acc[rg][1], acc[rg][2], acc[rg][3], a0, a1, a2, a3, b0, b1); \
+    } \
+  } \
+} while (0)
+
+extern "C" __global__ void __launch_bounds__(NTHR) KNAME(
+    const unsigned char* __restrict__ wA, const unsigned char* __restrict__ wB,
+#if SEGN > 2
+    const unsigned char* __restrict__ wC,
+#endif
+    const float* __restrict__ gridf, const __half* __restrict__ x16,
+    __half* __restrict__ outA, __half* __restrict__ outB
+#if SEGN > 2
+    , __half* __restrict__ outC
+#endif
+    )
+{
+  __shared__ __align__(16) __half sm[MTILE * XS_LD + NTILE * WS_LD];
+  __half* xs = sm;
+  __half* ws = sm + MTILE * XS_LD;
+  const int tid = threadIdx.x;
+  const int lane = tid & 31, warp = tid >> 5;
+  const int bid = blockIdx.x;
+  const int mb = bid / TGRID;
+  const int ns = bid - mb * TGRID;
+  const unsigned char* w1; __half* out16; int NDL, CLS, RPK, n0;
+  if (ns < GRID_A)             { w1 = wA; out16 = outA; NDL = NDA; CLS = QCA; RPK = RPA; n0 = ns * NTILE; }
+  else if (ns < GRID_A+GRID_B) { w1 = wB; out16 = outB; NDL = NDB; CLS = QCB; RPK = RPB; n0 = (ns - GRID_A) * NTILE; }
+#if SEGN > 2
+  else                          { w1 = wC; out16 = outC; NDL = NDC; CLS = QCC; RPK = RPC; n0 = (ns - GRID_A - GRID_B) * NTILE; }
+#endif
+  float acc[MRG][4];
+  _Pragma("unroll")
+  for (int rg = 0; rg < MRG; ++rg)
+    _Pragma("unroll")
+    for (int j = 0; j < 4; ++j) acc[rg][j] = 0.f;
+
+  const int r_ = lane >> 2, qc_ = lane & 3;
+  const uint4* w1u4 = (const uint4*)w1;
+  const size_t goff = ((size_t)(n0 / 8 + warp) * NCH) * 32 + lane;
+  uint2 xE[XTPR], xO[XTPR];
+  uint4 uGE, uGO;
+
+#define XPR(R, KC) do { \
+  _Pragma("unroll") \
+  for (int t = 0; t < XTPR; ++t) { \
+    const int lin = (tid + t*NTHR) * 4; \
+    if (lin < MTILE*KCH) { \
+      const int m = lin / KCH, kk = lin % KCH; \
+      x##R[t] = *(const uint2*)(x16 + (size_t)(mb*MTILE + m)*KDIM + (size_t)(KC) + kk); \
+    } \
+  } \
+} while (0)
+
+#define XCM(R) do { \
+  _Pragma("unroll") \
+  for (int t = 0; t < XTPR; ++t) { \
+    const int lin = (tid + t*NTHR) * 4; \
+    if (lin < MTILE*KCH) { \
+      const int m = lin / KCH, kk = lin % KCH; \
+      *(uint2*)(xs + (size_t)m*XS_LD + kk) = x##R[t]; \
+    } \
+  } \
+} while (0)
+
+#define WCM(R) do { \
+  _Pragma("unroll") \
+  for (int cc = 0; cc < NCL; ++cc) { \
+    __half w8[8]; \
+    dq_unit(gridf, u##R, cc, w8); \
+    const int kk = (qc_*NCL + cc)*8; \
+    _Pragma("unroll") \
+    for (int j = 0; j < 8; ++j) ws[(size_t)(warp*8 + r_)*WS_LD + kk + j] = w8[j]; \
+  } \
+} while (0)
+
+#define CLA_STAGE(KC) do { \
+  const unsigned char* rowp = w1 + (size_t)(n0 + warp*RPT + r_) * rowb_seg(CLS); \
+  const int lc0 = ((KC) & 255) >> 3; \
+  _Pragma("unroll") \
+  for (int cc = 0; cc < NCL; ++cc) { \
+    const int lc = lc0 + qc_*NCL + cc; \
+    __half w8[8]; \
+    dq_seg(CLS, rowp, gridf, ((KC) >> 8), lc, w8); \
+    const int kk = (qc_*NCL + cc)*8; \
+    _Pragma("unroll") \
+    for (int j = 0; j < 8; ++j) ws[(size_t)(warp*8 + r_)*WS_LD + kk + j] = w8[j]; \
+  } \
+} while (0)
+
+#if P5A
+  if (RPK == 2) {
+    // ---- P8 packed5 ring-2: lo-unit + meta-unit per lane-chunk (16B loads) ----
+    const uint4* w5 = (const uint4*)w1;
+    const size_t b5 = ((size_t)(n0/8 + warp) * NCH) * 48;
+    const int meoff = 32 + (lane>>2)*2 + ((lane>>1)&1);
+    uint4 lE, mE, lO, mO;
+    lE = w5[b5 + lane];
+    mE = w5[b5 + meoff];
+    XPR(E, 0);
+    WCM5(E);
+    XCM(E);
+    __syncthreads();
+    _Pragma("unroll 1")
+    for (int s = 0; s + 1 < NCH; s += 2) {
+      lO = w5[b5 + (size_t)(s + 1)*48 + lane];
+      mO = w5[b5 + (size_t)(s + 1)*48 + meoff];
+      XPR(O, (s + 1) * KCH);
+      MMAR();
+      __syncthreads();
+      WCM5(O); XCM(O);
+      __syncthreads();
+      if (s + 2 >= NCH) break;
+      lE = w5[b5 + (size_t)(s + 2)*48 + lane];
+      mE = w5[b5 + (size_t)(s + 2)*48 + meoff];
+      XPR(E, (s + 2) * KCH);
+      MMAR();
+      __syncthreads();
+      WCM5(E); XCM(E);
+      __syncthreads();
+    }
+    MMAR();
+  } else
+#endif
+  if (RPK) {
+#if RING4
+    // ---- R2d repacked DBUF ring-depth-4 (the pf_gemm3 RING4 body) ----
+    // 4 named unit sets (chunk k in u[k&3]); each phase issues unit(s+4) into
+    // u[s&3] (free: unit(s) was decoded staging chunk s at phase s-1) + x(s+2)
+    // BEFORE mma(s); decode/mma/k-order VERBATIM -> BIT-IDENTICAL.
+    uint4 u0, u1, u2, u3;
+    u0 = w1u4[goff];
+    XPR(E, 0);
+    WCM(0);
+    XCM(E);
+    __syncthreads();
+    u1 = w1u4[goff + (size_t)1 * 32];
+    u2 = w1u4[goff + (size_t)2 * 32];
+    u3 = w1u4[goff + (size_t)3 * 32];
+    XPR(O, KCH);
+    _Pragma("unroll 1")
+    for (int g4 = 0; g4 < NCH / 4; ++g4) {
+      const int c0 = 4 * g4;
+      // phase A (chunk c0): stage c0+1 from u1/xO
+      if (c0 + 4 < NCH) u0 = w1u4[goff + (size_t)(c0 + 4) * 32];
+      if (c0 + 2 < NCH) XPR(E, (size_t)(c0 + 2) * KCH);
+      MMAR();
+      __syncthreads();
+      WCM(1); XCM(O);
+      __syncthreads();
+      // phase B (chunk c0+1): stage c0+2 from u2/xE
+      if (c0 + 5 < NCH) u1 = w1u4[goff + (size_t)(c0 + 5) * 32];
+      if (c0 + 3 < NCH) XPR(O, (size_t)(c0 + 3) * KCH);
+      MMAR();
+      __syncthreads();
+      WCM(2); XCM(E);
+      __syncthreads();
+      // phase C (chunk c0+2): stage c0+3 from u3/xO
+      if (c0 + 6 < NCH) u2 = w1u4[goff + (size_t)(c0 + 6) * 32];
+      if (c0 + 4 < NCH) XPR(E, (size_t)(c0 + 4) * KCH);
+      MMAR();
+      __syncthreads();
+      WCM(3); XCM(O);
+      __syncthreads();
+      // phase D (chunk c0+3): stage c0+4 from u0/xE (skipped at the last group)
+      if (c0 + 7 < NCH) u3 = w1u4[goff + (size_t)(c0 + 7) * 32];
+      if (c0 + 5 < NCH) XPR(O, (size_t)(c0 + 5) * KCH);
+      MMAR();
+      __syncthreads();
+      if (c0 + 4 < NCH) { WCM(0); XCM(E); }
+      __syncthreads();
+    }
+#else
+    // ---- repacked DBUF ring (pf_gemm3 REPACK=1 body) ----
+    uGE = w1u4[goff];
+    XPR(E, 0);
+    WCM(GE);
+    XCM(E);
+    __syncthreads();
+    _Pragma("unroll 1")
+    for (int s = 0; s + 1 < NCH; s += 2) {
+      uGO = w1u4[goff + (size_t)(s + 1) * 32];
+      XPR(O, (s + 1) * KCH);
+      MMAR();
+      __syncthreads();
+      WCM(GO);
+      XCM(O);
+      __syncthreads();
+      if (s + 2 >= NCH) break;
+      uGE = w1u4[goff + (size_t)(s + 2) * 32];
+      XPR(E, (s + 2) * KCH);
+      MMAR();
+      __syncthreads();
+      WCM(GE);
+      XCM(E);
+      __syncthreads();
+    }
+    MMAR();
+#endif
+  } else {
+    // ---- classic (P6 twin body, MTILE-generalized) ----
+    _Pragma("unroll 2")
+    for (int kc = 0; kc < KDIM; kc += KCH) {
+      _Pragma("unroll")
+      for (int i = 0; i < XTPR; ++i) {
+        const int lin = (tid + i*NTHR) * 4;
+        if (lin < MTILE*KCH) {
+          const int m = lin / KCH, kk = lin % KCH;
+          *(uint2*)(xs + (size_t)m*XS_LD + kk) = *(const uint2*)(x16 + (size_t)(mb*MTILE + m)*KDIM + kc + kk);
+        }
+      }
+      CLA_STAGE(kc);
+      __syncthreads();
+      MMAR();
+      __syncthreads();
+    }
+  }
+
+  const int g = lane >> 2, tp = (lane & 3) * 2;
+  const int n = n0 + warp*8 + tp;
+  _Pragma("unroll")
+  for (int rg = 0; rg < MRG; ++rg) {
+    const int m0 = mb * MTILE + rg*16 + g;
+    *(__half2*)(out16 + (size_t)m0*NDL + n)     = __halves2half2((__half)acc[rg][0], (__half)acc[rg][1]);
+    *(__half2*)(out16 + (size_t)(m0+8)*NDL + n) = __halves2half2((__half)acc[rg][2], (__half)acc[rg][3]);
+  }
+}

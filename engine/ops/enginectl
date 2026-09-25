@@ -1,0 +1,142 @@
+#!/bin/zsh
+# enginectl — control the LLM engine + API (launchd services or manual).
+# TLX W2 fixes (ledger V-32/V-26):
+#   - stop NEVER pkills the GPU python (the old pattern never matched the
+#     engine argv anyway — env vars are not on argv — and pkill of a live GPU
+#     python is the documented GPU-EXIT reboot class). Order: (1) graceful
+#     socket shutdown RPC (flushes pcache, leaves the staydown marker),
+#     (2) pidfile SIGTERM if the socket is dead, (3) launchctl unload if managed.
+#   - breaker state lives in ~/tinygrad-metal/logs/ (persistent, V-26).
+# Usage: enginectl {start|stop|restart|status|install|uninstall|clear-breaker|logs}
+#        [engine|api|all]
+set -u
+SVC=${2:-all}
+ENG_LABEL=com.tlx.llm-engine
+API_LABEL=com.tlx.llm-api
+PLIST_DIR=/Library/LaunchDaemons
+OPS="${TLX_OPS_ROOT:-~/tinygrad-metal/engine0/ops}"
+LOGS="${TLX_LOGS_DIR:-~/tinygrad-metal/logs}"
+ENGINE_SOCK="${TLX_ENGINE_SOCK:-/tmp/llm-engine.sock}"
+ENGINE_PIDFILE=$LOGS/engine.pid
+STAYDOWN=$LOGS/llm_engine_staydown
+CRASHLOG=$LOGS/llm_engine_crashes.log
+ENVFILE=$OPS/env.canonical
+
+_svc_start() {
+  local label=$1 plist=$2
+  if launchctl list "$label" >/dev/null 2>&1; then
+    launchctl kickstart -k "system/$label"
+  else
+    sudo launchctl load -w "$plist"
+  fi
+}
+_svc_stop_launchd() {
+  local label=$1 plist=$2
+  sudo launchctl unload -w "$plist" 2>/dev/null || true
+}
+
+_admin_token() {
+  [ -f "$ENVFILE" ] && grep '^TLX_ADMIN_TOKEN=' "$ENVFILE" | cut -d= -f2-
+}
+
+# Graceful engine stop: the daemon flushes queued pcache nodes, unlinks the
+# socket and writes the staydown marker (its own _clean_exit).
+socket_shutdown() {
+  local tok; tok=$(_admin_token)
+  [ -z "$tok" ] && { echo "no TLX_ADMIN_TOKEN in $ENVFILE — cannot do a graceful stop" >&2; return 2; }
+  /usr/bin/python3 - "$ENGINE_SOCK" "$tok" <<'PYEOF'
+import json, socket, sys
+sock, tok = sys.argv[1], sys.argv[2]
+try:
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(10)
+    s.connect(sock)
+    s.sendall((json.dumps({"id": 1, "method": "shutdown",
+                           "params": {"admin_token": tok}}) + "\n").encode())
+    try:
+        buf = b""
+        while b"\n" not in buf:
+            ch = s.recv(4096)
+            if not ch: break
+            buf += ch
+        print("engine shutdown reply:", buf.decode(errors="replace").strip()[:200])
+    except Exception:
+        pass
+    sys.exit(0)
+except Exception as e:
+    print(f"socket shutdown failed: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
+
+stop_engine() {
+  if launchctl list "$ENG_LABEL" >/dev/null 2>&1; then
+    echo "(launchd-managed: unloading $ENG_LABEL)"
+    _svc_stop_launchd "$ENG_LABEL" "$PLIST_DIR/$ENG_LABEL.plist"
+    return
+  fi
+  if [ -S "$ENGINE_SOCK" ]; then
+    socket_shutdown && return
+    echo "graceful shutdown failed — trying the pidfile" >&2
+  fi
+  if [ -f "$ENGINE_PIDFILE" ]; then
+    local pid; pid=$(head -1 "$ENGINE_PIDFILE" 2>/dev/null | tr -d '[:space:]')
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      echo "SIGTERM to engine pid $pid (wrapper will record the exit)"
+      kill -TERM "$pid"
+      return
+    fi
+  fi
+  echo "engine not running (no launchd entry, socket, or pidfile)"
+}
+
+case ${1:-} in
+  install)
+    plutil -lint "$OPS/com.tlx.llm-engine.plist" "$OPS/com.tlx.llm-api.plist" || exit 1
+    chmod 600 "$ENVFILE" 2>/dev/null || true
+    sudo cp "$OPS/com.tlx.llm-engine.plist" "$OPS/com.tlx.llm-api.plist" "$PLIST_DIR/"
+    sudo launchctl load -w "$PLIST_DIR/com.tlx.llm-engine.plist"
+    sudo launchctl load -w "$PLIST_DIR/com.tlx.llm-api.plist"
+    echo "installed + started (engine boot ~6-7 min; watch: tail -f $LOGS/llm-engine-launchd.log)" ;;
+  uninstall)
+    sudo launchctl unload -w "$PLIST_DIR/com.tlx.llm-engine.plist" 2>/dev/null
+    sudo launchctl unload -w "$PLIST_DIR/com.tlx.llm-api.plist" 2>/dev/null
+    sudo rm -f "$PLIST_DIR/com.tlx.llm-engine.plist" "$PLIST_DIR/com.tlx.llm-api.plist"
+    echo "uninstalled (stop any manual engine first: enginectl stop engine)" ;;
+  start)
+    [[ "$SVC" == engine || "$SVC" == all ]] && _svc_start "$ENG_LABEL" "$PLIST_DIR/$ENG_LABEL.plist"
+    [[ "$SVC" == api   || "$SVC" == all ]] && _svc_start "$API_LABEL" "$PLIST_DIR/$API_LABEL.plist" ;;
+  stop)
+    [[ "$SVC" == api   || "$SVC" == all ]] && _svc_stop_launchd "$API_LABEL" "$PLIST_DIR/$API_LABEL.plist"
+    [[ "$SVC" == engine || "$SVC" == all ]] && stop_engine ;;
+  restart)
+    $0 stop "$SVC"; sleep 2; $0 start "$SVC" ;;
+  status)
+    echo "== engine (launchd) =="; launchctl list "$ENG_LABEL" 2>&1 | head -2
+    echo "== api (launchd) ==";    launchctl list "$API_LABEL" 2>&1 | head -2
+    echo "== engine pidfile ==";   cat "$ENGINE_PIDFILE" 2>/dev/null || echo "(none)"
+    echo "== breaker =="
+    if [ -f "$STAYDOWN" ]; then echo "STAYDOWN: $(cat "$STAYDOWN")"; else echo "clear"; fi
+    [ -f "$CRASHLOG" ] && tail -5 "$CRASHLOG"
+    echo "== gpu lock =="
+    if [ -f /tmp/nv_usb4.lock ]; then
+      pid=$(head -1 /tmp/nv_usb4.lock | tr -d '[:space:]' | sed 's/^pid=//' | cut -d' ' -f1)
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        echo "held by LIVE pid $pid:"; ps -p "$pid" -o pid,uid,etime,command
+      else
+        echo "present (pid ${pid:-unparseable}, not alive)"
+      fi
+    else
+      echo "clear"
+    fi
+    echo "== health =="; curl -s --max-time 3 http://127.0.0.1:8080/health || echo "(api not answering)" ;;
+  clear-breaker)
+    rm -f "$STAYDOWN" "$CRASHLOG" /tmp/llm_engine_staydown /tmp/llm_engine_crashes.log
+    echo "breaker cleared (persistent + legacy /tmp paths)" ;;
+  logs)
+    case "$SVC" in
+      engine) tail -f "$LOGS/llm-engine-launchd.log" /tmp/m1a_serve.log "$LOGS/m1a_serve.log" 2>/dev/null ;;
+      api)    tail -f "$LOGS/llm-api-launchd.log" 2>/dev/null ;;
+      *)      tail -f "$LOGS/llm-engine-launchd.log" "$LOGS/llm-api-launchd.log" /tmp/m1a_serve.log "$LOGS/m1a_serve.log" 2>/dev/null ;;
+    esac ;;
+  *) echo "usage: enginectl {start|stop|restart|status|install|uninstall|clear-breaker|logs} [engine|api|all]"; exit 1 ;;
+esac
