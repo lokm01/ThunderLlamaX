@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/media/logo.png" alt="ThunderLlamaX" width="256">
+</p>
+
 # ThunderLlamaX
 
 **LLM inference on an eGPU, hitched to a Mac.**
