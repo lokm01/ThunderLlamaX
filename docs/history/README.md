@@ -46,6 +46,7 @@ campaign. Expect rig-era shorthand, env-knob names, commit hashes, and
 - **MM_P8S_results.txt** — the serve-conformance bridge: bank60 60/60 THROUGH the daemon, pcache CACHE_HIT exact, soaks, the first MTP measurement (0.875)
 - **MM_P9_results.txt** — the MTP K=4 chain (spec==T1 60/60), the KAPool slab-coherence + narrow-load + Q3_K hmask laws, the launch-serialization measurement
 - **MM_P10_results.txt** — MTP wired into serving (prose 19.1 -> 40.1 through the API), the PF-only cur fix, the pairwise fusion honestly falsified + the marginal-launch law correction, the G3 first-contact adjudication
+- **MM_P9E_results.txt** — the first output-QUALITY battery (GSM8K 93/95%, PPL baselines, needle) + the F1 first-token-loss fix and the F2/F3 exhaustion findings (closed next by the P10 kernargs pool; eval/ in the repo root carries the harnesses)
 - **R8_DECODE.md** — K=9/K=10 ships (75.56 tok/s; 75.81 re-validated through the W5 fixed stack), the bimodal match law, prose-class honest numbers
 - **R6_BATCH.md** — the B=2 batch campaign: rungs, laws (compact-partial slice, R6 VRAM, BT>RM, graph-class budget, kernargs-slab), Phase-3 serving integration + honest tables
 - **FIX_CAMPAIGN.md** — the five-wave review-fix record + the W5 live validation + the open-findings ledger (#1-9)

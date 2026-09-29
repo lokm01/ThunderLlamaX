@@ -948,7 +948,7 @@ def _safe_engine_fields(st):
   return {k: st.get(k) for k in ("ready", "busy", "rpc", "pos", "ctxk", "mode",
                                  "queue", "dirty", "uptime_s", "config_fp",
                                  "lookup_k", "pf_prefill", "cycles_since_rebuild",
-                                 "batch_b", "cycle_cap", "pc", "model_id")}  # L2b
+                                 "batch_b", "cycle_cap", "pc", "model_id", "ka")}  # L2b; ka = TLX P10 pool counters
 
 def _admin_ok(request):
   """R3-23: HEADER ONLY (x-admin-token) — the ?admin_token= query param sat in
@@ -1451,6 +1451,25 @@ def _run_engine_sync(mode, cur, delta, ids2, rtext, messages, conv_id, max_token
       c.send({"id": 99, "method": "cancel", "params": {}})   # engine self-stops too
       terminal_drain()
       return result
+    # P9 EVAL FIX (first-token loss): in every prefill mode the ENGINE's
+    # first RESPONSE token is the prefill result's `cur` (predicted at the
+    # boundary hidden, held in cur_slot -- deliberately NOT part of the fed
+    # stream nor the cycle emits; serve.py: "generate appends emits,
+    # FOLLOW_UP appends [cur]+delta"). The cycle events start at the SECOND
+    # response token, so `cur` must be fed through the visible path ONCE,
+    # before the event loop, or every completion loses its first token
+    # (one-token answers came back EMPTY; found by the P9 needle eval +
+    # eval/probe_engine.py).
+    _cur0 = _pr.get("cur")
+    if _cur0 is not None:
+      _cur0 = int(_cur0)
+      result["tokens"].append(_cur0)
+      _feed_token(_cur0)
+      if _cur0 in stopset:
+        R["reusable"] = False
+        return bail("stop")
+      if not split.in_think and result["visible"] >= max_tokens:
+        return bail("length")
     try:
       while True:
         r = c.recv()

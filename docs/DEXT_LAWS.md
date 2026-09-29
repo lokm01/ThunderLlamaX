@@ -726,9 +726,9 @@ kernargs pool slab WEDGE (GSP: SKEDCHECK16_CTA_THREAD_DIMENSION_ZERO — the
 GPU reads STALE kernargs/QMDs through the slab's GPU-CACHEABLE mapping) for
 graphs built/stepped after the GPU has traffic over the slab; only the
 boot-time graph set is safe. FIX: a DEDICATED uncached ka per graph-runner
-(sysmem GPU_CACHEABLE_NO — the cpu-fold class). (The dense gcycle's
-ka-slab LEAK (X5) remains the follow-up; the MoE path reuses slab slices
-across rebuilds — audited.)
+(sysmem GPU_CACHEABLE_NO — the cpu-fold class). (The dense gcycle's ka-slab
+leak once noted here as the follow-up is now FIXED by the P10 pool — see
+the KA laws; the MoE path reuses slab slices across rebuilds — audited.)
 
 **MM10. THE GPU-EXIT LAW, EXTENDED TWICE (P7/P8).** (a) The GRACEFUL
 socket shutdown (bye:true) ALSO reboots the machine (6/6) — disable-first
@@ -815,8 +815,68 @@ spkq256m scratch = 16*P_MAX*CTX (the 16k rung faulted at 143*16384 >
 shim's paths must be ABSOLUTE (container CWD differs); drafts follow the
 EXTENDED qq match window, not the trimmed one.
 
+## KA. P10 kernargs-pool laws (the F2/F3 fix; P9-eval findings F1-F7)
+
+Journals: docs/history/MM_P9E_results.txt + eval/P9_EVAL_RESULTS.md. The
+P9 quality battery (GSM8K/PPL/needle through the live API) is what
+surfaced the exhaustion class; the P10 pool
+(`engine/ka_pool.py`, `TLX_KA_POOL=1` default-on) is what closed it.
+
+**KA1. THE MAP_SYSMEM_FD CAP / NO-UNMAP LAW (server.c).** The tinygpu
+server caps live sysmem mappings at MAX_SYSMEM=128 and has NO unmap RPC —
+`g_sysmem[]` holds its own mmap + shm fd until process death, so every
+fresh host-mapped kernargs slab burns one server slot for the whole
+daemon life. Exhaustion has two faces: SOFT (F3) — MAP_SYSMEM_FD returns
+no fd -> `IndexError: list index out of range` at the ancillary-data
+unpack (system.py:383), first seen on new PfGraph builds after enough
+graph churn; every subsequent long FRESH/CACHE_HIT prefill fails — and
+HARD (F2) — whole-process-tree deaths and machine resets under sustained
+dense decode (MTBF 13-18 min), NOT the classic ~950-cycle budget (fences
+firing normally; deaths at cumulative cycles 906-1457). Fresh boot clears
+both. Burn rate accelerates on long prompts: crossing ATTN_THR builds the
+gs26 graph class, and prefill class churn rebuilds PfGraph sets.
+
+**KA2. THE KA-SLAB LIFETIME ASYMMETRY (dense vs MoE).** The dense stack
+carves a FRESH slab for every ParityGraph/PfGraph build (~6-10 slabs per
+fence: gen_rebuild / l7_entry_rebuild -> build_graphs, plus PfGraph sets
+on every prefill class change) and simply dropped the retired ones —
+never returned. The MoE path never trips the cap because its fence
+(MG.rebuild) RE-FILLS kernargs into the SAME slab — zero new mappings.
+Same engine family, opposite lifetime discipline: that asymmetry is why
+F2/F3 looked dense-specific.
+
+**KA3. THE ZERO-ON-RELEASE DETERMINISM CONTRACT.** A fresh shm mapping is
+zero-filled; a pooled slab zero-filled at release is byte-identical at
+hand-out, so the GPU-visible bytes are exactly what the new build's
+fill_kernargs writes plus the per-submit QMD patches — the same bytes a
+fresh slab would carry. This is the whole determinism argument for slab
+reuse, and it does NOT contradict MM9's KAPool SLAB COHERENCE law: MM9's
+wedges were late CARVES from a traffic'd SHARED arena (the GPU reading
+stale kernargs through a GPU-CACHEABLE mapping); recycling whole,
+previously-good slabs with a full rewrite at a quiescent point is the
+proven-safe shape (the MoE 37-fence soak precedent; the P10 gates:
+bit-exact probe trace + GSM8K first-20 20/20 identical).
+
+**KA4. THE BUILD-THEN-SWAP LAW.** Retire the replaced set's slabs only
+AFTER the replacement set is live (a failed build must leave the OLD
+graphs fully servable — the W5 posture), and only at a quiescent point:
+every retirement site already dev.synchronize()s, and ka_release
+re-asserts the sync defensively (the V-56 close() discipline). Corollary:
+the snapshot-restore reset must retire + clear ALL graph attrs (a handle
+set left live on stale buffers is the wrong-answers class).
+
+**KA5. THE STAYDOWN-MARKER / NEWLY-CREATED-FILE LAW (P9 F7).** The
+staydown marker written by the stop path DIES with the GPU-EXIT reset it
+provokes (a newly-created file + fsync can still vanish — the
+MM10b newly-created-file law); launchd relaunches the engine within
+~2-4 min. A PRE-CREATED marker (written while the box is stable) SURVIVES
+the reset and holds the engine down for standalone-GPU windows. Extends
+MM10b from swap-intent files to ops markers generally: pre-create, don't
+create-then-die.
+
 New cross-references: R6_BATCH.md (X1-X6), R8_DECODE.md (X7-X9),
 R1_PROMPTCACHE.md W3 section + FIX_CAMPAIGN.md (X10-X11),
 MM_PLAN.md + MM_P0..P10_results.txt (MM1-MM22), M1C_STABILITY.md
 R3 live-window section (the L1-L5 ops fixes: pipe-vs-heredoc zsh tokens,
-client-side staydown markers, stop-order, dir-fsync).
+client-side staydown markers, stop-order, dir-fsync), MM_P9E_results.txt +
+eval/P9_EVAL_RESULTS.md (KA1-KA5 + the P9 findings F1-F7).

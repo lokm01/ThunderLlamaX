@@ -28,6 +28,7 @@ os.environ.setdefault("DEV", "NV")
 sys.path.insert(0, "~/tinygrad-src")
 sys.path.insert(0, "~/tinygrad-metal/engine0")
 from engine0 import dev
+from ka_pool import ka_alloc, ka_release   # TLX P10 (F2/F3 fix)
 from tinygrad.device import TinyELF
 from tinygrad.runtime.ops_nv import NVProgram
 
@@ -486,8 +487,10 @@ class PfGraph:
     from tinygrad.runtime.ops_nv import NVComputeQueue
     self.prev_var = UOp.variable(f"{tag}_prev", 0, 0xffffffff, dtype=dtypes.uint32)
     self.cur_var = UOp.variable(f"{tag}_cur", 0, 0xffffffff, dtype=dtypes.uint32)
+    self.dev = dev   # TLX P10: close() target
     per = max(_ru(p.kernargs_alloc_size, 8) for p, a, g, ls in seq)
-    self.ka = dev.allocator.alloc(per * len(seq), BufferSpec(cpu_access=True, nolru=True))
+    # TLX P10: pooled slab (F2/F3 fix); TLX_KA_POOL=0 = legacy fresh alloc.
+    self.ka = ka_alloc(per * len(seq), dev)
     q = NVComputeQueue()
     # P7F-1 law: the timeline WAIT must precede the shader-cache INVALIDATE.
     # Barrier-first + pipelined submits = GSP "SKEDCHECK22_INVALIDATE_ACTIVE_QMD"
@@ -504,6 +507,12 @@ class PfGraph:
     q.signal(dev.timeline_signal, self.cur_var)
     self.q = q
     print(f"[pf-pg] {tag}: launches={len(seq)} _q_words={len(q._q)} ring_bytes={len(q._q)*4}", flush=True)
+
+  def close(self):
+    """TLX P10: retire the kernargs slab to the pool (quiescent points only)."""
+    if getattr(self, "ka", None) is not None:
+      ka_release(self.ka, self.dev)
+      self.ka = None
 
   def submit(self, prev_v, cur_v):
     self.q.submit(dev, {self.prev_var.expr: int(prev_v), self.cur_var.expr: int(cur_v)})
@@ -550,8 +559,10 @@ def _pf_graphs(E, which=None):
   sets = _PG["sets"]
   st = sets.get(which)
   if st is None or st["key"] != key or st["n"] >= PG_REBUILD:
+    _old_graphs = []   # TLX P10: retired AFTER the replacement set is live
     if st is not None:
       dev.synchronize()   # rebuild ONLY at a quiescent point
+      _old_graphs = list(st["graphs"]) + list(st.get("graphs26") or [])
     if use128:
       full = list(E._pf_plan128) + (_pf_dfill_seq128(E) if (M32 and DFILL) else [])
     elif use64:
@@ -571,6 +582,11 @@ def _pf_graphs(E, which=None):
       subs26 = [full26[i:i + k] for i in range(0, len(full26), k)]
       graphs26 = [PfGraph(s, f"pfw{j}") for j, s in enumerate(subs26)]
     sets[which] = st = {"graphs": graphs, "graphs26": graphs26, "n": 0, "key": key}
+    # TLX P10: recycle the replaced set's slabs (F3: long-prompt PfGraph churn
+    # was the dominant MAP_SYSMEM_FD burn). Only reached on a SUCCESSFUL build.
+    for g in _old_graphs:
+      try: g.close()
+      except Exception: pass
     print(f"[pf-pg] {which} chunk graph ready: {len(subs)} queues x ~{k} launches ({len(full)} total, dfill={DFILL}"
           f"{', +S26 twin' if graphs26 is not None else ''})", flush=True)
   return st["graphs"]

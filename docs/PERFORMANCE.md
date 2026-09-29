@@ -225,7 +225,74 @@ line-for-line**. Battery + banks: [history/T2_P8W4.md](history/T2_P8W4.md).
 MoE P10 (MTP default) soak 106 rounds / 15 min zero failures — streams +
 follow-ups + quote classes + cancels + health polls, dirty never set. The
 R3/L7 hardening behind this: 51 review findings fixed in five waves +
-the abort-safety protocol (below).
+the abort-safety protocol (below). Post-P10, the dense soak record is a
+**42.7-min / 300-problem GSM8K run with ZERO engine deaths** (death
+watcher clean, engine pid unchanged) — the same traffic class crashed
+every 13-18 min before the kernargs-slab pool.
+
+## Output-quality eval battery (P9 — the first quality numbers)
+
+All prior gates were bit-exactness; this battery measures what the models
+actually answer, through the live serving stack (harnesses + per-item
+results in [../eval/](../eval/), narrative in
+[../eval/P9_EVAL_RESULTS.md](../eval/P9_EVAL_RESULTS.md), journal
+[history/MM_P9E_results.txt](history/MM_P9E_results.txt)).
+
+**GSM8K** (4-shot primer from the paper's train split, FIRST 100 test
+problems, greedy, `enable_thinking=false`, max_tokens=320, streaming):
+
+| Model | Accuracy | Decode tok/s (med) | TTFT med | Latency med |
+|---|---|---|---|---|
+| Qwen3.8-27B dense (K=10 lookup) | **95.0%** | 23.0 | 2.4 s | 8.4 s |
+| Qwen3.6-35B-A3B MoE (MTP K=4) | **93.0%** | 36.7 | 9.5 s | 13.2 s |
+
+Zero answer-extraction failures on both legs. Caveats, honestly: the dense
+leg rode ~10 engine deaths (the F2 crash-loop, since fixed) via a resume
+driver; both legs predate the first-token fix (F1), but the lost token was
+always the answer echo's leading word, never the final number — the scores
+stand. Post-fix, the first-20 GSM8K rerun was 20/20 identical predictions.
+The MoE TTFT is its weak spot (~66 tok/s effective FRESH prefill through
+the stack; no cross-conversation cache hits by design in this battery).
+A post-P10 300-problem soak run scored 94.0% at 23.2 tok/s median decode —
+performance unchanged, zero deaths.
+
+**Perplexity** (MoE, engine-side teacher-forced NLL, 118-135 tok/s scoring
+rate; identical corpora + tokenizer for future apples-to-apples regression
+deltas):
+
+| Domain | Tokens | NLL/tok | PPL | Greedy next-token acc |
+|---|---|---|---|---|
+| prose (Pride & Prejudice) | 32,767 | 0.1304 | 1.139 | 96.5% |
+| code (the serving layer) | 10,239 | 2.9931 | 19.95 | 53.7% |
+| prose_private (fix-campaign journal) | 3,071 | 3.5374 | 34.38 | 38.4% |
+| code2 (MoE kernel library) | 8,703 | 1.5712 | 4.812 | 70.8% |
+
+**The memorization caveat**: the Gutenberg classic is verbatim-memorized
+(96.5% greedy next-token) — its PPL 1.14 is a CONTAMINATION FLOOR, not a
+quality number. The honest domains are code 19.9, code2 4.8,
+prose_private 34.4. These are the program's first PPL baselines. Dense
+direct-scoring PPL is blocked by a device fault at the first scoring
+boundary (F5, still open).
+
+**Long-context needle** (dense; 5-digit code embedded in Gutenberg filler,
+chat API, thinking off):
+
+| Battery | Result |
+|---|---|
+| 61,189-token contexts (60k class), 10 trials @ 5-95% depth | **10/10 clean, 10/10 EXACT retrieval** (post-P10; e.g. code 53177 -> exactly "53177", ~331 tok/s end-to-end on the manual trial) |
+| ~20k-token contexts, 10 trials | 10/10 clean, 8/10 exact retrieval |
+| Pre-fix (P9, for the record) | 10/10 FAIL at both 60k and 20k — the F3 sysmem exhaustion blocked every long-prompt prefill; one clean manual 61k datapoint demonstrated the capability |
+
+The needle battery is the F3 regression test: it fails loudly the moment
+graph-build mapping exhaustion returns.
+
+**Quality findings that became fixes** (full ledger in
+[../eval/P9_EVAL_RESULTS.md](../eval/P9_EVAL_RESULTS.md)): F1 first-token
+loss (every completion dropped its first token; one-token answers came
+back empty — fixed in the API layer), F2 dense crash-loop + F3 long-prompt
+mapping exhaustion (both dead via the P10 kernargs-slab pool: `mapfd`
+counters freeze at 85 with ka_reused=1916 vs ka_fresh=42 lifetime), F5
+dense direct-PPL device fault (open), F7 the staydown-marker law.
 
 ## What this rig can and can't do (measured)
 

@@ -356,7 +356,7 @@ seeds `tok_hist` on the boot/FRESH/FOLLOW_UP/CACHE_HIT/snapshot_load paths.
 Without seeding, the first FRESH generate self-matches a -1 prefix -> -1
 drings -> OOB fault (never exercised before deep-K shipped).
 
-## Known issues (the honest ledger — W5 + MM live findings)
+## Known issues (the honest ledger — W5 + MM + P9/P10 live findings)
 
 1. **CACHE_HIT continuations from midprefill/turnend pcache nodes are not
    bit-exact vs FRESH** (pre-existing since the R2c M128 trunk; FIX_CAMPAIGN
@@ -378,12 +378,20 @@ drings -> OOB fault (never exercised before deep-K shipped).
    batch phases fail the bit-exactness gate (finding #5's class extended to
    the batch config). Batch mechanics themselves (concurrency,
    determinism, slot hygiene) are healthy.
-4. **The kernargs-slab leak** (R6 P3): every graph build allocates a
-   host-mapped kernargs slab that is never released; long-running batch
-   service mitigates with rotated fences + non-fatal failed fences. Durable
-   fix (ka-slab reuse) is a documented follow-up. (The MoE campaign's
-   KAPool reuse audits show rebuilds REUSING slices in that engine — the
-   leak remains a dense-gcycle follow-up.)
+4. **~~The kernargs-slab leak~~ FIXED (P10)**: every graph build used to
+   allocate a host-mapped kernargs slab that was never released (the dext
+   has no unmap RPC). It eventually killed long-prompt serving (P9 F3: new
+   PfGraph builds raised IndexError once the 128 sysmem-mapping pool
+   drained — ≥20k prompts failed 10/10) and correlated with a dense crash
+   loop under sustained load (P9 F2: ~10 deaths in 3 h, MTBF 13-18 min).
+   The fix is a recycling pool (`engine/ka_pool.py`, `TLX_KA_POOL=1`
+   default-on): retirement zero-fills a slab and pushes it on a free list;
+   new builds pop before mapping fresh; steady state never calls
+   MAP_SYSMEM_FD again. Post-fix: needle 61k 10/10 exact, and a 42.7-min
+   300-problem GSM8K soak with ZERO deaths at unchanged perf. Watch it via
+   the `ka` counters in `/health` (ka_fresh/ka_reused/ka_pooled/ka_live +
+   mapfd, the lifetime mapping count — must go FLAT after warm-up).
+   `TLX_KA_POOL=0` restores the exact legacy behavior.
 5. **The MoE first-contact gate shape** (P10, adjudicated): a spec-vs-T1
    gate that runs right after pcache ingest compares FRESH-vs-RESTORED
    (arm A feeds + ingests, arm B restores); reruns compare
@@ -396,6 +404,13 @@ drings -> OOB fault (never exercised before deep-K shipped).
 6. **MoE long-ctx MTP alpha unmeasured** — the acceptance table's 96k
    entries are harness-class only; the serving-grade 96k alpha battery is
    queued.
+7. **Dense direct-scoring PPL device fault (P9 F5, open)**: the dense
+   teacher-forced scorer (`eval/ppl_dense.py`) launches clean at the first
+   ingest boundary but the logits copyout hits `Device fault detected`
+   (2/2 boots). Distinct from the (fixed) mapping exhaustion — this is a
+   device fault during the boundary download; needs its own bisect
+   (suspect: eager head launches interleaved with the m128 chunk-graph
+   timeline). Serving itself is unaffected; only the offline scorer.
 
 ## Not yet (M2/M3)
 

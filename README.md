@@ -48,6 +48,8 @@ dext, `pcache`.
 | Follow-up turns | Resident conversation state: a 200-token turn @2k-class in **~2.1 s** vs ~6.1 s fresh |
 | Supervised operation | launchd supervisor + circuit breaker + env single-sourcing + boot-time kernel tripwires; survives GPU-fault reboots |
 | Exactness | **Bit-exact by default** — every speculative mode emits the identical token stream a non-speculative greedy rollout produces (Tier-1) |
+| Output quality | **GSM8K 95.0%** dense (K=10) / **93.0%** MoE (MTP K=4) through the full serving API, 4-shot greedy · **61k-context needle: 10/10 exact retrieval** |
+| Long-prompt reliability | Long prompts ≥20k tokens now serve reliably (a graph-kernargs pool recycles the driver's limited sysmem mappings); **42-min sustained-load soak with zero crashes** (300-problem GSM8K run, was a crash every 13-18 min before the fix) |
 
 ## Qwen on a Mac with an RTX 3090: the benchmark numbers
 
@@ -71,6 +73,8 @@ bit-exact (see FAQ). Full context and the complete ladders:
 | Cached 100k-context restore | ~6.5 s vs ~13 min FRESH; 60/60 exact across 4 restarts |
 | Tier-1 gate: speculative == greedy T=1 rollout | **60/60 bit-exact, x2 deterministic; 59/59 vs stock tinygrad** |
 | Deep-K acceptance (K=10) | E[m\|deep] = 10.000 — 92/92 deep cycles accept ALL TEN; 76.7% deep hits |
+| Quality: GSM8K (4-shot, greedy, through the API) | **95.0%** (first 100 test problems, 0 extraction failures; 23.0 tok/s median decode, 2.4 s TTFT) |
+| Quality: long-context needle @61k | **10/10 exact retrieval** (61,189-token contexts, code at 5-95% depth; 20k control 10/10 clean, 8/10 exact) |
 
 **Qwen3.6-35B-A3B (MoE, through the full API, MTP mode default):**
 
@@ -84,6 +88,7 @@ bit-exact (see FAQ). Full context and the complete ladders:
 | Prefill, chunk-256 (bit-exact class) | 181-204 tok/s @2k-16k; full 96k feed ~800 s end-to-end |
 | Tier-1 gate through the daemon | 60/60 mtp == t1 bit-exact, x2 deterministic (60-prompt bank) |
 | Prompt-cache hit | continuation EXACT vs the FRESH arm (G4); ~76 MB per 1k-token node |
+| Quality: GSM8K (4-shot, greedy, through the API) | **93.0%** (first 100 test problems; 36.7 tok/s median decode, 9.5 s TTFT — TTFT is the MoE's weak spot, ~66 tok/s effective FRESH prefill) |
 
 **Audited, not just benchmarked.** Before this snapshot was published, the
 whole stack went through repeated external-model review: a 10-review audit
@@ -103,6 +108,14 @@ campaign carried its own gate battery end-to-end (the full record,
 including the findings that remain open, is
 [docs/history/FIX_CAMPAIGN.md](docs/history/FIX_CAMPAIGN.md) +
 [docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) and the MM_P* journals).
+A first output-quality battery ([eval/](eval/)) then closed the loop between
+speed and correctness — GSM8K through the live API, perplexity baselines,
+61k-context needle retrieval — and caught two real serving bugs on the way:
+a first-token emission loss (every completion silently dropped its first
+token; fixed) and a graph-kernargs mapping exhaustion that crashed
+long-prompt serving (fixed with a slab-recycling pool: long prompts ≥20k
+now serve reliably, and a 42-minute sustained-load soak ran with zero
+crashes where the same traffic class used to die every 13-18 minutes).
 
 ## Can you use an eGPU with Apple Silicon?
 

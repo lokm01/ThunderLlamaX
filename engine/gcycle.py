@@ -17,6 +17,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.runtime.ops_nv import NVComputeQueue, nv_wait_timeline
 from engine0 import dev
+from ka_pool import ka_alloc, ka_release   # TLX P10 (F2/F3 fix)
 
 class ParityGraph:
   def __init__(self, seq, tag="g"):
@@ -25,8 +26,12 @@ class ParityGraph:
     self.prev_var = UOp.variable(f"{tag}_tl_prev", 0, 0xffffffff, dtype=dtypes.uint32)
     self.cur_var = UOp.variable(f"{tag}_tl_cur", 0, 0xffffffff, dtype=dtypes.uint32)
     # one host-mapped kernargs slab for the whole graph
+    # TLX P10: slabs come from the ka pool (F2/F3 fix) — pooled slabs are
+    # zero-filled on retirement, so at hand-out they are byte-identical to a
+    # fresh (zero-filled) MAP_SYSMEM_FD mapping. TLX_KA_POOL=0 restores the
+    # legacy fresh-alloc-every-build behavior exactly.
     per = max(round_up(p.kernargs_alloc_size, 8) for p, a, g in seq)
-    self.ka = dev.allocator.alloc(per * len(seq), BufferSpec(cpu_access=True, nolru=True))
+    self.ka = ka_alloc(per * len(seq), dev)
     self.ka_keep = self.ka  # hold refs (Bufs._keep discipline)
     q = NVComputeQueue()
     q.memory_barrier()
@@ -49,6 +54,14 @@ class ParityGraph:
     # dext (MTP_GRAPH_NOBIND convention). Per-submit cost is a tiny _q copy; the
     # 452 kernels chain inside QMDs, so _q is only a few dozen words.
 
+  def close(self):
+    """TLX P10: retire the kernargs slab to the pool. Call ONLY at a
+    quiescent point (the caller's rebuild discipline; ka_release re-asserts
+    dev.synchronize() defensively per the V-56 close() law)."""
+    if getattr(self, "ka", None) is not None:
+      ka_release(self.ka, self.dev)
+      self.ka = None; self.ka_keep = None
+
   def submit(self, prev_v, cur_v):
     # L7 FIX 5 (the R6 GRAPH-CLASS PREFILL BUDGET law): count EVERY graph
     # class against the global dext budget — prefill chunk replays spent the
@@ -68,7 +81,11 @@ class GCycleEngine:
 
   def build(self):
     if not hasattr(self.E, "_seq"): self.E._build_seqs()
-    self.graphs = {par: ParityGraph(self.E._seq[par], tag=f"w1c{par}") for par in (0, 1)}
+    # TLX P10: build-then-swap — a failed build leaves the OLD graphs live.
+    _old, self.graphs = self.graphs, {par: ParityGraph(self.E._seq[par], tag=f"w1c{par}") for par in (0, 1)}
+    for g in (_old or {}).values():
+      try: g.close()
+      except Exception: pass
 
   def _kicker(self):
     """W4.2 (V-59, the LONE-GRAPH law): a LONE-submitted graph never completes

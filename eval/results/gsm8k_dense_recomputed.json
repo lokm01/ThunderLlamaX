@@ -1,0 +1,1 @@
+{"tag": "dense", "n_completed": 100, "accuracy": 0.95, "n_correct": 95, "extract_fail": 0, "hash_extracts": 0, "lat_med": 8.41, "ttft_med": 2.41, "decode_tps_med": 22.98, "decode_tps_mean": 23.13, "ctok_med": 131.0, "ptok_med": 633.0}

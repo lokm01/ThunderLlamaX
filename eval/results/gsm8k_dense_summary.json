@@ -1,0 +1,22 @@
+{
+ "tag": "dense",
+ "model": "qwen3.8-27b-egpu",
+ "n": 100,
+ "shots": 4,
+ "max_tokens": 320,
+ "thinking": false,
+ "accuracy": 0.02,
+ "n_correct": 2,
+ "n_completed": 2,
+ "n_prev_done": 98,
+ "extract_failures": 0,
+ "latency_mean_s": 13.91,
+ "latency_median_s": 18.08,
+ "ttft_median_s": 12.49,
+ "gen_time_median_s": 7.41,
+ "completion_tokens_median": 165,
+ "prompt_tokens_median": 675,
+ "decode_tps_median": 22.52,
+ "decode_tps_mean": 22.4,
+ "wall_s": 27.8
+}

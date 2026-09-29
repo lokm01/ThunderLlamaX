@@ -373,7 +373,17 @@ class MTPEngine(TrunkEngineW1C):
     P.up("dring8", np.full(1, 0, dtype=np.int32))
     P.up("dring9", np.full(1, 0, dtype=np.int32))
     self._flush()
-    self.graphs = None   # buffer handles changed
+    # TLX P10 (pool-gated): buffer handles changed -> ALL graph sets invalid;
+    # retire their slabs and clear the deep/lookup refs so every generate path
+    # hits the loud "build_graphs first" assert until rebuilt (the old code
+    # left the deep tuples live on stale handles = the wrong-answers class).
+    from ka_pool import _POOL_ON as _KA_POOL_ON
+    if _KA_POOL_ON:
+      self._retire_graphs(self._live_graph_objs())
+      self.graphs = self.graphs5 = self.graphs6 = None
+      self.draft_lu_g = self.lu_t1_g = None
+    else:
+      self.graphs = None   # buffer handles changed (legacy exact)
 
   # ---------- draft chain step (13 kernels; buffer handles in, launch list out) ----------
   def _draft_entries(self, tokbuf, posbuf, hmbuf, hdbuf, dringbuf, dd=None):
@@ -437,8 +447,31 @@ class MTPEngine(TrunkEngineW1C):
     print(f"[fill_draft] {len(ids)} positions in {time.perf_counter()-t0:.1f}s", flush=True)
 
   # ---------- graphs ----------
+  def _live_graph_objs(self):
+    """TLX P10: every live ParityGraph (dedup'd — draft_g/flush_g are SHARED
+    between the K2 and the deep graph tuples)."""
+    out, seen = [], set()
+    for attr in ("graphs", "graphs5", "graphs6"):
+      for g in (getattr(self, attr, None) or ()):
+        if id(g) not in seen: seen.add(id(g)); out.append(g)
+    for attr in ("draft_lu_g", "lu_t1_g"):
+      g = getattr(self, attr, None)
+      if g is not None and id(g) not in seen: seen.add(id(g)); out.append(g)
+    return out
+
+  def _retire_graphs(self, graphs):
+    """TLX P10: return retired graphs' kernargs slabs to the ka pool.
+    Best-effort per graph; the caller owns the quiescent-point discipline
+    (ka_release re-asserts dev.synchronize() defensively)."""
+    for g in graphs:
+      try: g.close()
+      except Exception: pass
+
   def build_graphs(self):
     d, W, pr = self.P.d, self.W, self.pr
+    # TLX P10: stash the PREVIOUS set; retire only AFTER the new one is built
+    # (the W5 posture: a failed rebuild leaves the old graphs servable).
+    _prev_graphs = self._live_graph_objs()
     # TLX W4.4 (V-52): the K-suffix manifest assert — every trunk/stateful cubin,
     # scratch buffer, and the emit layout must match the rung manifest EXACTLY
     # (catches accept/acceptsel/lookup mispairing = the R4/R7 rec4-OOB class).
@@ -660,6 +693,9 @@ class MTPEngine(TrunkEngineW1C):
       self.graphs6 = (draft_g, probe6_g, accept6_g, flush_g)
       print(f"[mtp] deep graphs built: probe6 {len(p6seq)}k, accept6 {len(aseqN)}k", flush=True)
     print(f"[mtp] graphs built: probe {len(seq)}k, draft {len(dseq)}k, accept {len(aseq)}k, flush {len(fseq)}k", flush=True)
+    # TLX P10: recycle the replaced set's slabs (F2: each fence previously
+    # burnt ~6-8 fresh MAP_SYSMEM_FD slots for the daemon's whole life).
+    self._retire_graphs(_prev_graphs)
 
   def _probe5_seq(self):
     """R4: the DEEP (T=5) probe seq — mirrors the K2 probe with the M=5 kernel

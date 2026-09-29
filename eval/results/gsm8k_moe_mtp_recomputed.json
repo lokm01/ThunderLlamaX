@@ -1,0 +1,1 @@
+{"tag": "moe_mtp", "n_completed": 100, "accuracy": 0.93, "n_correct": 93, "extract_fail": 0, "hash_extracts": 0, "lat_med": 13.17, "ttft_med": 9.46, "decode_tps_med": 36.65, "decode_tps_mean": 36.53, "ctok_med": 123.5, "ptok_med": 633.0}

@@ -1,0 +1,40 @@
+P9 EVAL BATTERY (2026-09-29) — first output-QUALITY measurement (all prior gates were bit-exactness).
+Read eval/P9_EVAL_RESULTS.md for the full tables + evidence.
+
+HEADLINES:
+- GSM8K (4-shot, greedy, no-think, first-100 test): MoE-3.6-35B-A3B (MTP K=4 default path)
+  93.0% @ 36.7 tok/s decode med / 9.5s TTFT; DENSE-3.8-27B (K=10 lookup) 95.0% @ 23.0 tok/s /
+  2.4s TTFT. 0 extraction failures both legs. Dense leg rode ~10 engine deaths (F2).
+- PPL (MoE, engine-side teacher-forced, 118-135 tok/s): prose(P&P) 1.14 = CONTAMINATION FLOOR
+  (96.5% greedy = memorized); honest domains: code 19.9, code2 4.8, prose_private 34.4.
+  First PPL baselines for kernel/quant regression. Dense PPL BLOCKED (F5 device fault).
+- NEEDLE: blocked as a 10-trial number by F3 (sysmem exhaustion); ONE clean manual datapoint:
+  61,189-token ctx, needle @50% depth -> exact "53177" retrieval on a fresh boot.
+
+FINDINGS (ranked):
+F1 *** FIRST-TOKEN-LOSS IN SERVING — FOUND AND FIXED LIVE ***: the engine prefill's `cur`
+   (the model's FIRST response token; cycle emits start at the SECOND) was never fed into
+   the API's visible stream -> EVERY completion lost its first token; one-token answers came
+   back EMPTY (ct=0). Probe: eval/probe_engine.py. FIX in api_server.py ("P9 EVAL FIX
+   (first-token loss)", backup api_server.py.p9bak) — live for BOTH models, verified
+   ("12345"->"12345", "APPLE"->"APPLE"). The GSM8K numbers predate the fix but the lost
+   token was always the answer-echo's leading word, never the final number — they stand.
+F2 DENSE hard crash-loop under sustained decode load: ~10 deaths / ~3h, MTBF 13-18 min,
+   several full machine resets (GPU-EXIT class). Deaths at cumulative cycles 906/911/1206/
+   1457 WITH fences firing = NOT the classic 950 budget. MoE ran 100/100 clean — dense-
+   specific. Suspect: ka-slab leak accumulation (sysmem exhaustion; see F3).
+F3 SYSMEM EXHAUSTION (soft face): after enough graph builds, new PfGraph builds raise
+   IndexError @ system.py:383 (dext MAP_SYSMEM_FD returns no fd). Blocks ALL long-prompt
+   serving (needle at 60k AND 20k: 10/10 fail). Fresh boot clears. FIX = the known
+   kernargs-slab reuse open item. F2+F3 = same exhaustion, hard/soft faces (prime suspect).
+F4 /health correctly reports engine_down while the API survives (503-storm + flap = the
+   F2/F3 operator signature).
+F5 Dense direct-PPL: pfk_n16+head8 launch clean at the first ingest boundary; the logits
+   copyout hits Device-fault err_state (2/2 boots) — separate bisect needed.
+F6 Harness resume-accounting print bug (client-side; rows clean; finals recomputed).
+F7 Ops law: stop's staydown marker dies with the reset it provokes (newly-created-file
+   law) — PRE-CREATE the marker for quiet windows (used successfully 2x).
+
+RIG STATE AT CLOSE: MoE resident, health ok, smoke correct w/ first token intact.
+NEXT SESSION: (1) ka-slab reuse/free (kills F2+F3); (2) re-run needle battery + dense PPL
+(same corpora/tokenizer staged in eval/); (3) MTP-vs-T1 task-level delta via MM_MTP=0 boot.

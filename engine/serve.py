@@ -174,6 +174,17 @@ ST.last_rpc = time.time()
 # W2 telemetry (V-17/V-28 + watchdog beat)
 ST.rpc = None; ST.config_fp = None; ST.vocab = None
 ST.cycles_since_rebuild = 0; ST.step_beat = time.time()
+
+def _ka_slog_fields():
+  """TLX P10: ka-pool counters for slog lines (lazy import — serve.py keeps
+  'no engine imports at module load')."""
+  try:
+    from ka_pool import ka_stats
+    ks = ka_stats()
+    return dict(ka_fresh=ks["fresh"], ka_reused=ks["reused"], ka_pooled=ks["pooled"],
+                ka_live=ks["live"], mapfd=ks["mapfd_total"])
+  except Exception:
+    return {}
 ST.last_keepalive_ok = time.time()   # R3-02: idle-arm the watchdog on this
 ST.rebuild_fails = 0                 # R3-06: consecutive failed rebuilds
 ST.boot_beats = 0                    # R3-04b: boot-path heartbeats
@@ -541,7 +552,7 @@ def run_daemon(E, G, sess, decode_n, ref, ids, P0, CUR0, SNAP, CTXK, r6h=None):
         E.build_graphs()
         dev.global_cycle_ctr = 0
         ST.cycles_since_rebuild = 0     # fresh graph set = budget reset (both proxies)
-        slog(op="l7_entry_rebuild", gctr_at=GLOBAL_REBUILD_EVERY, tl=tl())
+        slog(op="l7_entry_rebuild", gctr_at=GLOBAL_REBUILD_EVERY, tl=tl(), **_ka_slog_fields())
       except Exception as e:
         ST.rebuild_fails += 1
         slog(op="l7_entry_rebuild_failed", error=repr(e), fails=ST.rebuild_fails)
@@ -935,7 +946,7 @@ def run_daemon(E, G, sess, decode_n, ref, ids, P0, CUR0, SNAP, CTXK, r6h=None):
             ST.cycles_since_rebuild = 0
             dev.global_cycle_ctr = 0      # L7 FIX 5: fence-class reset (both proxies)
             ST.rebuild_fails = 0            # R3-06: reset ONLY on success
-            slog(op="gen_rebuild", k=k, global_cycles=True, tl=tl())
+            slog(op="gen_rebuild", k=k, global_cycles=True, tl=tl(), **_ka_slog_fields())
           except Exception as e:
             # TLX W5 (finding #9, the KERNARGS-SLAB LEAK law): a failed rebuild
             # stays NON-FATAL for THIS generate (old graphs valid, sess holds
@@ -1602,6 +1613,7 @@ def run_daemon(E, G, sess, decode_n, ref, ids, P0, CUR0, SNAP, CTXK, r6h=None):
               "keepalive_s": KEEPALIVE_S, "keep_len": len(E.P._keep),
               "uptime_s": round(time.time() - ST.t0, 1),
               "config_fp": ST.config_fp, "lookup_k": os.getenv("LOOKUP_K"),
+        "ka": _ka_slog_fields(),
               "pf_prefill": os.getenv("PF_PREFILL"),
               "model_id": _MODEL_ID,          # R3-42 (pre-MoE: env or default)
               "cycles_since_rebuild": ST.cycles_since_rebuild,
@@ -1830,6 +1842,7 @@ def run_daemon(E, G, sess, decode_n, ref, ids, P0, CUR0, SNAP, CTXK, r6h=None):
         "queue": Q.qsize(), "keepalive_s": KEEPALIVE_S,
         "uptime_s": round(time.time() - ST.t0, 1),
         "config_fp": ST.config_fp, "lookup_k": os.getenv("LOOKUP_K"),
+        "ka": _ka_slog_fields(),
         "pf_prefill": os.getenv("PF_PREFILL"),
         "cycles_since_rebuild": ST.cycles_since_rebuild,
         "streams": [{"slot": st.s, "conversation_id": st.convo_id, "pos": st.pos_cache,
@@ -1925,6 +1938,7 @@ def run_daemon(E, G, sess, decode_n, ref, ids, P0, CUR0, SNAP, CTXK, r6h=None):
       "uptime_s": round(time.time() - ST.t0, 1),
       "config_fp": ST.config_fp, "lookup_k": os.getenv("LOOKUP_K"),
       "pf_prefill": os.getenv("PF_PREFILL"),
+      "ka": _ka_slog_fields(),           # TLX P10 pool counters (F2/F3)
       "cycles_since_rebuild": ST.cycles_since_rebuild,
       "model_id": _MODEL_ID,               # R3-42 (L2 fix: inline path missed)
       "cycle_cap": max(1, min(4096, CTXK - max(0, int(ST.pos_cache)))),  # R3-34
