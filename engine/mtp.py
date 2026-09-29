@@ -35,6 +35,20 @@ PVH = bool(int(_os2.getenv("PVH", "0")))  # W2F L2: partial-half2 PV in the QH K
 HM = bool(int(_os2.getenv("HM", "0")))    # W2G: HMMA tensor-core K1 dots (a3/probe build only; a1 stays scalar)
 SG = bool(int(_os2.getenv("SG", "0")))    # W2F L4: k2s3v grid-split scan + k2z3 norm
 SLICE = 40960
+# TLX P10-dense (Route A rung 1): the FULL-VOCAB draft head. The A.2 rank
+# histogram measured 89.8% of novel-prose targets OUT-OF-SLICE (top1==target
+# 6.1%) — the 40960-row prompt-frequency slice head cannot propose them, so
+# prose K2 cycles accept nothing and the alpha-death controller parks the
+# engine in T=1 at ~20.6 tok/s. sheadf/samxf propose over the whole 248320-row
+# W[("head",0)] (the SAME resident Q5_K head the trunk probe reads — no new
+# VRAM; logits3 row 0 is the scratch, dead at draft time by timeline order).
+# Draft-source-only knob: trunk numerics + emit/accept contracts UNCHANGED
+# (probe-verifies every emission — Tier-1 spec==T1 by construction). NOT a
+# config_fp key (same class as the MoE MM_MTP draft-source knob).
+TLX_DHEAD_FULL = bool(int(_os2.getenv("TLX_DHEAD_FULL", "0")))
+if TLX_DHEAD_FULL and int(_os2.getenv("BATCH_B", "1")) >= 2:
+  # the R6 batch per-stream draft chains would race on the SHARED logits3 row 0
+  raise RuntimeError("TLX_DHEAD_FULL requires BATCH_B=1 (shared logits3 draft scratch)")
 RBLK = 48*128*128
 CBLK = 3*10240
 
@@ -75,7 +89,32 @@ M4_CUBINS = ["h_embed4","k0n4","k0ab4","q5g8v4","k2s4","op38nw32_4","k3aonw32_4"
 LOOKUP_K = int(_os2.getenv("LOOKUP_K", "0"))
 DEEP_MODE = _os2.getenv("LOOKUP_DEEP_MODE", "sel")   # R4 diag: sel | off | on
 assert not (LOOKUP_K and K3), "LOOKUP_K and K3 are exclusive"
-assert LOOKUP_K in (0, 4, 5, 6, 7, 8, 9, 10), "LOOKUP_K: 0 (off), 4/5/6/7/8/9/10 (deep K, R5/R5d/R7a/R8)"
+assert LOOKUP_K in (0, 4, 5, 6, 7, 8, 9, 10), "LOOKUP_K: 0 (off), 4/5/6/7/8/9/10 (deep K, R4/R5/R5d/R7a/R8)"
+# TLX P10-dense rung 2 (THE K=4 EAGLE CHAIN): TLX_EAGLE_K=4 extends the draft
+# chain to 4 EAGLE steps (dring0..3 proposed by the full-vocab head) and runs
+# the R4 M=5 probe (T=5) + accept m-ladder as the PROSE set (graphs5). K-mix:
+# quote-class deep hits keep the K=10 deep set UNTOUCHED (the 75.8 engine);
+# non-deep cycles pick K4 vs K2 by a prose hysteresis — TLX_EAGLE_PROSE_TRIG
+# consecutive zero-hit miss cycles ENGAGE prose (quote misses are isolated so
+# the K2 set keeps serving them); any hit DISENGAGES; 0 = K4 always (gating).
+# Decode-behavior knob (changes which probe/accept graphs verify emissions) —
+# registered in svc_fp._ENV_KEYS (the LOOKUP_K precedent). Requires the
+# shipped dense world: TLX_DHEAD_FULL + LOOKUP_K>=8 + PF_DR7 + GEMVV, K3 off.
+TLX_EAGLE_K = int(_os2.getenv("TLX_EAGLE_K", "2"))
+TLX_EAGLE_PROSE_TRIG = int(_os2.getenv("TLX_EAGLE_PROSE_TRIG", "4"))
+if TLX_EAGLE_K not in (2, 4):
+  raise RuntimeError(f"TLX_EAGLE_K: 2 (rung-1 chain) or 4 (K=4 EAGLE chain), got {TLX_EAGLE_K}")
+if TLX_EAGLE_K == 4:
+  assert TLX_DHEAD_FULL and DR7 and LOOKUP_K >= 8, \
+    "TLX_EAGLE_K=4 requires TLX_DHEAD_FULL=1, PF_DR7=1 and LOOKUP_K>=8 (the shipped dense world)"
+  assert not K3 and GEMVV, "TLX_EAGLE_K=4 requires K3 off and GEMVV=1"
+# The M=5 probe set for the EAGLE world under DR7: the R4 M5 family with the
+# ffn/down pair swapped to the r7 twins (ffn8v5r7/down8nw32v5r7, P10 rung 2 —
+# the packed originals are NOT resident under PF_DR7). lookup5_nw32 is loaded
+# for the rung-manifest presence check only (the K=10 lookup11 does the scan).
+M5E_CUBINS = ["h_embed5","k0n5","k0ab5","q5g8v5","k2s5","op38nw32_5","k3aonw32_5",
+              "ao8nw32_5","hh5","ffn8v5r7","down8nw32v5r7","aq3k8v5","aq6k8v5",
+              "head8v5","accept5k","accept5e","acceptsel5k","lookup5_nw32"]
 if LOOKUP_K:
   RM = {4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10, 10: 11}[LOOKUP_K]
   assert KV8 and QH and HM and SKV, "LOOKUP_K requires the canonical W2H env (SKV KV8 QH HM)"
@@ -138,7 +177,7 @@ class MTPEngine(TrunkEngineW1C):
   def __init__(self, theta=10000.0):
     super().__init__(theta)
     P = self.P
-    for n in M3_CUBINS + (V2_CUBINS if GEMVV else []) + (M4_CUBINS if K3 else []) + (M5_CUBINS if LOOKUP_K == 4 else []) + (M6_CUBINS if LOOKUP_K == 5 else []) + (M7_CUBINS if LOOKUP_K == 6 else []) + (M8_CUBINS if LOOKUP_K == 7 else []) + (M9_CUBINS if LOOKUP_K == 8 else []) + (M10_CUBINS if LOOKUP_K == 9 else []) + (M11_CUBINS if LOOKUP_K == 10 else []) + (["k2s3v","k2z3"] if SG else []) + (LUT_CUBINS if (LOOKUP and not LOOKUP_K) else []) + MTpd_CUBINS:
+    for n in M3_CUBINS + (V2_CUBINS if GEMVV else []) + (M4_CUBINS if K3 else []) + (["sheadf", "samxf"] if TLX_DHEAD_FULL else []) + (M5_CUBINS if LOOKUP_K == 4 else []) + (M6_CUBINS if LOOKUP_K == 5 else []) + (M7_CUBINS if LOOKUP_K == 6 else []) + (M8_CUBINS if LOOKUP_K == 7 else []) + (M9_CUBINS if LOOKUP_K == 8 else []) + (M10_CUBINS if LOOKUP_K == 9 else []) + (M11_CUBINS if LOOKUP_K == 10 else []) + (M5E_CUBINS if TLX_EAGLE_K == 4 else []) + (["k2s3v","k2z3"] if SG else []) + (LUT_CUBINS if (LOOKUP and not LOOKUP_K) else []) + MTpd_CUBINS:
       lib = open(f"{BASE}/{n}.cubin", "rb").read()
       self.pr[n] = NVProgram(dev, TinyELF(lib=lib, name=n, target=dev.renderer.target, signature=tuple()))
     # ---- T=3 probe scratch ----
@@ -218,6 +257,7 @@ class MTPEngine(TrunkEngineW1C):
                            ("attn_out_d", 5120*2, np.float16, 7.7), ("hh_d", 5120*4, np.float32, 7.7e31),
                            ("hhx_d", 5120*2, np.float16, 7.7), ("gact_d", 17408*2, np.float16, 7.7),
                            ("hd_d0", 5120*4, np.float32, 7.7e31), ("hd_d1", 5120*4, np.float32, 7.7e31),
+                           ("hd_d2", 5120*4, np.float32, 7.7e31), ("hd_d3", 5120*4, np.float32, 7.7e31),
                            ("slogits", SLICE*2, np.float16, 7.7)]:
       P.poison(nm, nb, dt, pv)
     if KV8:
@@ -282,6 +322,12 @@ class MTPEngine(TrunkEngineW1C):
         for key, n in (("spk_pre11", "spk_pre11qh_100k"), ("spk_a11", "spk_g4nw32hm11_100k"), ("spk_c11", "spk_c11g_100k")):
           lib = open(f"{BASE}/{n}.cubin", "rb").read()
           self.pr[key] = NVProgram(dev, TinyELF(lib=lib, name=n, target=dev.renderer.target, signature=tuple()))
+      if TLX_EAGLE_K == 4:
+        # P10-dense rung 2: the T=5 probe's ROWS=5 attention set (the same
+        # triples the LOOKUP_K=4 world loads; _probe5_seq wires these keys).
+        for key, n in (("spk_pre5", "spk_pre5qh_100k"), ("spk_a5", "spk_g4nw32hm5_100k"), ("spk_c5", "spk_c5g_100k")):
+          lib = open(f"{BASE}/{n}.cubin", "rb").read()
+          self.pr[key] = NVProgram(dev, TinyELF(lib=lib, name=n, target=dev.renderer.target, signature=tuple()))
       if LOOKUP_K == 7:
         # R5d: the DEEP (ROWS=8) attention set (RMAX=48, RP=48 — NO padding rows, MAXOWN=2)
         for key, n in (("spk_pre8", "spk_pre8qh_100k"), ("spk_a8", "spk_g4nw32hm8_100k"), ("spk_c8", "spk_c8g_100k")):
@@ -295,7 +341,7 @@ class MTPEngine(TrunkEngineW1C):
       P.poison("ps3", 4*SKV_S*6*RM*4, np.float32, 7.7e31)
       P.poison("pA3", 4*SKV_S*6*RM*256*4, np.float32, 7.7e31)
       self._flush()
-    for nm in ("cur_slot", "dring0", "dring1", "dring2", "dring3", "dring4", "dring5", "dring6", "dring7", "dring8", "dring9", "m_slot", "cyc_slot", "dpos1", "dpos2", "fillpos", "dtokf"):
+    for nm in ("cur_slot", "dring0", "dring1", "dring2", "dring3", "dring4", "dring5", "dring6", "dring7", "dring8", "dring9", "m_slot", "cyc_slot", "dpos1", "dpos2", "dpos3", "fillpos", "dtokf"):
       P.up(nm, np.zeros(1, dtype=np.int32))
     P.up("m_hist", np.zeros(1 << 20, dtype=np.int32))   # M1-C: 1024 OOB-d at cyc>=1024 (accept writes m_hist[cyc_slot])
     if LOOKUP or LOOKUP_K: P.up("l_hist", np.zeros(1 << 20, dtype=np.int32))   # R3/R4: per-cycle lookup match len (0=miss; 9=hit)
@@ -386,10 +432,13 @@ class MTPEngine(TrunkEngineW1C):
       self.graphs = None   # buffer handles changed (legacy exact)
 
   # ---------- draft chain step (13 kernels; buffer handles in, launch list out) ----------
-  def _draft_entries(self, tokbuf, posbuf, hmbuf, hdbuf, dringbuf, dd=None):
+  def _draft_entries(self, tokbuf, posbuf, hmbuf, hdbuf, dringbuf, dd=None, with_head=True):
     # R6: dd = per-stream buffer-dict override (batched draft chains); default
     # path identical (dd=None -> self.P.d). Only kv_d/sc_d are persistent state
     # read here; all other d[] refs are intra-step transient (serialized-safe).
+    # P10-dense: with_head=False drops the head+argmax pair (fill_draft never
+    # consumes the draft argmax — its tokens come from the prompt; the full
+    # head would add ~4-5ms/tok of pure waste to every prompt-fill step).
     d, pr = (dd if dd is not None else self.P.d), self.pr
     e = []
     e.append((pr["h_embed"], (self.W[("emb",0)], d["grid512"], tokbuf, d["e_buf"]), 1))
@@ -410,8 +459,18 @@ class MTPEngine(TrunkEngineW1C):
     e.append((pr["dfgu"], (d["d_fg"], d["d_fu"], d["hhx_d"], d["gact_d"]), 2176))
     e.append((pr["ddown"], (d["d_fd"], d["gact_d"], d["hh_d"], hdbuf), 640))
     e.append((pr["k0_norm"], (hdbuf, d["d_shnw"], d["xh_d"]), 1))
-    e.append((pr["shead"], (d["slice_w"], d["xh_d"], d["slogits"]), SLICE//8))
-    e.append((pr["samx"], (d["slogits"], d["stab"], dringbuf), 1))
+    if not with_head:
+      return e
+    if TLX_DHEAD_FULL:
+      # P10-dense: full-vocab head (W[("head",0)] is the trunk head Q5_K plane;
+      # logits3 row 0 = the draft scratch, overwritten by the probe head before
+      # any probe-side read — timeline-ordered graphs). samxf writes the token
+      # id directly (row index == id; no stab gather).
+      e.append((pr["sheadf"], (self.W[("head",0)], d["xh_d"], d["logits3"]), VOCAB//8))
+      e.append((pr["samxf"], (d["logits3"], dringbuf), 1))
+    else:
+      e.append((pr["shead"], (d["slice_w"], d["xh_d"], d["slogits"]), SLICE//8))
+      e.append((pr["samx"], (d["slogits"], d["stab"], dringbuf), 1))
     return e
 
   def fill_draft(self, ids, start_pos=0, seed_hd=None, prog=None):
@@ -428,7 +487,8 @@ class MTPEngine(TrunkEngineW1C):
     t0 = time.perf_counter()
     for q, tid in enumerate(ids):
       P.win_up("dtokf", 0, np.array([int(tid)], dtype=np.int32))
-      for p, a, g in self._draft_entries(P.d["dtokf"], P.d["fillpos"], P.d["hd_d1"], P.d["hd_d1"], P.d["dring0"]):
+      for p, a, g in self._draft_entries(P.d["dtokf"], P.d["fillpos"], P.d["hd_d1"], P.d["hd_d1"], P.d["dring0"],
+                                          with_head=not TLX_DHEAD_FULL):
         _nm = getattr(p, "name", "")
         p(*a, global_size=(g, 1, 1), local_size=((1024,1,1) if "nw32" in _nm else (768,1,1) if "nw24" in _nm else (512,1,1) if "nw16" in _nm else LS))
       pr["dposadd"](P.d["fillpos"], P.d["fillpos"], global_size=(1,1,1), local_size=LS)
@@ -485,12 +545,17 @@ class MTPEngine(TrunkEngineW1C):
       _eo = emit_offsets(LOOKUP_K)
       assert self.P.d["emit"].size >= 4 * _eo["words"], \
         f"emit buffer {self.P.d['emit'].size}B < manifest {_eo['words']} words"
+      if TLX_EAGLE_K == 4:
+        # P10-dense rung 2: the K4-EAGLE graphs5 set pairs the R4 M=5 rung
+        # (probe5 + accept5k/accept5e/acceptsel5k + the ROWS=5 attention set;
+        # manifest k4 carries the ffn8v5r7/down8nw32v5r7 twins as dr7_cu).
+        assert_rung_wiring(4, LOOKUP, set(pr.keys()) | {q.name for q in pr.values()}, 5, set(d.keys()), dr7=DR7)
     if DR7:
       # r7d.cu ports exist ONLY for the live families: K2-probe GEMVV (ffn8v_3 /
       # down8nw32_3) and the K=7 deep probe (ffn8v8 / down8nw32_8). Anything else
       # would read packed7 bytes through packed-layout kernels = silent garbage.
-      assert GEMVV and not K3 and LOOKUP_K in (0, 7, 8, 9, 10), \
-        "PF_DR7 requires GEMVV=1, K3 off, LOOKUP_K in (0,7,8,9,10)"
+      assert GEMVV and not K3 and (LOOKUP_K in (0, 7, 8, 9, 10) or TLX_EAGLE_K == 4), \
+        "PF_DR7 requires GEMVV=1, K3 off, LOOKUP_K in (0,7,8,9,10) (or TLX_EAGLE_K=4 with LOOKUP_K>=8)"
     # probe
     if K3:
       seq = [(pr["h_embed4"], (W[("emb",0)], d["grid512"], d["cur_slot"], d["dring0"], d["dring1"], d["dring2"], d["xA"]), 1)]
@@ -692,6 +757,33 @@ class MTPEngine(TrunkEngineW1C):
       accept6_g = ParityGraph(aseqN, tag="mtpA6")
       self.graphs6 = (draft_g, probe6_g, accept6_g, flush_g)
       print(f"[mtp] deep graphs built: probe6 {len(p6seq)}k, accept6 {len(aseqN)}k", flush=True)
+    if TLX_EAGLE_K == 4:
+      # P10-dense rung 2: the K4-EAGLE PROSE set. draft_g4 = the 4-step EAGLE
+      # chain with DEDICATED per-step hidden buffers (hd_d0=h(cur), hd_d1=
+      # h(dring0), hd_d2=h(dring1), hd_d3=h(dring2) — accept5e maps m to the
+      # exact hidden for m<=3) + the same deep lookup tail (inserted BEFORE
+      # the lookup entry so a hit still overwrites dring0..9 — dseq[-1] is
+      # the single lookup append under LOOKUP_K>=8). probe5_g = the R4 M=5
+      # trunk (T=5; ffn/down via the r7 twins under DR7); accept5_g = the
+      # m<=4 ladder + conv5x window select. The K2 set (self.graphs) and the
+      # deep set (self.graphs6) are UNTOUCHED — DecodeSession.step picks
+      # graphs5 on prose-hysteresis miss cycles (readout-order law).
+      dseq4 = dseq[:-1] + [(pr["dposadd"], (d["dpos1"], d["dpos2"]), 1)]
+      dseq4 += self._draft_entries(d["dring1"], d["dpos2"], d["hd_d1"], d["hd_d2"], d["dring2"])
+      dseq4 += [(pr["dposadd"], (d["dpos2"], d["dpos3"]), 1)]
+      dseq4 += self._draft_entries(d["dring2"], d["dpos3"], d["hd_d2"], d["hd_d3"], d["dring3"])
+      dseq4 += [dseq[-1]]
+      draft_g4 = ParityGraph(dseq4, tag="mtpD4")
+      p5seq = self._probe5_seq()
+      probe5_g = ParityGraph(p5seq, tag="mtpP5")
+      aseq5 = [(pr["accept5e"], (d["amds"], d["dring0"], d["dring1"], d["dring2"], d["dring3"], d["xA"],
+                                 d["m_slot"], d["m_hist"], d["cyc_slot"], d["pos_slot"], d["cur_slot"],
+                                 d["tok_hist"], d["h_seed"], d["hd_d0"], d["hd_d1"], d["hd_d2"], d["hd_d3"],
+                                 d["dhd_seed"], d["emit"], d["l_hist"]), 1),
+               (pr["acceptsel5k"], (d["rec4"], d["conv4"], d["m_slot"], d["conv5x"]), 48)]
+      accept5_g = ParityGraph(aseq5, tag="mtpA5")
+      self.graphs5 = (draft_g4, probe5_g, accept5_g, flush_g)
+      print(f"[mtp] K4-EAGLE graphs built: draft4 {len(dseq4)}k, probe5 {len(p5seq)}k, accept5 {len(aseq5)}k", flush=True)
     print(f"[mtp] graphs built: probe {len(seq)}k, draft {len(dseq)}k, accept {len(aseq)}k, flush {len(fseq)}k", flush=True)
     # TLX P10: recycle the replaced set's slabs (F2: each fence previously
     # burnt ~6-8 fresh MAP_SYSMEM_FD slots for the daemon's whole life).
@@ -717,8 +809,8 @@ class MTPEngine(TrunkEngineW1C):
                 (pr["spk_c5"], (d["pm3"], d["ps3"], d["pA3"], d["qrow3"], d["ao_row3"]), 24)]
         a += [(pr["ao8nw32_5"], (W[("o",i)], d["grid512"], d["ao_row3"], d["attn_out3"]), 160),
               (pr["hh5"], (xin, d["attn_out3"], W[("nw2",i)], d["hh3b"], d["hhx3"]), 1),
-              (pr["ffn8v5"], (W[("fg",i)], W[("fu",i)], d["gridf"], d["hhx3"], d["gact3"]), 2176),
-              (pr["down8nw32_5"], (W[("fd",i)], d["gridf"], d["gact3"], d["hh3b"], xout), 160)]
+              (pr["ffn8v5r7" if DR7 else "ffn8v5"], (W[("fg",i)], W[("fu",i)], d["gridf"], d["hhx3"], d["gact3"]), 2176),
+              (pr["down8nw32v5r7" if DR7 else "down8nw32_5"], (W[("fd",i)], d["gridf"], d["gact3"], d["hh3b"], xout), 160)]
       else:
         conv_b = d["conv4"].offset(offset=self.gdn_idx.index(i)*5*CBLK*4, size=5*CBLK*4)
         rec_b = d["rec4"].offset(offset=self.gdn_idx.index(i)*5*RBLK*4, size=5*RBLK*4)
@@ -732,13 +824,16 @@ class MTPEngine(TrunkEngineW1C):
         else:
           a.append((pr["op38nw32_5"], (W[("out",i)], d["gridf"], d["z3"], d["attn_out3"]), 160))
         a.append((pr["hh5"], (xin, d["attn_out3"], W[("nw2",i)], d["hh3b"], d["hhx3"]), 1))
-        a.append((pr["ffn8v5"], (W[("fg",i)], W[("fu",i)], d["gridf"], d["hhx3"], d["gact3"]), 2176))
-        a.append((pr["down8nw32_5"], (W[("fd",i)], d["gridf"], d["gact3"], d["hh3b"], xout), 160))
+        a.append((pr["ffn8v5r7" if DR7 else "ffn8v5"], (W[("fg",i)], W[("fu",i)], d["gridf"], d["hhx3"], d["gact3"]), 2176))
+        a.append((pr["down8nw32v5r7" if DR7 else "down8nw32_5"], (W[("fd",i)], d["gridf"], d["gact3"], d["hh3b"], xout), 160))
       seq += a
       cur ^= 1
     seq.append((pr["k0n5"], (d["xA"], W[("onw",0)], d["xh3"]), 1))
     seq.append((pr["head8v5"], (W[("head",0)], d["xh3"], d["logits3"]), VOCAB//8))
-    seq.append((pr["amx3"], (d["logits3"], d["amds"]), RM))
+    # P10-dense: rows pinned to the T this graph probes (RM is the ACTIVE
+    # set's M — 11 under LOOKUP_K=10; amx3 over stale rows would clobber
+    # amds[5..] with garbage argmaxes before a later deep cycle rewrites them).
+    seq.append((pr["amx3"], (d["logits3"], d["amds"]), 5))
     return seq
 
   def _probe6_seq(self):
@@ -1305,6 +1400,10 @@ class DecodeSession:
     self.t1pos = 0         # pos_new the T=1 stream has reached (host-tracked)
     self.t1cycidx = 0      # cyc_slot frozen at episode entry (l_hist read index)
     self.nt1cycles = 0     # lifetime T=1 cycles (stats)
+    # P10-dense rung 2: the K-mix prose hysteresis (TLX_EAGLE_K=4 only)
+    self.missrun = 0       # consecutive zero-hit non-deep cycles
+    self.prose = 0         # 1 = the K4-EAGLE set (graphs5) serves miss cycles
+    self.nprose = 0        # lifetime K4 cycles (stats)
 
   def begin(self):
     assert self.E.graphs, "build_graphs first"
@@ -1321,6 +1420,8 @@ class DecodeSession:
     self.t1mode = 0
     self.zerorun = 0
     self.t1cyc = 0
+    self.missrun = 0
+    self.prose = 0
 
   def _t1_enter(self, cur, pos):
     """spec world -> T=1 world. Quiescent-point only (post step() wait).
@@ -1388,7 +1489,11 @@ class DecodeSession:
     if self.prev is None: self.begin()
     if self.t1mode:
       return self._step_t1()
-    if LOOKUP_K >= 5: g = E.graphs6 if self.deep else E.graphs
+    ran_prose = 0   # P10-dense: the set THIS cycle ran (nprose stats)
+    if LOOKUP_K >= 5:
+      if self.deep: g = E.graphs6
+      elif TLX_EAGLE_K == 4 and self.prose: g = E.graphs5; ran_prose = 1
+      else: g = E.graphs
     elif LOOKUP_K: g = E.graphs5 if self.deep else E.graphs
     else: g = E.graphs
     ran_deep5 = (LOOKUP_K >= 5 and self.deep)   # the set that ran THIS cycle (emit layout)
@@ -1427,11 +1532,32 @@ class DecodeSession:
       else:   # R5: LOOKUP_TRIG (HyperQwen refinement) — deep needs N consecutive hits
         self.hitrun = self.hitrun + 1 if hit >= 9 else 0
         self.deep = 1 if self.hitrun >= DEEP_TRIG else 0
+    # P10-dense rung 2: the K-mix prose hysteresis — K4 engages after
+    # TLX_EAGLE_PROSE_TRIG consecutive zero-hit non-deep cycles (novel prose;
+    # quote-class misses are isolated so the K2 set keeps serving them) and
+    # disengages on the first hit (the deep set takes over anyway). TRIG=0 =
+    # K4 on every miss cycle (the gating mode). Readout-order law: the set
+    # choice reads THIS cycle's completed emit; it takes effect next cycle.
+    if TLX_EAGLE_K == 4:
+      if self.deep or hit >= 9:
+        self.missrun = 0; self.prose = 0
+      else:
+        self.missrun += 1
+        if TLX_EAGLE_PROSE_TRIG == 0 or self.missrun >= TLX_EAGLE_PROSE_TRIG:
+          self.prose = 1
+      if ran_prose: self.nprose += 1
     # A.1: the alpha-death tracker — enter the T=1 mode after N consecutive
     # K2 cycles that accepted nothing and hit nothing (the hysteresis that
     # protects the MTP-positive middle class). Needs the trunk engine + the
     # scan graph; headroom-checked so the episode + exit always fit the ctx.
-    if TLX_T1_MODE and LOOKUP_K >= 8 and not ran_deep5 \
+    # P10-dense: the T=1 entry is SUPPRESSED under TLX_DHEAD_FULL — the
+    # alpha-death controller was the fix for the slice-head m=0 world; with a
+    # full-vocab chain (acceptance ~0.6/cycle) a 4-zero-accept streak is noise,
+    # and the T=1 episode can NEVER exit on novel prose (the exit needs an
+    # 8-gram hit) — entering it parks the engine at the T=1 rate for the rest
+    # of the generation (the observed 20.6-trap; the penalty asymmetry is
+    # ~9ms/cycle vs +60-90% throughput). Knob-off keeps the controller.
+    if TLX_T1_MODE and not TLX_DHEAD_FULL and LOOKUP_K >= 8 and not ran_deep5 \
        and getattr(E, "gcycle", None) is not None and getattr(E, "lu_t1_g", None) is not None:
       if m == 0 and hit < 9: self.zerorun += 1
       else: self.zerorun = 0

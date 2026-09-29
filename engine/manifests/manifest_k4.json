@@ -9,7 +9,10 @@
   "spk_g4nw32hm5_100k",
   "spk_c5g_100k"
  ],
- "dr7_cu": [],
+ "dr7_cu": [
+  "ffn8v5r7",
+  "down8nw32v5r7"
+ ],
  "drings": 4,
  "emit_stop_off": 7,
  "emit_words": 10,

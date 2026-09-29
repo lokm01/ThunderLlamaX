@@ -15,7 +15,8 @@ CUDA driver, no NVIDIA userspace), a hand-written kernel engine, and an
 OpenAI-compatible API on top. The result: **two models served from one
 service** — Qwen3.8-27B dense at **75.81 tokens per second** decode
 (bit-exact against greedy decoding, 100k-token context, 569/510/342 tok/s
-prefill) and Qwen3.6-35B-A3B MoE at **97.6-104 tok/s** quote-class /
+prefill; **43.7 tok/s** on novel prose via its own EAGLE draft layer) and
+Qwen3.6-35B-A3B MoE at **97.6-104 tok/s** quote-class /
 **40.1 tok/s** prose-class — with a durable prompt cache that restores a
 100k context in ~6.5 seconds, speculative decoding that drafts from the
 document being read AND from the model's own MTP layer, and a model
@@ -39,8 +40,8 @@ dext, `pcache`.
 | Models | **Qwen3.8-27B** dense hybrid (48 gated-delta-net + 16 full-attention blocks, IQ3_XXS) · **Qwen3.6-35B-A3B** MoE (30 GDN + 10 attn blocks, 256 routed experts top-8 + shared, ~3B active, UD-IQ4_XS) |
 | Context | 100,352-token KV (dense) / 98,304 (MoE); gates run at a 97,810-token prompt |
 | Decode speed, quote-class @100k | **75.81 tok/s** dense (K=10 LOOKUP) · **97.6-104.0 tok/s** MoE (K=8 LOOKUP) — bit-exact in both |
-| Decode speed, prose-class | **20.6 tok/s** dense (adaptive T=1 mode) · **40.1 tok/s** MoE (first-party MTP K=4) |
-| Speculative decoding | n-gram LOOKUP from the document being read (K up to 10) **plus the model's own MTP layer as a first-party drafter** (K=4 chain, 0.875 depth-1 acceptance) |
+| Decode speed, prose-class | **43.7 tok/s** dense (the checkpoint's own EAGLE draft layer behind a full-vocab draft head, GSM8K median through the API) · **40.1 tok/s** MoE (first-party MTP K=4) |
+| Speculative decoding | n-gram LOOKUP from the document being read (K up to 10) **plus the models' own MTP layers as first-party drafters** (dense: EAGLE chain + full-vocab draft head; MoE: K=4 chain, 0.875 depth-1 acceptance) |
 | Prefill speed (dense) | **569.2 tok/s @2k · 510.1 @8k · 342.0 @100k** (Tier-2 default; bit-identical Tier-1 path one env away); MoE chunk-256 prefill 181-204 tok/s @2k-16k |
 | Multi-model serving | A model registry (`model_registry.json`), per-model env files + caches, `enginectl switch` — one resident at a time, 409 `model_not_resident` with a switch hint |
 | Batch mode (opt-in) | B=2 concurrent streams, per-stream bit-exact; 81.33 tok/s engine-class harness aggregate / honest 1.20x service-measured — see honesty section |
@@ -65,7 +66,7 @@ bit-exact (see FAQ). Full context and the complete ladders:
 |---|---|
 | Decode, K=10 deep-K LOOKUP (hit-class workload) | **75.81 tok/s** (~118 ms/cycle, 8.92 tok/cycle; R8 + the W5 re-validation, ladder ... -> 71.51 -> 74.70 -> 75.56 -> 75.81-through-the-fixed-stack) |
 | Decode, K=9 / K=8 / K=7 / K=2 rungs (same engine) | 74.70 / 71.5-72.0 / 63.11 / 40.35 tok/s |
-| Decode on novel prose (adaptive T=1 mode, shipped) | **20.56 tok/s** (was 14.67 pure-spec; output bit-identical) |
+| Decode on novel prose (full-vocab EAGLE draft head, shipped) | **43.7 tok/s** GSM8K median through the API (1.90x; was 20.56 adaptive-T1 / 14.67 pure-spec; quote-class unchanged at ~75) |
 | T=1 engine, no speculation, @100k | 21.78 tok/s (45.92 ms/token) |
 | Prefill FRESH @2k / @8k / 100k rebuild — Tier-2 W4A8 (default) | **569.2 / 510.1 / 342.0 tok/s** (+7.3/+6.4/+4.3% over Tier-1) |
 | — same, Tier-1 bit-identical path (kill-switch) | 530.6 / 479.4 / 328.0 tok/s |
@@ -73,7 +74,7 @@ bit-exact (see FAQ). Full context and the complete ladders:
 | Cached 100k-context restore | ~6.5 s vs ~13 min FRESH; 60/60 exact across 4 restarts |
 | Tier-1 gate: speculative == greedy T=1 rollout | **60/60 bit-exact, x2 deterministic; 59/59 vs stock tinygrad** |
 | Deep-K acceptance (K=10) | E[m\|deep] = 10.000 — 92/92 deep cycles accept ALL TEN; 76.7% deep hits |
-| Quality: GSM8K (4-shot, greedy, through the API) | **95.0%** (first 100 test problems, 0 extraction failures; 23.0 tok/s median decode, 2.4 s TTFT) |
+| Quality: GSM8K (4-shot, greedy, through the API) | **95.0%** (first 100 test problems, 0 extraction failures; decode median 23.0 tok/s at the P9 battery -> **43.7** with the P10 draft head, spot-verified 93.3% / 10-of-10; 2.4 s TTFT) |
 | Quality: long-context needle @61k | **10/10 exact retrieval** (61,189-token contexts, code at 5-95% depth; 20k control 10/10 clean, 8/10 exact) |
 
 **Qwen3.6-35B-A3B (MoE, through the full API, MTP mode default):**
@@ -187,11 +188,15 @@ While ingesting or revisiting long documents, the model's own context is the
 best drafter: a GPU-side n-gram scan finds where the current 8-token suffix
 last occurred and proposes the next K tokens from history (K has climbed
 2 -> 10; that's the X). On novel prose — where there is nothing to copy —
-the engines now ship their own answers: the dense model adaptively switches
-to lean T=1 cycles when drafting stops paying (+40% prose), and the MoE
+the engines now ship their own answers: the dense model runs its
+**checkpoint-shipped EAGLE draft layer behind a full-vocab draft head** (the
+old 40960-row slice head could only propose ~10% of novel-prose targets;
+proposing over the full vocabulary doubled prose to 43.7 tok/s), and the MoE
 model runs a **first-party MTP K=4 chain**: the model's own multi-token
 prediction layer (the `blk.40` head the checkpoint ships for exactly this)
 drafts four tokens ahead of the verifier, accepting 0.875 of first drafts.
+Speculation-depth machinery is likewise proven to K=4 on the dense engine
+(Tier-1 gated behind `TLX_EAGLE_K`) pending a deeper drafter.
 In every mode the load-bearing trick is the same: **every batched kernel
 preserves the single-token kernel's floating-point op order exactly, so
 acceptance can never flip a near-tie** — the speculative stream is
@@ -353,10 +358,14 @@ from the model re-reading text it already has (documents, code, quotes,
 repetitions). On the gate workload (a 100k prompt with a repeat region) the
 dense engine sustains 75.81; on novel prose the n-gram drafter never fires —
 and that's exactly where the two shipped prose modes kick in: the dense
-engine detects the dead drafter and switches to lean T=1 cycles (20.56
-tok/s, output bit-identical to the speculative stream), and the MoE engine
+engine drafts from its own EAGLE layer through a full-vocab head (43.7
+tok/s through the API, output bit-identical), and the MoE engine
 runs its first-party MTP K=4 chain (40.1 tok/s through the API, 0.875
-first-draft acceptance). All of these numbers are measured and published —
+first-draft acceptance). When a mode doesn't pay, that gets published too:
+the dense K=4 chain is built and Tier-1-proven but ships **off** — its
+1-layer drafter saturates at two accepted tokens, so K=4 measured **-25%
+prose** and the default stays K=2 until a deeper drafter exists (break-even
+math in PERFORMANCE.md). All of these numbers are measured and published —
 see "What this rig can and can't do" in
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md#what-this-rig-can-and-cant-do-measured).
 
@@ -410,8 +419,10 @@ OpenAI API + prompt cache under the launchd supervisor, with the environment
 split per model (`env.common` + `env.canonical.d/<model>.env`, generated
 from the published examples) and the kernel set asserted against rung
 manifests at every boot. **Two models serve from the one registry**: the
-dense Qwen3.8-27B (K=10 decode finished at 75.81; adaptive T=1 prose mode
-shipped at +40%) and the MoE Qwen3.6-35B-A3B (K=8 quote at 97.6-104 tok/s;
+dense Qwen3.8-27B (K=10 decode finished at 75.81; the full-vocab EAGLE
+draft head doubled novel-prose to 43.7 tok/s through the API; the K=4
+chain is built, Tier-1-gated, and honestly falsified at -25% until a
+deeper drafter exists) and the MoE Qwen3.6-35B-A3B (K=8 quote at 97.6-104 tok/s;
 first-party MTP K=4 prose at 40.1 — the multi-model campaign MM P0-P10,
 including its honestly-falsified fusion, is
 [docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) + the MM_P* journals).

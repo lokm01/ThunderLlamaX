@@ -40,6 +40,10 @@ def dr7_pair(M):
   M=9 via ffn8v9r7/down8nw32v9r7."""
   if M in (8, 9, 10, 11): return [f"ffn8v{M}r7", f"down8nw32v{M}r7"]
   if M == 3: return ["ffn8v3r7", "down8nw32v3r7"]
+  # P10-dense rung 2: the K=4 EAGLE T=5 probe's twins (the M5E load list under
+  # PF_DR7 wires these INSTEAD of the packed originals — the assert drops the
+  # base ffn8v5/down8nw32_5 requirement under DR7 exactly like the M=8..11 set)
+  if M == 5: return ["ffn8v5r7", "down8nw32v5r7"]
   return []
 
 def emit_manifest(K):

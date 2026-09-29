@@ -874,9 +874,62 @@ the reset and holds the engine down for standalone-GPU windows. Extends
 MM10b from swap-intent files to ops markers generally: pre-create, don't
 create-then-die.
 
+## PD. P10-dense prose-campaign laws (the full-vocab draft head + the K=4 verdict)
+
+Journals: PERFORMANCE.md "P10-dense" section; eval/results/gsm8k_p10_dhead*
++ gsm8k_p10r2_spot.jsonl. The prose 23.0 -> 43.7 tok/s run + the
+honestly-falsified K=4 EAGLE chain (machinery gated, default K=2).
+
+**PD1. THE SLICE-HEAD PROVENANCE LAW (rung 1).** A draft head over a
+prompt-frequency vocab SLICE cannot propose tokens it never saw: 89.8% of
+novel-prose targets were OUT-OF-SLICE (top1==target 6.1%) under the
+40960-row slice — measured by a rank histogram, not inferred. When a
+speculative mode accepts ~0, measure WHERE the targets land in the
+drafter's proposal space before touching the chain or the acceptance
+machinery. (The fix — the full-vocab head — reuses the resident trunk head
+plane: zero new VRAM, and the draft scratch rides a dead logits row.)
+
+**PD2. THE T=1-TRAP / PENALTY-ASYMMETRY LAW (rung 1, serving).** An
+alpha-death fallback whose EXIT condition can never fire on the workload
+that triggers its ENTRY is a one-way trap: the T=1 exit needs an 8-gram
+hit, which novel prose never produces — entering T=1 parks decode at the
+T=1 rate for the rest of the generation (the observed 20.6-trap: ~9
+ms/cycle saved vs 60-90% throughput lost). Under the full-vocab head
+(acceptance ~0.6+/cycle) the 4-zero-accept entry trigger is pure noise —
+suppress the ENTRY, keep the controller verbatim knob-off.
+
+**PD3. THE v3->v5 M-EXTENSION GENERATOR PATTERN (rung 2, gen_r7d5).** The
+r7 GEMV families M-extend by SOURCE TRANSFORM, not by hand: extract the
+_v3r7 body, extend the ACC/RED macros row-wise (ACC3H2 -> ACC5H2, RED3 ->
+RED5), keep the R7U uint4 W-fetch and the per-row fp order VERBATIM, and
+insert the new macro defs AFTER the full \-continued existing defs (the X8
+MACRO-DEF INSERTION law). Gate = A/B vs the packed originals nz=0 det x2
+(the r7d_test v5 pairs) + the ptxas audit (50/64 regs, 0 spill — the P18
+spill law). First-build-green at M=5.
+
+**PD4. THE INTERMEDIATE-BUILD PROVENANCE LAW (rung 2).** A perf log line
+is only as good as the build it ran on: rung-1's in-harness "46.46 ms /
+1.0 tok-cyc" prose number came from an INTERMEDIATE build — its rep shows
+56 T1-cycles, IMPOSSIBLE under the final T=1-entry suppression (which
+forbids T=1 cycles entirely). Falsify a banked number by checking its
+BYPRODUCTS against the final code's invariants (cycle-type counts, knob
+states), and re-derive every headline number on the FINAL build before
+publishing it (the shipped K2 world: 69.03 ms / 1.583 tok/cyc = 22.9 tok/s
+in-harness @100k; the daemon's 43.7 is GSM8K-class work at ~600-token
+contexts — different regimes, both true).
+
+**PD5. THE AMDS ROW-PINNING LAW (rung 2).** An in-graph argmax over a
+multi-row logits buffer must pin its row count to the T the graph PROBES:
+under LOOKUP_K=10 the deep probe writes RM=11 rows, so a probe-side amx3
+launched at the buffer's full row capacity would argmax STALE rows and
+clobber amds[5..] with garbage argmaxes before a later deep cycle rewrites
+them. Pin the rows to the active set's M (5 for the T=5 EAGLE probe),
+never the buffer's capacity.
+
 New cross-references: R6_BATCH.md (X1-X6), R8_DECODE.md (X7-X9),
 R1_PROMPTCACHE.md W3 section + FIX_CAMPAIGN.md (X10-X11),
 MM_PLAN.md + MM_P0..P10_results.txt (MM1-MM22), M1C_STABILITY.md
 R3 live-window section (the L1-L5 ops fixes: pipe-vs-heredoc zsh tokens,
 client-side staydown markers, stop-order, dir-fsync), MM_P9E_results.txt +
-eval/P9_EVAL_RESULTS.md (KA1-KA5 + the P9 findings F1-F7).
+eval/P9_EVAL_RESULTS.md (KA1-KA5 + the P9 findings F1-F7),
+PERFORMANCE.md P10-dense section + eval/results/gsm8k_p10_* (PD1-PD5).

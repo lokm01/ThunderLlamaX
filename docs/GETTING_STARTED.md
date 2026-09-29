@@ -338,7 +338,9 @@ example — generate the file for the full rig-fidelity run.)
 | `NV_SMEM_CFG_AUTO=1 NV_SMEM_CFG_AUTO_NAMES=pfg,pfa32c` | dynamic smem carveout for the big prefill kernels |
 | `NV_SPILL_EXEMPT_NAMES=pf,p8` | fork tripwire scoping — the Tier-2 prefill families run 104-592 B stack FRAMES by design (warn-only for these names; the hard >100 B spill law stays for the decode/canon set) |
 | `TLX_ADMIN_TOKEN` / `TLX_MODEL_PATH` | ops: the privileged-RPC token + the model path feeding the config fingerprint (live in env.canonical/env.common, not the repo) |
-| `TLX_T1_MODE=1` | dense: the adaptive T=1 prose mode (4 zero-accept K2 cycles -> T=1 cycles; first 8-gram hit exits to deep). Output-invariant by gate; ships ON in the dense model env |
+| `TLX_T1_MODE=1` | dense: the adaptive T=1 prose mode (4 zero-accept K2 cycles -> T=1 cycles; first 8-gram hit exits to deep). Output-invariant by gate; entry suppressed under `TLX_DHEAD_FULL` |
+| `TLX_DHEAD_FULL=1` | dense: the FULL-VOCAB EAGLE draft head — the blk.64 nextn chain proposes over the resident trunk head plane (prose 23.0 -> 43.7 tok/s through the API; zero new VRAM; draft-source-only, not an fp knob; kill-switch = remove the line) |
+| `TLX_EAGLE_K` | dense: the EAGLE chain depth — 2 (default, bit-exact to the rung-1 ship) or 4 (the Tier-1-proven K=4 graph set; honestly falsified at -25% prose on the 1-layer drafter — armed for a future deeper drafter). Registered in the config fingerprint |
 | `TLX_GLOBAL_CYCLE_REBUILD_EVERY=928` | L7 fix 5: the global graph-submit budget across all graph classes (the ~950-cycle dext envelope; fence resets it) |
 | `MM_MTP=1` | MoE: the first-party MTP K=4 chain as the default miss path (prose 19.1 -> 40.1 tok/s through the API; kill-switch = 0; draft-source-only, not an fp knob) |
 | `MM_MODEL` / `MM_PACKED` / `MM_CTXS` / `MM_SPEC` / `MM_LK` | MoE engine: the gguf path, the packed-slab dir, the context capacity, the lookup-spec mode, the deep-K scan arm |

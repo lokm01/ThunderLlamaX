@@ -162,13 +162,16 @@ Three decode modes ship, selected per conversation/cycle — all Tier-1
   (`LOOKUP_K=10`): n-gram drafts from the document being read, verified in
   one batched pass. 75.81 tok/s on hit-class work @100k. On the MoE the
   same machinery runs at K=8 (97.6-104.0 tok/s through the API).
-- **Adaptive T=1 prose mode (dense, `TLX_T1_MODE=1`, shipped ON)** — after
-  4 consecutive zero-accept/zero-hit K2 cycles (the alpha-death signal),
-  the session switches to plain T=1 cycles; a per-cycle lookup scan keeps
-  the exit trigger live, and the first 8-gram hit drops STRAIGHT into a
-  deep cycle. Prose: 14.67 -> **20.56 tok/s**; the mixed-mode output is
-  bit-identical to pure spec; quote classes never trigger it (canonical
-  Tier-1 60/60 with the mode ON, 75.35 tok/s).
+- **EAGLE prose drafting (dense, `TLX_DHEAD_FULL=1`, shipped ON)** — the
+  checkpoint's own `blk.64` nextn layer drafts through a FULL-VOCAB head
+  (the resident trunk head plane; zero new VRAM) instead of the 40960-row
+  prompt-frequency slice (89.8% of novel-prose targets were out-of-slice).
+  The alpha-death T=1 entry is suppressed under the knob (a T=1 episode
+  can never exit on novel prose — the one-way-trap law); knob-off keeps
+  the adaptive T=1 controller verbatim (`TLX_T1_MODE`, prose 14.67 ->
+  20.56 tok/s). Prose with the full head: 23.0 -> **43.7 tok/s** GSM8K
+  median through the API; quote classes unchanged (~75). The deeper K=4
+  chain ships gated (`TLX_EAGLE_K=4`, default 2 = bit-exact to this mode).
 - **First-party MTP K=4 (MoE, `MM_MTP=1`, shipped default)** — the model's
   own MTP layer drafts 4 tokens ahead of the probe (see
   [ARCHITECTURE.md](ARCHITECTURE.md) for the chain). Prose through the

@@ -111,7 +111,8 @@ next. The engine scans its own token history for the current 8-token suffix
 and, if it recurs, proposes the actual continuation from history, up to K=10
 tokens at once. A batched verify pass accepts or rejects; on this workload
 class, hits accept ALL K proposals (measured, six rungs in a row). On novel
-prose the drafter never fires and the engine falls back to the K=2 cycle.*
+prose the drafter never fires and the engine falls back to the K=2 cycle —
+whose draft head is full-vocab since P10 (next section).*
 
 K=8 shipped config (104.65 ms -> 71.51-72.02 tok/s @100k); K=9/K=10 rungs
 (74.70/75.56 tok/s, same construction — kernel sets pending the next engine
@@ -155,6 +156,58 @@ between it and a deep-K cycle:
   Tier-1 60/60 x2 deterministic + stock 59/59 at every K rung; the
   R4_TRACE/R4_DIF/R4_BISECT harness triad (env-gated in `test_w100k.py`)
   proves all probe rows bit-identical to the T=3 path.
+
+## The EAGLE prose drafter (P10-dense: the full-vocab draft head + the gated K=4 chain)
+
+*Plain language: the dense checkpoint ships its own one-block draft model —
+a 65th layer that exists purely to predict ahead. The engine was already
+running it, but its proposals were filtered through a 40,960-row
+"most-likely-tokens" shortcut head that misses ~9 of 10 novel-prose
+targets. Pointing the drafter at the real, full-vocabulary output head —
+the same weights the verifier reads, zero new memory — doubled prose speed.
+A 4-deep version of the same chain was built and verified but ships off:
+the 1-layer drafter can only reliably predict 2 tokens ahead, so the deeper
+verify pass costs more than it recovers.*
+
+- **The EAGLE nextn finding**: the dense checkpoint carries a first-party
+  MTP layer — `blk.64` holds the full
+  `nextn.{eh_proj,enorm,hnorm,shared_head_norm}` block plus a complete
+  attn+FFN block (`qwen35.nextn_predict_layers=1`, block_count=65). The
+  W2-era 2-step EAGLE chain (`_draft_entries` + the kv_d draft KV + the
+  fill_draft prompt-fill pass) had been running it all along; prose
+  acceptance was zero because of the HEAD, not the chain — the rank
+  histogram measured **89.8% of novel-prose targets OUT-OF-SLICE**
+  (top1==target 6.1%) under the 40960-row prompt-frequency slice, so K2
+  cycles accepted ~0 and the alpha-death controller parked decode in T=1.
+- **Draft-head plane reuse (zero new VRAM)**: `sheadf.cu` is the Q5_K
+  slice-head GEMV verbatim at VOCAB=248320 — every chain step proposes over
+  the SAME resident `W[("head",0)]` plane the trunk probe head reads; the
+  draft scratch is logits3 row 0, dead at draft time by timeline order (the
+  probe head overwrites rows 0..RM-1 before any probe-side read).
+  `samxf.cu` is the single-row full-vocab argmax writing the winning row
+  index DIRECTLY as the token id (full vocab — no id-table gather). Under
+  the knob (`TLX_DHEAD_FULL=1`, dense default) the alpha-death T=1 entry is
+  suppressed: a T=1 episode can never exit on novel prose (the exit needs
+  an 8-gram hit), so entering it parks decode at the T=1 rate for the rest
+  of the generation. `fill_draft` skips the head+argmax pair (prompt fill
+  never consumes the draft argmax). Result: prose 23.0 -> 43.7 tok/s GSM8K
+  median through the API; quote-class untouched (~75).
+- **The K=4 graph set (`TLX_EAGLE_K=4`, gated; default 2 = rung-1
+  bit-exact)**: a 4-step draft chain over DEDICATED per-step hidden buffers
+  (hd_d0=h(cur), hd_d1=h(dring0), hd_d2=h(dring1), hd_d3=h(dring2) —
+  `accept5e` maps m to the exact chain hidden for m<=3), the R4 M=5 trunk
+  probe (T=5; FFN/down via the `ffn8v5r7`/`down8nw32v5r7` r7 twins — the
+  packed7 plane under PF_DR7, 50/64 regs 0 spill), `accept5e`/
+  `acceptsel5k` accept, and a prose hysteresis in DecodeSession:
+  `TLX_EAGLE_PROSE_TRIG` consecutive zero-hit miss cycles ENGAGE the K4
+  set, any hit disengages, 0 = K4 always (the gating mode). Quote-class
+  deep hits keep the K=10 deep set untouched; the K2 and deep sets are
+  untouched by the scaffold (knob-off is byte-identical to rung-1).
+  Tier-1 proven (60/60 x2 + 59/59 stock) — and honestly falsified on
+  performance: the 1-layer drafter saturates at m=2 (m=3 fires 5% of prose
+  cycles, m=4 never), so K=4 measured -25% prose and ships OFF pending a
+  deeper drafter (verdict + break-even math in
+  [PERFORMANCE.md](PERFORMANCE.md#p10-dense-the-prose-rungs-rung-1--the-full-vocab-draft-head-rung-2--the-k4-verdict)).
 
 ## The MoE engine (Qwen3.6-35B-A3B — four new kernel classes)
 
@@ -254,12 +307,13 @@ off, and its launch-count arm corrected the launch-serialization law — see
 | `spk_c{1,3}` | split-KV phase 3: fixed-order combine + sigmoid gate | sequential per-split merge, fp32 partials |
 | `head8*` (head8v_3) | output head GEMV (Q5_K 248320 rows) | 874 MB at memory floor; half2 |
 | `m3*/m4*` family | the full M=3/M=4 probe trunk (batched variants of every trunk kernel) | bit-identical per-row op order (the Tier-1 contract) |
-| `q4v` (ehproj/dq/doproj/ddown), `mtpd` (dnorm2/dfgu/dkv/aattn_d/shead/samx/dposadd) | the draft chain (all Q4_0) | nibble-plane Q4_0 decode; two-region aligned pack; 40960-row slice head with prompt-frequency table |
-| `accept`, `accept4`, `acceptsel` | accept/commit: m-ladder, state slot copy, h_seed select | device-resident; no host rollback |
+| `q4v` (ehproj/dq/doproj/ddown), `mtpd` (dnorm2/dfgu/dkv/aattn_d/shead/samx/dposadd) | the draft chain (all Q4_0) | nibble-plane Q4_0 decode; two-region aligned pack; 40960-row slice head with prompt-frequency table (knob-off path) |
+| `sheadf`/`samxf` (P10-dense, `TLX_DHEAD_FULL=1` default) | the FULL-VOCAB draft head + argmax (the shipped prose drafter) | slice-head GEMV verbatim at VOCAB=248320 over the resident trunk head plane (zero new VRAM; logits3 row-0 scratch, timeline-ordered); argmax writes the row index AS the token id |
+| `accept`, `accept4`, `accept5e`, `acceptsel` | accept/commit: m-ladder, state slot copy, h_seed select | device-resident; no host rollback; accept5e maps m to the K4 chain's dedicated per-step hiddens (hd_d0..d3) |
 | `lookup_nw32`, `lookup{5..9}_nw32` | deep-K n-gram drafter: suffix scan over tok_hist -> fill the whole draft ring on hit | LMIN=8; deep-K scan-range law iend=pos-8-K; hit flag in the emit record |
 | `k2s{5..9}`, `accept{k}k`, `acceptsel{k}k` | deep-K probe trunk scan + accept/commit per K | REC-CHAIN SLOT LAW (t=K reads rec{K}x scratch); layout-aware emit word count (16w K2 -> 20w K8) |
 | `spk_pre{5..9}qh`, `spk_g4nw32hm{5..9}`, `spk_c{5..9}g` | deep-K attention (ROWS=5..9 windows) | RMAX pad rows / MAXOWN owner paths (the RP>NW owner bug fix); 64 regs 0 spill in-graph |
-| `r7d.cu` family (`ffn8r7`, `down8r7`, `ffn8v3r7`, ..., `ffn8v9r7`, `down8nw32v9r7`) | decode/spec GEMVs reading the shared packed7 plane | bit-identical ports; kills the both-live VRAM wall, full m64 prefill coverage; R7a added the uint4 single-load W-fetch (all four u32 lanes consumed — the DCE law) |
+| `r7d.cu` family (`ffn8r7`, `down8r7`, `ffn8v3r7`, ..., `ffn8v9r7`, `down8nw32v9r7`, `ffn8v5r7`/`down8nw32v5r7`) | decode/spec GEMVs reading the shared packed7 plane (the v5r7 twins serve the T=5 EAGLE probe) | bit-identical ports; kills the both-live VRAM wall, full m64 prefill coverage; R7a added the uint4 single-load W-fetch (all four u32 lanes consumed — the DCE law) |
 | `gen_m{5..9}.py` | generators for the M=5..9 batched kernel sets | launch-bounds-preserved renames + fail-loud row-store audits on every write family (the R5a bug class) |
 | `pack_w5.py` -> `packed5/` | the packed5 Q5_K qkv repack (48 tensors, 6 bits/word units) | pure integer permutation, byte-exact roundtrip; the gdnqg prefill GEMM reads true-16B units |
 | `p8_imma.cu` | the W4A8 IMMA discriminator (info-only) | mma.m16n8k32.s8.s8.s32, per-chunk fp32 rescale; its "x4.58" was a discriminator FRAME ARTIFACT (one-plane M=64 vs two-plane M=128 arms) — the honest fused-shape class is x1.06 (T2 correction; match plane-count x M-grid between arms) |
@@ -354,6 +408,8 @@ prefill share ONE resident copy instead of two.*
 | MM P8-SERVE the MoE serving bridge | bank60 60/60 THROUGH THE DAEMON; pcache CACHE_HIT exact; soak 148 rounds 0 fail | worked — serve.py as an imported library; 29/29 mock battery |
 | MM P9/P10-A the first-party MTP K=4 | prose 19.6 -> 42-47 (harness) / **19.1 -> 40.1 through the API**; mtp==t1 60/60 det x2 | worked — the blk.40 drafter at 0.875 depth-1 acceptance; the PF-only cur fix; soak 106 rounds 0 fail |
 | MM P10-B pairwise MoE fusion | DIVERGED @ token 27; NOT shipped | honestly falsified — and it corrected the launch-serialization law (fat kernels pipeline dispatch; the T=1 cycle is kernel-RUNTIME-bound) |
+| P10-dense rung 1: full-vocab EAGLE draft head | dense prose 23.0 -> **43.7 tok/s** GSM8K median through the API (1.90x); quote ~75 unchanged; Tier-1 60/60 x2 + 59/59 | worked — the failure was the slice head (89.8% of prose targets out-of-slice), not the blk.64 nextn chain; proposing over the resident head plane = zero new VRAM |
+| P10-dense rung 2: the K=4 EAGLE chain | Tier-1 60/60 x2 + 59/59 with EAGLE_K=4; prose K4 17.25 vs K2 22.93 tok/s in-harness (-25%) | honestly falsified — the 1-layer drafter saturates at m=2 (m=4: 0/120); machinery ships gated (`TLX_EAGLE_K`, default 2) for a future deeper drafter |
 | R2c decode-r7 shared packed7 plane | prefill +22.9% @100k | worked — one resident weight copy serves decode + prefill |
 | P8 packed5 + o-proj M-grid fold | prefill 530.6 @2k / 328.0 @100k (Tier-1) | worked — true-16B qkv units + one g=160 o-proj launch; both bit-identical |
 | T2 W4A8 packed7-IMMA ffn (`PF_W4A8=1`) | prefill **569.2 @2k / 510.1 @8k / 342.0 @100k** (Tier-2) | worked — the existing packed7 planes read through a linearized int4 codebook view; zero new VRAM, decode Tier-1 untouched; the honest IMMA verdict x1.06 (the banked x4.58 was a discriminator frame artifact — 750 closed) |
@@ -367,7 +423,10 @@ it is the correctness-contract ancestor of the engine and reached 7.28 tok/s
 grid-stride loops (hang); smem-staged G1 attention (L1 hits, staging
 round-trip loses); carveout override for 2 CTAs/SM (dext is 1 CTA/SM hard);
 T-layout transposed weight packs (load width not the wall); K=3 at this draft
-quality (alpha collapses 0.867->0.608 with depth, net-negative); QMD-unchain
+quality (alpha collapses 0.867->0.608 with depth, net-negative); the dense
+K=4 EAGLE chain at the CURRENT 1-layer drafter (machinery Tier-1-proven and
+gated on; drafter saturates at m=2, m=4 never fires — -25% prose, ships off);
+QMD-unchain
 across layers (structurally void — real data deps); draft GEMV half2 ports
 (latency/L2-bound, neutral); draft-vocab slice expansion (the 100k prompt is
 a 30-distinct-id repetition; the slice already covers 100% of truth — alpha

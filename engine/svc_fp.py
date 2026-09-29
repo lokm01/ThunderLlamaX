@@ -42,6 +42,11 @@ _ENV_KEYS = (
     # restore_chain uploaded old KV into a different engine — the
     # wrong-answer-with-/health-ok class)
     "BATCH_B", "BATCH_REBUILD_EVERY", "BATCH_PF_CHUNK", "R6_PF_T1", "PF_G3M_MB",
+    # P10-dense rung 2: the K=4 EAGLE chain (TLX_EAGLE_K=4 swaps the miss-cycle
+    # probe/accept set to the R4 M=5 pair — same class as LOOKUP_K: decode
+    # behavior, not prefill numerics). CAche-invalidation event: one cold
+    # pcache rebuild per model on the first boot after this (slogged).
+    "TLX_EAGLE_K",
 )
 
 # R3-19: the cubin set the batch scheduler loads BY PATH (r6_serve.r6_boot).

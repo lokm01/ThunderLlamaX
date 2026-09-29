@@ -37,17 +37,21 @@ def main():
   d = P.d
   progs = {n: prog(n) for n in ("ffn8", "ffn8r7", "down8", "down8r7",
                                 "ffn8v_3", "ffn8v3r7", "down8nw32_3", "down8nw32v3r7",
+                                "ffn8v5", "ffn8v5r7", "down8nw32_5", "down8nw32v5r7",
                                 "ffn8v8", "ffn8v8r7", "down8nw32_8", "down8nw32v8r7")}
   # x planes (fp16), deterministic
   P.up("x1", (rng.standard_normal(5120) * 0.10).astype(np.float16))
   P.up("x3", (rng.standard_normal(3 * 5120) * 0.10).astype(np.float16))
   P.up("x8", (rng.standard_normal(8 * 5120) * 0.10).astype(np.float16))
+  P.up("x5", (rng.standard_normal(5 * 5120) * 0.10).astype(np.float16))
   P.up("gact1", (rng.standard_normal(17408) * 0.10).astype(np.float16))
   P.up("gact3", (rng.standard_normal(3 * 17408) * 0.10).astype(np.float16))
   P.up("gact8", (rng.standard_normal(8 * 17408) * 0.10).astype(np.float16))
+  P.up("gact5", (rng.standard_normal(5 * 17408) * 0.10).astype(np.float16))
   P.up("hh1", (rng.standard_normal(5120) * 0.05).astype(np.float32))
   P.up("hh3", (rng.standard_normal(3 * 5120) * 0.05).astype(np.float32))
   P.up("hh8", (rng.standard_normal(8 * 5120) * 0.05).astype(np.float32))
+  P.up("hh5", (rng.standard_normal(5 * 5120) * 0.05).astype(np.float32))
   dev.synchronize(); P._keep.clear()
 
   # warm-up pair (the bare-world first-pair law)
@@ -93,6 +97,16 @@ def main():
     lambda: progs["down8nw32_3"](d["pk_fd"], d["gridf"], d["gact3"], d["hh3"], d["o_out"], global_size=(160, 1, 1), local_size=(1024, 1, 1), wait=True),
     lambda: progs["down8nw32v3r7"](d["r7_fd"], d["gridf"], d["gact3"], d["hh3"], d["r_out"], global_size=(160, 1, 1), local_size=(1024, 1, 1), wait=True),
     3 * 5120, np.float32)
+  # ---- ffn8v5 / ffn8v5r7 (M=5, P10-dense K=4 EAGLE probe) ----
+  run_pair("ffn8v5-r7",
+    lambda: progs["ffn8v5"](d["pk_fg"], d["pk_fu"], d["gridf"], d["x5"], d["o_out"], global_size=(2176, 1, 1), local_size=LS, wait=True),
+    lambda: progs["ffn8v5r7"](d["r7_fg"], d["r7_fu"], d["gridf"], d["x5"], d["r_out"], global_size=(2176, 1, 1), local_size=LS, wait=True),
+    5 * 17408, np.float16)
+  # ---- down8nw32_5 / down8nw32v5r7 (M=5, P10-dense K=4 EAGLE probe) ----
+  run_pair("down8nw32v5-r7",
+    lambda: progs["down8nw32_5"](d["pk_fd"], d["gridf"], d["gact5"], d["hh5"], d["o_out"], global_size=(160, 1, 1), local_size=(1024, 1, 1), wait=True),
+    lambda: progs["down8nw32v5r7"](d["r7_fd"], d["gridf"], d["gact5"], d["hh5"], d["r_out"], global_size=(160, 1, 1), local_size=(1024, 1, 1), wait=True),
+    5 * 5120, np.float32)
   # ---- ffn8v8 / ffn8v8r7 (M=8) ----
   run_pair("ffn8v8-r7",
     lambda: progs["ffn8v8"](d["pk_fg"], d["pk_fu"], d["gridf"], d["x8"], d["o_out"], global_size=(2176, 1, 1), local_size=LS, wait=True),

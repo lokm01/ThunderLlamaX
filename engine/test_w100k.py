@@ -218,7 +218,7 @@ def decode_n(n=NTOK):
     deep = getattr(sess, "deep", 0)
     r = sess.step()
     if int(os.getenv("LOOKUP_K", "0") or 0) > 0:
-      R4LOG.append((r["m"], r["hit"], deep))
+      R4LOG.append((r["m"], r["hit"], deep, getattr(sess, "prose", 0)))
     emt += r["tokens"]
   return emt, r["pos_new"]
 
@@ -719,13 +719,26 @@ if os.getenv("R5_QUOTE", "0") == "1":
     agree = int((outw == qref).sum())
     fd = next((k for k in range(NTOK) if outw[k] != qref[k]), None)
     _nt1 = int(getattr(sess, "nt1cycles", 0))
+    _npr = int(getattr(sess, "nprose", 0)); _ndp = int(getattr(sess, "ndeep", 0)); _nc = int(getattr(sess, "ncyc", 0))
     print(f"[quote] rep{rep}: {agree}/{NTOK} exact vs T=1 (first div {fd}); emitted {len(emt)} toks, "
-          f"{dt*1e3/NTOK:.2f} ms/tok-stream, t1-cycles(life) {_nt1}", flush=True)
+          f"{dt*1e3/NTOK:.2f} ms/tok-stream, t1-cycles(life) {_nt1}, k4-cycles(life) {_npr}/{_nc} deep {_ndp}", flush=True)
     if agree < NTOK:
       print(f"[quote] out: {outw[:32].tolist()}")
       print(f"[quote] ref: {qref[:32].tolist()}")
     outs.append(outw.copy())
   print(f"[quote] deterministic across reps: {bool((outs[0] == outs[1]).all())}", flush=True)
+  # P10-dense rung 2: the K4-EAGLE acceptance histogram on THIS class
+  if R4LOG:
+    import numpy as _np2
+    L2 = _np2.array(R4LOG, dtype=_np2.int64)
+    pl2 = (L2[:, 2] == 0) & (L2[:, 3] == 1)
+    if pl2.any():
+      print(f"[k4hist] k4 cycles {int(pl2.sum())}, E[m|k4] {float(L2[pl2,0].mean()):.3f}, "
+            f"m-dist(k4) {[int((L2[pl2,0]==v).sum()) for v in range(5)]}, tok/cyc(k4) {float((L2[pl2,0]+1).mean()):.2f}", flush=True)
+    kl2 = (L2[:, 2] == 0) & (L2[:, 3] == 0)
+    if kl2.any():
+      print(f"[k4hist] k2 cycles {int(kl2.sum())}, E[m|k2] {float(L2[kl2,0].mean()):.3f}, "
+            f"m-dist(k2) {[int((L2[kl2,0]==v).sum()) for v in range(3)]}", flush=True)
   lh = E.P.down("l_hist", (4096,), np.int32)
   mh = E.P.down("m_hist", (4096,), np.int32)
   ncy = int((lh > 0).sum())
@@ -821,11 +834,17 @@ if os.getenv("LOOKUP") == "1" or int(os.getenv("LOOKUP_K", "0") or 0) > 0:
         f"E[m|hit] {em_h:.3f}, E[m|miss] {em_m:.3f}, l-dist(1..9) {[int((lh==v).sum()) for v in range(1,10)]}", flush=True)
   if int(os.getenv("LOOKUP_K", "0") or 0) > 0 and R4LOG:
     import numpy as _np
-    L = _np.array(R4LOG, dtype=_np.int64)          # (m, hit, deep-selected)
+    L = _np.array(R4LOG, dtype=_np.int64)          # (m, hit, deep-selected, prose)
     dl = L[:, 2] == 1
+    pl = (L[:, 2] == 0) & (L[:, 3] == 1)   # P10-dense: the K4-EAGLE prose set
+    kl = (L[:, 2] == 0) & (L[:, 3] == 0)
     print(f"[deepk] cycles {len(L)}, deep-selected {int(dl.sum())} ({100.0*dl.mean():.1f}%), "
-          f"E[m|deep] {float(L[dl,0].mean()) if dl.any() else 0:.3f}, E[m|k2] {float(L[~dl,0].mean()) if (~dl).any() else 0:.3f}, "
+          f"E[m|deep] {float(L[dl,0].mean()) if dl.any() else 0:.3f}, E[m|k2] {float(L[kl,0].mean()) if kl.any() else 0:.3f}, "
           f"m-dist(deep) {[int((L[dl,0]==v).sum()) for v in range(int(os.getenv('LOOKUP_K','0') or 0)+1)]}, hits {int((L[:,1]>=9).sum())}", flush=True)
+    if pl.any():
+      print(f"[k4eagle] prose cycles {int(pl.sum())} ({100.0*pl.mean():.1f}% of non-deep), "
+            f"E[m|k4] {float(L[pl,0].mean()):.3f}, m-dist(k4) {[int((L[pl,0]==v).sum()) for v in range(5)]}, "
+            f"tok/cyc(k4) {float((L[pl,0]+1).mean()):.2f}", flush=True)
   # R4 DIAG: force deep OFF (isolates lookup5+acceptk on the K2 path) then
   # deep ON (isolates the T=5 set) — the exactness discriminator.
   if int(os.getenv("LOOKUP_K", "0") or 0) > 0 and os.getenv("R4_DIAG", "1") == "1":

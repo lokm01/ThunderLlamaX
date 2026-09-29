@@ -87,6 +87,85 @@ zero numerics, and the ladder reads ... -> 71.51 -> 74.70 -> 75.56 ->
 | K=9 -> K=10 (R8) | 74.70 -> **75.56** | the same generator discipline; **the K-ladder stops at ten** (increments fell to +0.86 tok/s/rung, hit decay ~-1.6pt/rung) |
 | review-fix campaign re-validation (W5) | **75.81** | five waves of serving/security/tripwire fixes + fork tripwires — zero numerics change, re-gated live on the rig |
 | adaptive T=1 prose mode (P8+A, `TLX_T1_MODE=1`) | quote 75.35 / **prose 14.67 -> 20.56** | after 4 zero-accept K2 cycles the session runs T=1-only cycles (the alpha-death signal); first 8-gram hit exits straight into a deep cycle. Output stream BIT-IDENTICAL to pure spec (120/120) + Tier-1 60/60 x2 |
+| P10-dense rung 1: full-vocab EAGLE draft head (`TLX_DHEAD_FULL=1`) | quote 74.85 (bank ~75.5) / **prose 23.0 -> 43.7 tok/s GSM8K median through the API** (22.9 in-harness @100k) | the 40960-row slice head proposed only ~10% of novel-prose targets (89.8% out-of-slice); proposing over the resident full-vocab head plane (zero new VRAM) + the T=1-entry suppression; Tier-1 60/60 x2 + 59/59 stock |
+
+### P10-dense: the prose rungs (rung 1 — the full-vocab draft head; rung 2 — the K=4 verdict)
+
+The dense model's shipped prose drafter is its own checkpoint MTP layer:
+`blk.64` carries the full `nextn.*` EAGLE block
+(`qwen35.nextn_predict_layers=1`, block_count=65), chained W2-style —
+eh_proj -> draft block (own KV) -> head. Rung 1 established the prose
+failure was never the chain — it was the **slice head**: the rank histogram
+measured **89.8% of novel-prose targets OUT-OF-SLICE** (top1==target 6.1%)
+under the 40960-row prompt-frequency slice, so K2 cycles accepted ~0
+(tok/cyc 1.02) and the alpha-death controller parked decode in T=1
+(~20.6-23 tok/s — the exit needs an 8-gram hit that never comes in novel
+prose).
+
+**Rung 1 (`TLX_DHEAD_FULL=1`, shipped default in the dense env):**
+
+- `sheadf.cu` — the Q5_K slice-head GEMV verbatim at VOCAB=248320: every
+  chain step proposes over the SAME resident head plane the trunk probe
+  reads (zero new VRAM; the draft scratch is logits3 row 0, dead at draft
+  time by timeline order). `samxf.cu` — the single-row full-vocab argmax
+  writing the token id directly (row index == id; no id-table gather).
+- `fill_draft` skips the head+argmax pair under the knob (prompt fill never
+  consumes the draft argmax — boot fill 300 s -> 211 s).
+- The **T=1-entry suppression**: under the knob a 4-zero-accept streak is
+  noise at acceptance ~0.6+/cycle, and a T=1 episode can NEVER exit on
+  novel prose — entering it parks decode at the T=1 rate for the rest of
+  the generation. Knob-off keeps the alpha-death controller verbatim.
+- Gates: Tier-1 60/60 x2 + 59/59 stock; quote-class 74.85 tok/s (bank
+  75.53, within boot variance — deep cycles run the lookup drafter
+  untouched; only K2/transition cycles pay the +2.8 ms full head). BATCH_B
+  >= 2 refused under the knob (the shared logits3 row-0 scratch would race
+  across batch streams).
+- **Result: prose 23.0 -> 43.7 tok/s GSM8K median through the API (1.90x;**
+  30-problem battery at 93.3% — sample noise vs the 95.0% 100-problem bank;
+  TTFT 2.37 s unchanged; 10-problem spot re-check 10/10 at 44.1 after the
+  rung-2 scaffold landed). The dense now beats the MoE MTP K=4 (36.7) on
+  prose.
+
+**Rung 2 (`TLX_EAGLE_K`, default 2 = rung-1 bit-exact): the K=4 EAGLE
+chain — built, Tier-1-proven, honestly falsified on performance:**
+
+- The scaffold: a 4-step draft chain with dedicated per-step hidden buffers
+  (hd_d0..hd_d3; `accept5e` maps m to the exact chain hidden for m<=3), the
+  T=5 probe (the R4 M=5 family with the FFN/down pair swapped to
+  `ffn8v5r7`/`down8nw32v5r7` — the gen_r7d* v3->v5 M-extension, 50/64 regs
+  0 spill), the graphs5 probe5/accept5 set, and a prose hysteresis:
+  `TLX_EAGLE_PROSE_TRIG` consecutive zero-hit miss cycles ENGAGE the K4
+  set, any hit disengages, 0 = K4 always (the gating mode). Quote-class
+  deep hits keep the K=10 deep set untouched.
+- Gates: the r7 twins A/B nz=0 det x2 vs the packed originals; Tier-1 with
+  EAGLE_K=4 (TRIG=0) 60/60 x2 + 59/59 stock, quote-class 72.08 tok/s (the
+  always-K4 tax on quote misses, -3.7%); quote knob-off BYTE-IDENTICAL to
+  rung-1 (70.11 vs 69.96 ms/cyc, tok/cyc 1.88 EXACT — the scaffold costs
+  nothing off).
+- **The verdict (prose @100k in-harness, the R8_PROSE anchor): K4 94.67
+  ms/cyc, E[m|k4] = 0.633, m-dist [70,30,14,6,0] -> 17.25 tok/s; the K2
+  control on the SAME build 69.03 ms/cyc, E[m|k2] = 0.583, m-dist
+  [68,34,18] -> 22.93 tok/s. K4 = -25% prose; break-even needed E[m] >=
+  1.17.** The 1-layer EAGLE drafter (blk.64 nextn) saturates at m=2 — m=3
+  fires 5% of prose cycles, m=4 never (0/120). The two extra chain steps
+  (+7.9 ms draft: two more full heads) and the T=5 probe (+19.2 ms; the
+  class bisect: ffn 28.8 | attn 22.6 | scan 3.8 | norms 6.9 | head 1.9 ms)
+  buy +0.05 tok/cycle. The binding constraint is DRAFTER DEPTH FIDELITY
+  (the old alpha-program law: acceptance collapses with depth), not the
+  machinery — the K4 graph set stays armed behind `TLX_EAGLE_K=4` for a
+  future drafter-quality program (DFlash2-class or a trained nextn head).
+- **Provenance note (measurement hygiene)**: rung-1's in-harness log line
+  ("prose 46.46 ms / 1.0 tok-cyc") came from an INTERMEDIATE build — its
+  rep shows 56 T1-cycles, impossible under the final T=1-entry suppression.
+  The shipped K2 world is 69.03 ms / 1.583 tok/cyc = 22.9 tok/s in-harness
+  @100k; the daemon's 43.7 is GSM8K-class work at ~600-token contexts.
+  Re-derive in-harness numbers on the FINAL build before banking them.
+
+Tools: `engine/p10r2_phase.py` (per-graph phase bench),
+`engine/p10r2_bisect.py` (probe5 per-kernel-class bisect), the `[k4hist]`
+acceptance histograms in test_w100k. Eval artifacts:
+[eval/results/gsm8k_p10_dhead_summary.json](../eval/results/gsm8k_p10_dhead_summary.json),
+`gsm8k_p10_dhead.jsonl`, `gsm8k_p10r2_spot.jsonl`.
 
 ### Decode: the second model — Qwen3.6-35B-A3B (MoE, MM campaign)
 
@@ -302,24 +381,31 @@ dense direct-PPL device fault (open), F7 the staydown-marker law.
   text it has): **75.81 tok/s** dense / **97.6-104.0 tok/s** MoE. The n-gram
   drafter fires on 76.7% of dense cycles and every hit accepts all ten
   (dense) / all eight (MoE).
-- **Prose-class** (novel text): the honest floor has MOVED twice, both times
-  by shipping a first-party drafter rather than a longer lookup window:
-  - dense, adaptive T=1 mode (P8+A, shipped ON): **20.56 tok/s** (was 14.67
-    pure-spec) — after 4 zero-accept K2 cycles the session switches to T=1
-    cycles and the per-cycle lookup scan keeps the exit trigger live; the
-    mixed-mode output is BIT-IDENTICAL to pure spec (120/120 positions).
+- **Prose-class** (novel text): the honest floor has MOVED three times, each
+  time by shipping a first-party drafter rather than a longer lookup window:
+  - dense, adaptive T=1 mode (P8+A): **20.56 tok/s** (was 14.67 pure-spec)
+    — after 4 zero-accept K2 cycles the session switches to T=1 cycles and
+    the per-cycle lookup scan keeps the exit trigger live; the mixed-mode
+    output is BIT-IDENTICAL to pure spec (120/120 positions). Superseded by
+    the P10 draft head but kept verbatim knob-off.
+  - dense, full-vocab EAGLE draft head (P10-dense rung 1, shipped ON):
+    **43.7 tok/s** GSM8K median through the API (1.90x over the 23.0
+    battery baseline; 22.9 tok/s in-harness @100k) — the checkpoint's own
+    blk.64 nextn layer proposing over the full 248320-row vocab instead of
+    the 40960-row slice (89.8% of prose targets were out-of-slice).
   - MoE, first-party MTP K=4 chain (P9/P10-A, shipped default): **40.1
     tok/s** prose-0 through the API (was 19.1 T1-only), 29.9 at prose-9.
   An earlier reading on this page bounded prose at "~15 tok/s with
   56-70 tok/s only via a future DFlash2-class drafter" — that ceiling was a
   category error (it priced the K2-cycle weight floor, not the drafted
-  modes). The measured answer is 20.6 / 40.1 with the shipped drafters; the
+  modes). The measured answer is 43.7 / 40.1 with the shipped drafters; the
   BIMODAL MATCH LAW still holds (the lookup tier gains nothing on prose —
-  the wins above come from T=1 mode-switching and MTP, not from lookup).
-- **What is still honestly open on prose**: dense has no first-party MTP
-  chain yet (its MTP block drafts through a 40960-row vocab slice — 89.8%
-  of prose targets fall OUT of the slice, so T=1-at-physics-cap is the
-  honest dense endpoint for that drafter); the MoE's long-ctx (96k) MTP
+  the wins above come from the first-party drafters and T=1 mode-switching,
+  not from lookup).
+- **What is still honestly open on prose**: the dense K=4 chain is built and
+  Tier-1-gated, but its 1-layer drafter saturates at m=2 — K=4 measured -25%
+  prose (break-even needs E[m] >= 1.17), so a DFlash2-class or trained
+  nextn drafter is the unlock; the MoE's long-ctx (96k) MTP
   alpha is unmeasured; prose-9 decay (29.9) is real and unsolved.
 
 **The measured walls (why prefill stops where it stops):**
