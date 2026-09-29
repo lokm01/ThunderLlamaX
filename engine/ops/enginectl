@@ -175,7 +175,15 @@ stop_engine() {
 }
 
 # ---- P8: model registry helpers ------------------------------------------------
-_state_write() {  # atomic + fsync + dir-fsync (the L5 law)
+# R8 sudo-ownership fix: tempfile.mkstemp creates files 0600 owned by the
+# INVOKING user — `sudo enginectl switch` armed next_model/swap_in_progress
+# as root:root 0600, the non-sudo user wrapper's _state_read (head, stderr
+# suppressed) returned EMPTY, promotion silently SKIPPED and the OLD model
+# rebooted instead of swapping. State must always be readable by the daemon
+# user (the launchd UserName): every write lands 0644 and, when invoked as
+# root, chowned to the state dir's owner — mixed sudo/non-sudo invocation is
+# survivable. _state_repair sweeps any pre-fix root-owned leftovers.
+_state_write() {  # atomic + fsync + dir-fsync (the L5 law) + daemon-readable perms
   /usr/bin/python3 - "$STATEDIR" "$1" "$2" <<'PYEOF'
 import os, sys, tempfile
 sd, name, val = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -184,10 +192,34 @@ fd, tmp = tempfile.mkstemp(dir=sd, prefix=f".{name}.")
 with os.fdopen(fd, "w") as f:
     f.write(val if val.endswith("\n") else val + "\n")
     f.flush(); os.fsync(f.fileno())
-os.replace(tmp, os.path.join(sd, name))
+final = os.path.join(sd, name)
+os.replace(tmp, final)
+os.chmod(final, 0o644)
+try:
+    st = os.stat(sd)
+    if os.geteuid() == 0 and (st.st_uid, st.st_gid) != (0, 0):
+        os.chown(final, st.st_uid, st.st_gid)  # sudo invocation -> daemon user owns it
+except OSError:
+    pass
 dfd = os.open(sd, os.O_RDONLY)
 try: os.fsync(dfd)
 finally: os.close(dfd)
+PYEOF
+}
+_state_repair() {  # fix perms/ownership of ANY existing state files (pre-fix leftovers)
+  /usr/bin/python3 - "$STATEDIR" <<'PYEOF' 2>/dev/null || true
+import os, sys
+sd = sys.argv[1]
+try: dst = os.stat(sd)
+except OSError: sys.exit(0)
+for n in os.listdir(sd):
+    p = os.path.join(sd, n)
+    try:
+        os.chmod(p, 0o644)
+        if os.geteuid() == 0 and (dst.st_uid, dst.st_gid) != (0, 0):
+            os.chown(p, dst.st_uid, dst.st_gid)
+    except OSError:
+        pass
 PYEOF
 }
 _state_read() { head -1 "$STATEDIR/$1" 2>/dev/null | tr -d '[:space:]'; }
@@ -300,9 +332,9 @@ case ${1:-} in
     [[ "$SVC" == engine || "$SVC" == all ]] && _svc_start "$ENG_LABEL" "$PLIST_DIR/$ENG_LABEL.plist"
     [[ "$SVC" == api   || "$SVC" == all ]] && _svc_start "$API_LABEL" "$PLIST_DIR/$API_LABEL.plist" ;;
   models)
-    _models_cmd ;;
+    _state_repair; _models_cmd ;;
   switch)
-    _switch_cmd "${2:-}" ;;
+    _state_repair; _switch_cmd "${2:-}" ;;
   stop)
     [[ "$SVC" == api   || "$SVC" == all ]] && _svc_stop_launchd "$API_LABEL" "$PLIST_DIR/$API_LABEL.plist"
     [[ "$SVC" == engine || "$SVC" == all ]] && stop_engine ;;

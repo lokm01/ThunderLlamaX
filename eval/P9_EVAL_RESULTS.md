@@ -51,7 +51,31 @@ download; float64 logsumexp; target = next token. Score rate 118-135 tok/s.
 - These are the program's first PPL baselines for kernel/quant regression
   work; identical corpus + identical tokenizer (verified equal on both GGUFs)
   so future deltas are apples-to-apples.
-- Dense PPL: BLOCKED — device fault at the first scoring boundary (F5).
+
+### 2b. Dense PPL (F5 fixed 2026-09-29b — the full battery ran clean)
+
+ppl_dense.py: the exact test_w100k daemon boot (snapshot + T1 ref + graphs)
+then pcache.fresh_prefill with the ingest scorer at every 128-chunk boundary;
+per-row pfk_n16 -> head8 -> logits download, float64 logsumexp. Score rate
+193-208 tok/s (the m128 trunk + FP16 head make dense scoring FASTER than the
+MoE twin's 118-135). Results: eval/results/ppl_dense.json.
+
+| domain                       | tokens | NLL/tok | PPL   | greedy acc |
+|------------------------------|--------|---------|-------|------------|
+| prose (Pride & Prejudice)    | 32767  | 1.4731  | 4.363 | 63.3%      |
+| code (engine0/serve.py)      | 10239  | 1.5910  | 4.909 | 66.4%      |
+| prose_private (FIX_CAMPAIGN) | 3200   | 2.9196  | 18.53 | 44.1%      |
+| code2 (MM_P7_lib.py)         | 8704   | 1.0248  | 2.786 | 77.9%      |
+
+- Dense-vs-MoE on the HONEST domains: dense WINS all three — code 4.91 vs
+  19.95, prose_private 18.53 vs 34.38, code2 2.79 vs 4.81 (the 27B dense
+  reader beats the A3B router on unfamiliar code + private jargon; also
+  IQ3_XXS-vs-UD-IQ3_S quant is not the dominant term at this gap). On the
+  contaminated prose domain dense shows the honest 4.36 while the MoE's 1.14
+  memorization floor hides its true prose level.
+- Numerics note: dense logits are the engine-native FP16 head output (the
+  same values greedy decode decides on); the MoE head emits FP32. NLL
+  accumulation is float64 on both rigs.
 
 ## 3. Long-context needle (dense signature capability)
 
@@ -121,12 +145,17 @@ F4 — /health under engine churn: accurately reports engine_down when the
   resets instead. Not a stale-path bug — but 503-storm + engine_down
   flapping IS the observable signature of F2/F3 for operators.
 
-F5 — DENSE direct-PPL device fault: pfk_n16 + head8 launch clean at the
-  first ingest boundary; the logits COPYOUT hits `RuntimeError: Device
-  fault detected` (err_state) — row 0, chunk 1, reproducible 2/2 boots
-  (logs_ppl_dense.log). Distinct from F3 (mapping) — this is a device
-  fault during the boundary download; needs its own bisect (suspect:
-  eager head launches interleaved with the m128 chunk-graph timeline).
+F5 — DENSE direct-PPL device fault: RESOLVED (harness bug, one line). The
+  fault was the logits COPYOUT reading 2x the buffer: `down_at("logits", 0,
+  VOCAB, np.float32)` = VOCAB*4B from a VOCAB*2B FP16 buffer (trunk.py:65
+  `("logits", VOCAB*2, np.float16)`) — 496KB past the end, device fault at
+  the first copyout (2/2 boots; logs_ppl_dense.log). The eager head launches
+  were NEVER the problem: pfk_n16 sync-clean + head8 wait-clean precede the
+  fault in the traceback (engine0.py down_at -> _copyout -> err_state).
+  Fix: download as np.float16 (the engine's native head output; h_argmax/
+  greedy read the same values). Post-fix: the full 4-domain battery ran
+  clean end-to-end (§2b; logs_ppl_dense_f5fix.log). The MoE twin worked
+  because its logitsb is FP32 and its dn() reads the matching dtype.
 
 F6 — eval-harness accounting bug (client-side): the GSM8K harness's
   post-resume running "acc=" print mixed a session-scoped correct-count

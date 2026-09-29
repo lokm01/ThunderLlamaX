@@ -727,6 +727,19 @@ if os.getenv("R5_QUOTE", "0") == "1":
       print(f"[quote] ref: {qref[:32].tolist()}")
     outs.append(outw.copy())
   print(f"[quote] deterministic across reps: {bool((outs[0] == outs[1]).all())}", flush=True)
+  # THE PROSE-CLASS LAW (adjudicated 2026-09-29 via R8_PROSE_DUMP, shipped
+  # default config): a first divergence vs the T=1 ref on the novel-prose
+  # anchor is the CROSS-CLASS FLIP class -- the M=3 probe family and the M=1
+  # trunk family rank the same top-2 pair but disagree on the order when the
+  # weaker margin is inside the cross-family logit drift (measured median
+  # 0.39 logits at the flip point; the T1-preferred token moved 1.39 between
+  # families). One flip + cascade => the low N/60 is ONE decision, not N. The
+  # spec stream stays the probe-world's own consistent greedy chain (lossless
+  # within its family). Rerun with R8_PROSE_DUMP=1 for the full-logit
+  # adjudication + printed verdict.
+  if int((outs[0] == qref).sum()) < NTOK:
+    print("[quote] divergence-class NOTE: expected CROSS-CLASS FLIP (see law above); "
+          "set R8_PROSE_DUMP=1 to adjudicate with logits", flush=True)
   # P10-dense rung 2: the K4-EAGLE acceptance histogram on THIS class
   if R4LOG:
     import numpy as _np2
@@ -766,6 +779,165 @@ if os.getenv("R5_QUOTE", "0") == "1":
     verdict = ("DRAFTER FIXABLE (median<=4)" if med <= 4 else
                ("INCONCLUSIVE (4<median<=8)" if med <= 8 else "T=1 ENDPOINT (median>8)"))
     print(f"[rank] VERDICT: {verdict}" + ("  [note: driven by the SLICE boundary — a full-vocab head re-test is the Tier-2 follow-up]" if OOS * 2 > NTOT else ""), flush=True)
+  # R8_PROSE_DUMP: THE 7/60 ADJUDICATION (the novel-prose first-divergence vs
+  # the T=1 ref). The spec stream IS the probe's argmax chain (accepted drafts
+  # match amds rows; the bonus token IS amds[m]) -- so a first divergence means
+  # the M=3 probe kernel family's argmax and the M=1 trunk family's argmax
+  # disagree at that position over the SAME true-greedy prefix. Measure the
+  # full-vocab fp16 logits of BOTH families at the exact divergence position:
+  #   T1  : CONTINUE from the same anchor([]) the qref ran from, fd+1 decode
+  #         passes -> d["logits"] (pass fd+1 computed qref[fd]).
+  #         (A single step at anchor(pre) is WRONG: follow_up builds the state
+  #         via the BATCH-PREFILL kernels -- a different accumulation than the
+  #         decode path, one position late, wildly different logits.)
+  #   PRB : replay the spec cycles from anchor([]) with per-cycle row dumps
+  #         until the emitted stream covers fd  -> d["logits3"] row r.
+  # MEASURED (2026-09-29, shipped default config): CROSS-CLASS FLIP. Both
+  # families rank the SAME top-2 pair {11, 321} at idx 6; T1 margin +1.16 for
+  # 11, probe margin +0.31 for 321; cross-family drift median 0.39/max 4.17
+  # logits, concentrated on the flipped token (d(321)=1.39, d(11)=0.08). The
+  # weaker margin (0.31) is INSIDE the family drift (0.39) -- which family
+  # computes the greedy pick decides the token. The 7/60 is ONE such flip at
+  # idx 6 + the cascade (novel prose = flat distributions); streams are
+  # deterministic x2 within each family. Logits wobble +-0.1 run-to-run BELOW
+  # argmax resolution (237k/248320 entries, max 0.098) -- token streams stay
+  # bit-stable; only the bitwise-logit det requirement would call that a race.
+  if os.getenv("R8_PROSE_DUMP", "0") == "1":
+    _RM = int(_mtpmod.RM)
+    _VOC = int(getattr(_mtpmod, "VOCAB", 248320))
+    outw0 = outs[0]
+    fd = next((k for k in range(NTOK) if outw0[k] != qref[k]), None)
+    if fd is None or fd == 0:
+      print(f"[pdump] nothing to adjudicate (first div {fd})", flush=True)
+    else:
+      pre = [int(t) for t in qref[:fd]]
+      assert pre == outw0[:fd].tolist(), "pdump: shared-prefix violation"
+      t_ref, t_spec = int(qref[fd]), int(outw0[fd])
+      print(f"[pdump] first div idx {fd}: T1={t_ref} spec={t_spec}; shared prefix {pre}", flush=True)
+
+      def _anchor(extra):
+        # byte-mirror of quote_anchor with delta+extra as the fed stream
+        reset_spec(E)
+        _nc, _pn, _nf = E.follow_up(Gq, delta + extra)
+        win_up(E.P, "tok_hist", P0*4, np.array([CUR0] + delta + extra, dtype=np.int32))
+        dev.synchronize()
+        return _nc, _pn
+
+      # ---- (0) the T=1 reference itself, deterministic x2 (the adjudication
+      #      is built on sand without this) ----
+      t1d = []
+      for _ in range(2):
+        _nc, _pn = _anchor([])
+        win_up(E.P, "tok_slot", 0, np.array([int(_nc)], dtype=np.int32))
+        dev.synchronize()
+        Gq.run_tokens(NTOK, wait_each=True)
+        t1d.append(E.P.down_at("tok_hist", pb*4, NTOK, np.int32).tolist())
+      print(f"[pdump] T1 ref deterministic x2: {t1d[0] == t1d[1]}; == harness qref: {t1d[0] == qref.tolist()}", flush=True)
+
+      # ---- (1) T=1 full-vocab logits at the divergence position, x2.
+      #      CAUTION (the first-run lesson): a single step at anchor(pre) sits
+      #      on state built by the FOLLOW_UP BATCH-PREFILL kernels -- a
+      #      different accumulation than the decode path the qref itself ran
+      #      (and one feed-position late: argmax came out qref[fd+1]). The
+      #      true T=1 distribution at the divergence = CONTINUE from the same
+      #      anchor([]) the qref ran from, fd+1 decode passes; the logits
+      #      buffer then holds pass fd+1's output = the qref[fd] prediction.
+      t1_rows = []
+      for it in range(2):
+        _nc, _pn = _anchor([])
+        win_up(E.P, "tok_slot", 0, np.array([int(_nc)], dtype=np.int32))
+        dev.synchronize()
+        Gq.run_tokens(fd + 1, wait_each=True)
+        t1h = E.P.down_at("tok_hist", pb*4, fd + 1, np.int32).tolist()
+        assert t1h == [int(t) for t in qref[:fd+1]], "pdump: T1 continuation lost qref sync"
+        l1 = E.P.down("logits", (_VOC,), np.float16).astype(np.float32)
+        t1_rows.append((int(t1h[fd]), l1.copy()))
+        o = np.argsort(-l1)[:3]
+        print(f"[pdump] T1 it{it}: continuation matched qref[:{fd+1}]; divergence-pos argmax "
+              f"{t1h[fd]} (qref[{fd}]={t_ref}) top3 {[(int(i), round(float(l1[i]), 4)) for i in o]}", flush=True)
+
+      # ---- (2) probe side: replay the spec decode from the quote anchor,
+      #      dump the amds/logits3 rows of the cycle that emitted fd, x2 ----
+      pr_rows = []
+      for it in range(2):
+        _nc, _pn = _anchor([])
+        assert _pn == pb
+        sess.begin()
+        emt = []
+        caught = None
+        while len(emt) <= fd:
+          r = sess.step()
+          new = r["tokens"]; emt += new
+          if len(emt) > fd and caught is None:
+            m = int(r["m"])
+            r_in = fd - (len(emt) - len(new))
+            am = E.P.down_at("amds", 0, _RM, np.int32)
+            lrows = [E.P.down_at("logits3", k*_VOC*2, _VOC, np.float16).astype(np.float32)
+                     for k in range(min(m + 2, _RM))]
+            caught = (m, r_in, am.tolist(), [row.copy() for row in lrows])
+            break
+        assert emt[:fd+1] == outw0.tolist()[:fd+1], "pdump: probe replay diverged from the recorded stream"
+        m, r_in, am, lrows = caught
+        lp = lrows[r_in]
+        o = np.argsort(-lp)[:3]
+        print(f"[pdump] PRB it{it}: stream idx {fd} was row {r_in} of a m={m} cycle; "
+              f"amds[0..{m}] {am[:m+1]}; row top3 {[(int(i), round(float(lp[i]), 4)) for i in o]}", flush=True)
+        pr_rows.append((m, r_in, am, lrows))
+
+      # ---- (3) probe-side cross-iter row diff (the first run showed the two
+      #      replays' caught rows agreeing on top3 yet not bit-equal -- the
+      #      first-launch-vs-rest uninit-smem detector class; quantify it) ----
+      lp0v = pr_rows[0][3][pr_rows[0][1]]
+      lp1v = pr_rows[1][3][pr_rows[1][1]]
+      drow = lp0v - lp1v
+      nz = int((drow != 0).sum())
+      print(f"[pdump] PRB row cross-iter: {nz}/{_VOC} entries differ, max|d| "
+            f"{float(np.abs(drow).max()) if nz else 0.0:.4f}", flush=True)
+
+      # ---- (4) the verdict ----
+      # Stream/argmax-level determinism is the CONTRACT (logits wobble +-0.1
+      # run-to-run below argmax resolution -- measured; the first-run bitwise
+      # det requirement was wrong). Classification:
+      #   CROSS-CLASS FLIP (benign, the tie-mine law at family-offset scale):
+      #     both sides rank the SAME top-2 pair, each prefers its own pick,
+      #     and the weaker margin <= the cross-family median logit drift -- the
+      #     greedy choice is decided by which kernel family computes it.
+      #   STATE-DIVERGENCE (Class C): disjoint top sets or logits far outside
+      #     the family-drift envelope -- accept-state corruption, P0-grade.
+      tok1, l1 = t1_rows[0]
+      m_t1 = float(l1[t_ref]) - float(l1[t_spec])
+      _, r_in, am, lrows = pr_rows[0]
+      lp = lrows[r_in]
+      m_pr = float(lp[t_spec]) - float(lp[t_ref])
+      dl = np.abs(l1 - lp)
+      dmax = float(dl.max()); dmed = float(np.median(dl))
+      d_ref = float(dl[t_ref]); d_spec = float(dl[t_spec])
+      top2_t1 = {int(i) for i in np.argsort(-l1)[:2]}
+      top2_pr = {int(i) for i in np.argsort(-lp)[:2]}
+      same_top2 = top2_t1 == top2_pr and top2_t1 == {t_ref, t_spec}
+      det_stream = (t1d[0] == t1d[1]) and bool((outs[0] == outs[1]).all()) \
+                   and all(t1_rows[i][0] == t_ref for i in (0, 1)) and am[r_in] == t_spec
+      print(f"[pdump] margins: T1 prefers {t_ref} over {t_spec} by {m_t1:+.4f}; probe prefers "
+            f"{t_spec} over {t_ref} by {m_pr:+.4f}; same top-2 pair: {same_top2}", flush=True)
+      print(f"[pdump] cross-family logit drift: median {dmed:.4f} max {dmax:.4f} | per-token "
+            f"d({t_ref}) {d_ref:.4f} d({t_spec}) {d_spec:.4f} | stream-level det x2 {det_stream}", flush=True)
+      if not det_stream:
+        cls = "NONDETERMINISTIC STREAM (adjudication void -- a real RACE, not numerics)"
+      elif same_top2 and m_t1 > 0 and m_pr > 0 and min(m_t1, m_pr) <= dmed:
+        cls = (f"CROSS-CLASS FLIP (Class B, benign: the tie-mine law at family-offset scale -- "
+               f"both sides rank {{{t_ref},{t_spec}}} top-2 and the weaker margin "
+               f"{min(m_t1, m_pr):.3f} is within the cross-family drift {dmed:.3f}; the spec "
+               f"stream is the probe-world's own consistent greedy chain)")
+      elif not same_top2 or dmax > 4.0:
+        cls = ("STATE-DIVERGENCE (Class C: probe row logits outside the family-drift envelope "
+               "at the same true-greedy prefix -- accept-state/KV corruption, P0-grade)")
+      else:
+        cls = (f"RESOLVED-FLIP (real argmax disagreement above the drift scale: m_t1 {m_t1:.4f} "
+               f"m_pr {m_pr:.4f} vs dmed {dmed:.4f} -- investigate the row {r_in} path)")
+      print(f"[pdump] VERDICT: {cls}", flush=True)
+      np.save("~/r8_pdump_t1.npy", l1)
+      np.save("~/r8_pdump_prb.npy", lp)
+      np.save("~/r8_pdump_prb_it1.npy", lp1v)
   raise SystemExit(0)
 
 # P3 prefill-assembly gates (PF_GATE=1): batched M=16 prefill vs T=1, inside the

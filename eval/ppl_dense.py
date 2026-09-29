@@ -164,7 +164,12 @@ def main():
                 if st["cnt"] < 3:
                     dev.synchronize()
                     print(f"[ppl_dense] rowdbg r={r} head8 ok; downloading...", flush=True)
-                lg = E.P.down_at("logits", 0, VOCAB, np.float32).astype(np.float64)
+                # F5 FIX: d["logits"] is VOCAB*2 BYTES (fp16 — trunk.py:65
+                # ("logits", VOCAB*2, np.float16)); the old np.float32 read
+                # VOCAB*4B = 496KB PAST the buffer end -> device fault at the
+                # first copyout (2/2 boots). fp16 IS the engine's native head
+                # output (h_argmax/greedy read the same values).
+                lg = E.P.down_at("logits", 0, VOCAB, np.float16).astype(np.float64)
                 if st["cnt"] < 3:
                     print(f"[ppl_dense] rowdbg r={r} download ok absmax={np.abs(lg).max():.1f}",
                           flush=True)

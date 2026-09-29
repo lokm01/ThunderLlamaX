@@ -349,9 +349,29 @@ deltas):
 **The memorization caveat**: the Gutenberg classic is verbatim-memorized
 (96.5% greedy next-token) — its PPL 1.14 is a CONTAMINATION FLOOR, not a
 quality number. The honest domains are code 19.9, code2 4.8,
-prose_private 34.4. These are the program's first PPL baselines. Dense
-direct-scoring PPL is blocked by a device fault at the first scoring
-boundary (F5, still open).
+prose_private 34.4. These are the program's first PPL baselines.
+
+**Dense perplexity** (Qwen3.8-27B, the same engine-side teacher-forced
+harness — ppl_dense.py, 193-208 tok/s scoring; the m128 trunk + FP16 head
+make dense scoring FASTER than the MoE twin's 118-135; results in
+[../eval/results/ppl_dense.json](../eval/results/ppl_dense.json)):
+
+| Domain | Tokens | NLL/tok | PPL | Greedy next-token acc |
+|---|---|---|---|---|
+| prose (Pride & Prejudice) | 32,767 | 1.4731 | 4.363 | 63.3% |
+| code (the serving layer) | 10,239 | 1.5910 | 4.909 | 66.4% |
+| prose_private (fix-campaign journal) | 3,200 | 2.9196 | 18.53 | 44.1% |
+| code2 (MoE kernel library) | 8,704 | 1.0248 | 2.786 | 77.9% |
+
+**Dense vs MoE, cross-model**: dense WINS every honest domain — code 4.91
+vs 19.95, prose_private 18.53 vs 34.38, code2 2.79 vs 4.81 (the 27B dense
+reader beats the A3B router on unfamiliar code and private jargon; the
+quant difference — IQ3_XXS vs UD-IQ3_S — is not the dominant term at that
+gap). On the contaminated prose domain the dense model shows the honest
+4.36 while the MoE's 1.14 memorization floor hides its true prose level.
+Numerics note: dense logits are the engine-native FP16 head output (the
+same values greedy decode decides on); the MoE head emits FP32; NLL
+accumulation is float64 on both.
 
 **Long-context needle** (dense; 5-digit code embedded in Gutenberg filler,
 chat API, thinking off):
@@ -371,7 +391,10 @@ loss (every completion dropped its first token; one-token answers came
 back empty — fixed in the API layer), F2 dense crash-loop + F3 long-prompt
 mapping exhaustion (both dead via the P10 kernargs-slab pool: `mapfd`
 counters freeze at 85 with ka_reused=1916 vs ka_fresh=42 lifetime), F5
-dense direct-PPL device fault (open), F7 the staydown-marker law.
+dense direct-PPL device fault (RESOLVED — harness bug, one line: the
+logits copyout read VOCAB*4B from a VOCAB*2B FP16 buffer, 496KB past the
+end; the fix downloads FP16, the engine-native head output, and the full
+4-domain battery above ran clean), F7 the staydown-marker law.
 
 ## What this rig can and can't do (measured)
 

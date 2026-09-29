@@ -926,10 +926,48 @@ clobber amds[5..] with garbage argmaxes before a later deep cycle rewrites
 them. Pin the rows to the active set's M (5 for the T=5 EAGLE probe),
 never the buffer's capacity.
 
+**PD6. THE CROSS-CLASS FLIP LAW (R8_PROSE adjudication, 2026-09-29).**
+The novel-prose gate's stable 7/60 vs the T=1 ref (first div idx 6,
+deterministic x2, identical across K2/K4/K10 and every draft-head variant)
+is the tie-mine law at FAMILY-OFFSET scale, not fp16-ulp scale: the M=3
+probe kernel family and the M=1 trunk family rank the SAME top-2 pair at
+the divergence position but disagree on the order — measured full-vocab at
+the flip: T1 margin +1.17 for its pick, probe margin +0.33 for the other,
+cross-family logit drift MEDIAN 0.379 / max 4.15 concentrated on the
+flipped token (d=1.39 vs 0.11 on the stable one). The weaker margin sits
+INSIDE the family drift: WHICH KERNEL FAMILY computes the greedy pick
+decides the token. One flip + cascade (novel prose = flat top-2
+distributions) means a low N/60 is ONE decision, not N; each stream is its
+own family's consistent greedy chain (lossless within its world), so the
+class is BENIGN — distinguish it from state divergence by adjudicating
+with full logits (R8_PROSE_DUMP=1 in test_w100k: disjoint top-sets or
+logits outside the drift envelope = STATE-DIVERGENCE, P0-grade; same
+top-2 + margin-inside-drift = cross-class flip).
+
+**PD7. THE SUB-ARGMAX LOGIT WOBBLE LAW (same adjudication).** Run-to-run
+replays of the SAME probe cycle wobble ~±0.1 logits on ~237k of 248320
+vocab entries (max 0.098) — BELOW argmax resolution at these margins, so
+TOKEN STREAMS stay bit-stable across reruns, but a bitwise-LOGIT
+determinism check would cry race. The determinism contract is and must be
+stated at the stream/argmax level; only a bitwise-logit requirement makes
+this class observable. (Same family as the first-launch-vs-rest
+uninit-smem detector: quantify before classifying.)
+
+**PD8. THE ANCHOR+SINGLE-STEP MEASUREMENT TRAP (same adjudication).** To
+measure the T=1 reference's logits at a divergence position you must
+CONTINUE from the same anchor the reference ran from (fd+1 single decode
+passes). A single forward step at anchor(prefix) is WRONG: follow_up
+builds state via the BATCH-PREFILL kernels — a different accumulation
+than the decode path the reference itself ran, one feed-position late —
+and its logits are wildly different. Any per-position adjudication that
+mixes a prefill-built state with decode-path references measures the state
+builder, not the numerics under test.
+
 New cross-references: R6_BATCH.md (X1-X6), R8_DECODE.md (X7-X9),
 R1_PROMPTCACHE.md W3 section + FIX_CAMPAIGN.md (X10-X11),
 MM_PLAN.md + MM_P0..P10_results.txt (MM1-MM22), M1C_STABILITY.md
 R3 live-window section (the L1-L5 ops fixes: pipe-vs-heredoc zsh tokens,
 client-side staydown markers, stop-order, dir-fsync), MM_P9E_results.txt +
 eval/P9_EVAL_RESULTS.md (KA1-KA5 + the P9 findings F1-F7),
-PERFORMANCE.md P10-dense section + eval/results/gsm8k_p10_* (PD1-PD5).
+PERFORMANCE.md P10-dense section + eval/results/gsm8k_p10_* (PD1-PD5),
+the R8_PROSE_DUMP instrument in engine/test_w100k.py (PD6-PD8).

@@ -1,0 +1,38 @@
+{
+ "prose": {
+  "n_tokens": 32767,
+  "nll_per_token": 1.473095,
+  "ppl": 4.3627,
+  "greedy_acc": 0.6333,
+  "wall_s": 170.0,
+  "score_rate_tps": 192.8,
+  "skipped_gaps": []
+ },
+ "code": {
+  "n_tokens": 10239,
+  "nll_per_token": 1.59098,
+  "ppl": 4.9086,
+  "greedy_acc": 0.6637,
+  "wall_s": 49.5,
+  "score_rate_tps": 206.9,
+  "skipped_gaps": []
+ },
+ "prose_private": {
+  "n_tokens": 3200,
+  "nll_per_token": 2.919603,
+  "ppl": 18.5339,
+  "greedy_acc": 0.4409,
+  "wall_s": 15.4,
+  "score_rate_tps": 208.2,
+  "skipped_gaps": []
+ },
+ "code2": {
+  "n_tokens": 8704,
+  "nll_per_token": 1.024752,
+  "ppl": 2.7864,
+  "greedy_acc": 0.7791,
+  "wall_s": 42.8,
+  "score_rate_tps": 203.2,
+  "skipped_gaps": []
+ }
+}

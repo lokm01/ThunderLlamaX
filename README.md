@@ -117,6 +117,11 @@ token; fixed) and a graph-kernargs mapping exhaustion that crashed
 long-prompt serving (fixed with a slab-recycling pool: long prompts ≥20k
 now serve reliably, and a 42-minute sustained-load soak ran with zero
 crashes where the same traffic class used to die every 13-18 minutes).
+Two later closures: the dense-PPL scorer fault was a one-line harness bug
+(a 2x-oversized logits download — fixed, the full dense perplexity battery
+now runs clean), and `sudo enginectl switch` state files are now always
+written daemon-readable, so mixed sudo/non-sudo invocation can't silently
+skip model promotion.
 
 ## Can you use an eGPU with Apple Silicon?
 

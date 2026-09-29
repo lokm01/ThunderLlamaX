@@ -86,6 +86,16 @@ authored staydowns never cleared by a swap, invalid intents quarantined
 with the current model kept, `TLX_MODEL_ID` exported to the engine, the
 monolithic-env rollback fallback).
 
+**Swap-state ownership (the sudo fix, R8)**: `mkstemp` creates files 0600
+owned by the INVOKING user — a `sudo enginectl switch` used to arm
+`next_model`/`swap_in_progress` as root:root 0600, the non-sudo wrapper's
+state read (head, stderr suppressed) came back EMPTY, promotion was
+silently SKIPPED, and the OLD model rebooted instead of swapping. State
+files now always land 0644 and, when `enginectl` runs as root, are chowned
+to the state dir's owner (the launchd daemon user) — mixed sudo/non-sudo
+invocation is safe. A repair sweep (wired into `models` and `switch`)
+heals any pre-fix root-owned leftovers.
+
 **Streaming semantics**: one SSE chunk per engine cycle — each cycle emits
 m+1 tokens (up to K+1), so chunks arrive at the cycle rate: ~8.9 tokens /
 118 ms on the K=10 hit-class config (~7.5/105 ms at the published K=8
@@ -407,13 +417,17 @@ drings -> OOB fault (never exercised before deep-K shipped).
 6. **MoE long-ctx MTP alpha unmeasured** — the acceptance table's 96k
    entries are harness-class only; the serving-grade 96k alpha battery is
    queued.
-7. **Dense direct-scoring PPL device fault (P9 F5, open)**: the dense
-   teacher-forced scorer (`eval/ppl_dense.py`) launches clean at the first
-   ingest boundary but the logits copyout hits `Device fault detected`
-   (2/2 boots). Distinct from the (fixed) mapping exhaustion — this is a
-   device fault during the boundary download; needs its own bisect
-   (suspect: eager head launches interleaved with the m128 chunk-graph
-   timeline). Serving itself is unaffected; only the offline scorer.
+7. **~~Dense direct-scoring PPL device fault (P9 F5)~~ RESOLVED (harness
+   bug, one line)**: the fault was the logits copyout reading 2x the
+   buffer — `down_at("logits", 0, VOCAB, np.float32)` = VOCAB*4B from a
+   VOCAB*2B FP16 buffer, 496KB past the end, device fault at the first
+   boundary copyout (2/2 boots). The eager head launches were never the
+   problem (they sync-clean in the traceback). Fix: download as
+   `np.float16` — the engine-native head output, the same values greedy
+   decode decides on. Post-fix the full 4-domain dense PPL battery runs
+   clean end-to-end (see [PERFORMANCE.md](PERFORMANCE.md)). The MoE twin
+   never faulted because its logits buffer is FP32 and its harness reads
+   the matching dtype.
 
 ## Not yet (M2/M3)
 
