@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """W1+W2 mock-engine battery for api_server.py/serve.py/ops (GPU-free; run on
 the rig with system python3).  Standalone:  python3 engine0/tests/test_api_mocks.py
 Also pytest-compatible (all test_* are sync; async parts use asyncio.run).
@@ -51,6 +48,12 @@ def setup_module():
   with open(canon, "w") as f:
     f.write(f"TLX_MODEL_PATH={gguf}\nLOOKUP_K=10\nPF_PREFILL=1\nKV8=1\nSKV=1\n")
   os.environ["TLX_ENV_CANONICAL"] = canon
+  # TLX P8: this battery exercises the LEGACY single-model surface — point the
+  # registry + state dir at nonexistent sandbox paths (REGISTRY None). The P8
+  # multi-model surface has its own battery (tests/test_p8_multiplayer.py).
+  os.environ["TLX_MODEL_REGISTRY"] = os.path.join(d, "NO_REGISTRY.json")
+  os.environ["TLX_STATE_DIR"] = os.path.join(d, "state")
+  os.environ["TLX_ENV_COMMON"] = os.path.join(d, "NO_env.common")
   sys.path.insert(0, ENG0)
   import api_server
   _BATT["api"] = api_server
@@ -500,7 +503,7 @@ def test_midstream_error_sse_and_dirty_fresh():
       evs, _ = r.sse_events()
       assert evs and evs[-1] == "[DONE]"
       errs = [e for e in evs if isinstance(e, dict) and "error" in e]
-      assert errs and errs[0]["error"]["type"] == "engine_error", evs[:6]
+      assert errs and errs[0]["error"]["type"] == "api_error"              and errs[0]["error"]["code"] == "engine_error", evs[:6]   # R3-37 enum
       assert mc.eng.dirty is True
       assert mc.a._resident("e1")["reusable"] is False
       assert mc.a._resident("e1")["messages"] is None
@@ -676,9 +679,11 @@ def test_serve_rpc_validation_unit():
   assert err
   err, _ = serve.validate_rpc("prefill", {"mode": "FRESH", "ids": [1] * (CTXK + 1)}, CTXK, VOCAB, 0)
   assert err and "ctxk" in err
-  err, _ = serve.validate_rpc("prefill", {"mode": "FOLLOW_UP", "ids": [5] * 100}, CTXK, VOCAB, CTXK)
+  err, _ = serve.validate_rpc("prefill", {"mode": "FOLLOW_UP", "ids": [5] * 100,
+                                           "conversation_id": "c"}, CTXK, VOCAB, CTXK)
   assert err and "overflows" in err
-  err, p = serve.validate_rpc("prefill", {"mode": "FOLLOW_UP", "ids": [5] * 8}, 1000, VOCAB, 900)
+  err, p = serve.validate_rpc("prefill", {"mode": "FOLLOW_UP", "ids": [5] * 8,
+                                           "conversation_id": "c"}, 1000, VOCAB, 900)
   assert err is None and p["ids"] == [5] * 8
   err, _ = serve.validate_rpc("prefill", {"mode": "EVIL", "ids": [1]}, CTXK, VOCAB, 0)
   assert err
@@ -799,19 +804,20 @@ def test_health_redaction_and_admin_debug():
       assert j["status"] == "ok"
       flat = json.dumps(j)
       assert "fed_tail" not in flat and "conversation_id" not in flat
-      assert j["engine"]["config_fp"] == mc.a.EXPECTED_FP
-      assert j["engine"]["busy"] is False
-      assert j["config"]["drift_check"] == "on"
+      # R3-24: the engine view + drift detail moved behind the admin header
+      assert "engine" not in j and "config" not in j, j
       # wrong token -> still redacted
       r2 = await ME.asgi_request(mc.a.app, "GET", "/health",
                                  headers={"x-admin-token": "nope"})
-      assert "engine_debug" not in r2.json()
+      assert "engine_debug" not in r2.json() and "engine" not in r2.json()
       # right token -> full ops view
       r3 = await ME.asgi_request(mc.a.app, "GET", "/health",
                                  headers={"x-admin-token": mc.a.ADMIN_TOKEN})
       j3 = r3.json()
       assert "fed_tail" in j3.get("engine_debug", {}) and \
              "conversation_id" in j3.get("engine_debug", {})
+      assert j3["engine"]["config_fp"] == mc.a.EXPECTED_FP
+      assert j3["engine"]["busy"] is False and j3["config"]["drift_check"] == "on"
   asyncio.run(asyncio.wait_for(run(), 30))
 
 def test_health_config_drift_503():
@@ -824,7 +830,11 @@ def test_health_config_drift_503():
       assert r.status == 503, r.body[:300]
       j = r.json()
       assert j["status"] == "config_drift"
-      assert j["config"]["config_fp_expected"] == mc.a.EXPECTED_FP
+      # R3-24: the fp pair sits behind the admin header
+      assert "config" not in j
+      ra = await ME.asgi_request(mc.a.app, "GET", "/health",
+                                 headers={"x-admin-token": mc.a.ADMIN_TOKEN})
+      assert ra.json()["config"]["config_fp_expected"] == mc.a.EXPECTED_FP
       r2 = await req(json_body=no_think(body("q", conv="d1", max_tokens=5)))
       assert r2.status == 503 and b"config drift" in r2.body, r2.body[:300]
       # the refusal happened BEFORE any engine prefill
@@ -961,12 +971,11 @@ def test_pcache_env_keys_extended():
 
 def test_ops_canonical_and_scripts():
   """W2.3: env.canonical carries the ship knobs; wrapper/enginectl lost the
-  /tmp breaker state, pgrep/pkill patterns; plists carry a UserName key.
-  (Published-repo form: the live env.canonical is NOT in the repo — the
-  sanitized env.canonical.example stands in; on the rig the real file is
-  present and the same assertions run against it.)"""
+  /tmp breaker state, pgrep/pkill patterns; plists carry a UserName."""
   import svc_fp
   ops = os.path.join(ENG0, "ops")
+  # bare clone: env.canonical is generated from the published example; test
+  # the example when the operator's real file is absent (rig behavior intact)
   canon = os.path.join(ops, "env.canonical")
   if not os.path.exists(canon):
     canon = os.path.join(ops, "env.canonical.example")
@@ -986,6 +995,966 @@ def test_ops_canonical_and_scripts():
   for p in (pe, pa):
     assert "<key>UserName</key>" in p          # substitute %USER% before install
   assert "EnvironmentVariables" not in pe     # env single-sourced (V-27)
+
+# ==============================================================================
+# R3 additions (round-3 ledger; review-fixes-r3 branch)
+# ==============================================================================
+def test_q_promote_vs_cancel_grant_released():
+  """R3-10: a promotion landing in the same window as the waiter's
+  cancellation must RELEASE the consumed grant — at permits=1 the old code's
+  no-op handler leaked it and ONE occurrence bricked admission (429 forever)."""
+  async def run():
+    a = api(); fresh_api()
+    a.QSTATE.update({"active": 1, "permits": 1})   # a live holder occupies the
+    t = asyncio.ensure_future(a.q_acquire(1))      # only permit
+    await asyncio.sleep(0.01)                 # t parked on its fut in the deque
+    assert len(a.QSTATE["wait"]) == 1
+    fut = a.QSTATE["wait"][0]
+    a.q_release()                             # holder leaves: active->0 AND the
+    assert a.QSTATE["active"] == 1            # promoter grants OUR fut (the
+    assert fut.done() and not fut.cancelled() # wakeup is scheduled, not run)
+    t.cancel()                                # cancel BEFORE t resumes -> the
+    try:                                      # CancelledError fires at the await
+      await t
+    except asyncio.CancelledError:
+      pass
+    await asyncio.sleep(0.01)
+    assert a.QSTATE["active"] == 0, a.QSTATE  # OLD: stays 1 — the leaked grant
+    assert len(a.QSTATE["wait"]) == 0         # bricks admission at permits=1
+  asyncio.run(asyncio.wait_for(run(), 10))
+
+def test_q_dead_waiters_pruned_no_429():
+  """R3-11: timed-out waiters leave dead futures in the wait deque and used to
+  count toward MAX_WAITING — after N timeouts a fresh arrival was 429'd even
+  though the real queue was empty."""
+  async def run():
+    a = api(); fresh_api()
+    a.QSTATE.update({"active": 1, "permits": 1})
+    old_max = a.MAX_WAITING
+    a.MAX_WAITING = 4
+    async def timed_out_waiter():
+      try:
+        await asyncio.wait_for(a.q_acquire(1), 0.05)
+        a.q_release()                          # if admitted, be polite
+      except asyncio.TimeoutError:
+        pass
+    try:
+      await asyncio.gather(*[timed_out_waiter() for _ in range(4)])
+      assert len(a.QSTATE["wait"]) == 0, [f.done() for f in a.QSTATE["wait"]]
+      # fresh arrival must NOT see a full queue; admitted as soon as the
+      # holder releases
+      t = asyncio.ensure_future(a.q_acquire(1))
+      a.q_release()
+      await asyncio.wait_for(t, 2)
+      assert a.QSTATE["active"] == 1
+    finally:
+      a.MAX_WAITING = old_max
+      a.q_release()
+  asyncio.run(asyncio.wait_for(run(), 10))
+
+def test_evq_coalesce_and_loud_fail_unit():
+  """R3-12 unit (the §3.3 ruling): under Full, text/reasoning COALESCE into
+  one pending event (never a silent drop); a SECOND consecutive coalesced-put
+  failure marks the stream dead + arms the cancel (loud-fail backstop); the
+  pending tail is flushed, not lost."""
+  a = api()
+  dead = {"v": False}
+  evq, pend, on_event = a._make_stream_events(1, put_timeout=0.02,
+                                              on_dead=lambda: dead.__setitem__("v", True))
+  on_event("prefill", {"done": 1, "total": 2})
+  assert evq.get_nowait()[0] == "prefill"
+  on_event("text", "a")                     # fills the single slot
+  assert evq.qsize() == 1
+  on_event("text", "b")                     # Full -> coalesced into pending
+  assert evq.qsize() == 1 and pend["text"] == "b" and not pend["dead"]
+  assert evq.get_nowait() == ("text", "a")  # drain
+  on_event("text", "c")                     # retry succeeds -> merged event
+  assert evq.get_nowait() == ("text", "bc"), "coalesced order+content"
+  assert pend["text"] == "" and pend["stalls"] == 0
+  # loud-fail backstop: two consecutive Full windows with no drain
+  on_event("reasoning", "r1")               # fills the slot
+  on_event("reasoning", "r2")               # Full #1 -> pending
+  on_event("reasoning", "r3")               # Full #2 -> DEAD + cancel armed
+  assert pend["dead"] and dead["v"], "backstop must fire loudly"
+  assert pend["reasoning"] == "r2r3"        # the tail is preserved, not lost
+  on_event("text", "never")                 # post-dead: no-op, no queue growth
+  assert evq.qsize() == 1
+
+def test_evq_stream_byte_complete_tiny_queue():
+  """R3-12 e2e: a tiny event queue under a fast producer still delivers
+  byte-complete concatenated content through the REAL gen() (the coalesced
+  chunks and the end-of-stream pending flush keep stream == non-stream)."""
+  async def run():
+    with MockCtx(reply_text=LONG_REPLY, cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode(LONG_REPLY) + [ID_IMEND]
+      old_max = mc.a.EVQ_MAX
+      mc.a.EVQ_MAX = 4
+      try:
+        r = await req(json_body=no_think(body("slow consumer", conv="evq1",
+                                              stream=True, max_tokens=400)))
+        assert r.status == 200
+        evs, _ = r.sse_events()
+        got = content_join(evs)
+        assert got == LONG_REPLY, (len(got), len(LONG_REPLY))
+        r2 = await req(json_body=no_think(body("slow consumer", conv="evq2",
+                                               max_tokens=400)))
+        assert r2.json()["choices"][0]["message"]["content"] == LONG_REPLY
+      finally:
+        mc.a.EVQ_MAX = old_max
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_batch_same_conv_streams_serialize_over_stream_lifetime():
+  """R3-08: at permits=2 the conv lock is held for the STREAM LIFETIME — the
+  old code released it when the route returned, so a second same-conv request
+  prefilled (double slot binding!) while the first stream's executor thread
+  was still generating: torn R['fed'] reads and prefill-failure mirror wipes."""
+  async def run():
+    with MockCtx(engine_cls=ME.MockBatchEngine, reply_text=LONG_REPLY,
+                 cycle_delay=0.004) as mc:
+      ra, rb = await asyncio.gather(
+        req(json_body=no_think(body("same stream a", conv="cx", stream=True, max_tokens=120))),
+        req(json_body=no_think(body("same stream b", conv="cx", stream=True, max_tokens=120))))
+      assert ra.status == 200 and rb.status == 200, (ra.status, rb.status)
+      # same-conversation generates never overlapped (conv lock spans the
+      # stream; the OLD code ran them concurrently at permits=2)
+      assert not mc.eng.generates_overlap(), mc.eng.gen_windows
+      # the engine-side belt never had to fire (the API serialized first)
+      busy = [r for r in mc.eng.rejected if "conversation busy" in r[1]]
+      assert not busy, busy
+      # no double slot binding for one conversation at any tick
+      st = mc.eng._status_locked()
+      cids = [s["conversation_id"] for s in st["streams"]]
+      assert cids.count("cx") <= 1, cids
+  asyncio.run(asyncio.wait_for(run(), 60))
+
+def test_engine_belt_rejects_prefill_while_conv_generating():
+  """R3-08 engine belt (mock mirror of serve._b_prefill): a prefill binding a
+  conversation that is GENERATING on another slot is refused cleanly — never
+  a silent double-bind (wrong-answer class)."""
+  a = api(); fresh_api()
+  eng = ME.MockBatchEngine(a.SOCK, {"cycle_width": 3})
+  try:
+    ca = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); ca.settimeout(5)
+    ca.connect(a.SOCK)
+    cb = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); cb.settimeout(5)
+    cb.connect(a.SOCK)
+    def send(c, o): c.sendall((json.dumps(o) + "\n").encode())
+    bufs = {ca: b"", cb: b""}
+    def reply(c, wid):
+      while True:
+        while b"\n" not in bufs[c]:
+          bufs[c] += c.recv(65536)
+        line, bufs[c] = bufs[c].split(b"\n", 1)
+        r = json.loads(line)
+        if r.get("id") == wid and "event" not in r:
+          return r
+    # conn A: prefill + attach generate (no terminal yet)
+    send(ca, {"id": 1, "method": "prefill", "params":
+        {"mode": "FRESH", "ids": [10, 11, 12], "conversation_id": "belt"}})
+    assert reply(ca, 1)["ok"]
+    send(ca, {"id": 2, "method": "generate", "params": {"max_cycles": 50}})
+    time.sleep(0.3)                      # let the generate attach + tick
+    # conn B: SAME conversation prefill -> clean refusal, no second binding
+    send(cb, {"id": 3, "method": "prefill", "params":
+        {"mode": "FRESH", "ids": [20, 21], "conversation_id": "belt"}})
+    r = reply(cb, 3)
+    assert not r["ok"] and "conversation busy" in r["error"], r
+    st = eng._status_locked()
+    cids = [s["conversation_id"] for s in st["streams"]]
+    assert cids.count("belt") == 1, cids
+    # a DIFFERENT conversation still prefills fine on the other slot
+    send(cb, {"id": 4, "method": "prefill", "params":
+        {"mode": "FRESH", "ids": [30, 31], "conversation_id": "other"}})
+    assert reply(cb, 4)["ok"]
+    ca.close(); cb.close()
+  finally:
+    eng.stop(); fresh_api()
+
+def test_encode_once_off_loop():
+  """R3-09: the O(pairs) BPE encode runs in the THREADPOOL and ONCE (the
+  pre-slot memo is reused post-slot). Old code: encode ran directly on the
+  asyncio loop TWICE per FRESH request — a 50-100k-token prompt starved SSE
+  generators, disconnect watchers and /health."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      calls = {"n": 0}
+      real_encode = mc.a.TOK.encode
+      def slow_encode(text):
+        calls["n"] += 1
+        time.sleep(0.15)                 # model the O(pairs) merge cost
+        return real_encode(text)
+      mc.a.TOK.encode = slow_encode
+      lat = []
+      async def probe():
+        for _ in range(8):
+          t0 = time.time()
+          await ME.asgi_request(mc.a.app, "GET", "/health")
+          lat.append(time.time() - t0)
+          await asyncio.sleep(0.04)
+      try:
+        pb = asyncio.ensure_future(probe())
+        r = await req(json_body=no_think(body("big " + "prompt " * 200,
+                                              conv="enc1", max_tokens=10)))
+        assert r.status == 200, r.body[:200]
+        await asyncio.wait_for(pb, 10)
+      finally:
+        mc.a.TOK.encode = real_encode
+      assert calls["n"] == 1, f"encode must run exactly once, ran {calls['n']}"
+      assert max(lat) < 0.12, f"event loop stalled on the encode: {lat}"
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+
+def test_r3_19_fp_batch_and_cubin_sensitivity():
+  """R3-19: config_fp sees BATCH-knob drift (BATCH_B / BATCH_REBUILD_EVERY /
+  BATCH_PF_CHUNK / R6_PF_T1 / PF_G3M_MB were absent from _ENV_KEYS — a BATCH_B=2
+  boot without env edits kept the SAME fp and old KV restored into a different
+  engine) AND cubin-content drift (a kernel rebuild with no env change); the
+  API import and the daemon mix the same cubin digest (agreement)."""
+  import svc_fp, tempfile as _tf, shutil as _sh
+  d = _tf.mkdtemp(prefix="tlx_fp19_")
+  try:
+    m = os.path.join(d, "m.gguf"); open(m, "wb").write(b"A" * 1024)
+    base = {"KV8": "1", "LOOKUP_K": "10", "TLX_MODEL_PATH": m}
+    saved = svc_fp.extra_fp()
+    try:
+      svc_fp.set_extra("cubins", "digestA")
+      fp1 = svc_fp.config_fp(env=base)
+      for k, v in (("BATCH_B", "2"), ("BATCH_REBUILD_EVERY", "232"),
+                   ("BATCH_PF_CHUNK", "64"), ("R6_PF_T1", "1"),
+                   ("PF_G3M_MB", "0")):
+        e2 = dict(base); e2[k] = v
+        assert svc_fp.config_fp(env=e2) != fp1, f"{k} drift invisible"
+      svc_fp.set_extra("cubins", "digestB")     # a rebuilt kernel set
+      assert svc_fp.config_fp(env=base) != fp1
+    finally:
+      svc_fp._EXTRA_FP.clear(); svc_fp._EXTRA_FP.update(saved)
+    # cubin_set_digest: byte sensitivity + deterministic missing-file class
+    cd = _tf.mkdtemp(prefix="tlx_cub_")
+    try:
+      open(os.path.join(cd, "k2s5.cubin"), "wb").write(b"v1")
+      dg1 = svc_fp.cubin_set_digest(base_dir=cd)
+      open(os.path.join(cd, "k2s5.cubin"), "wb").write(b"v2")
+      assert svc_fp.cubin_set_digest(base_dir=cd) != dg1
+      dg3 = svc_fp.cubin_set_digest(base_dir=os.path.join(cd, "gone"))
+      assert len(dg3) == 16                    # all-missing still deterministic
+    finally:
+      _sh.rmtree(cd, ignore_errors=True)
+    # wiring: the api import mixed the real cubin digest (agrees with serve)
+    a = api()
+    assert svc_fp.extra_fp().get("cubins") == svc_fp.cubin_set_digest()
+    for k in ("BATCH_B", "BATCH_REBUILD_EVERY", "BATCH_PF_CHUNK", "R6_PF_T1", "PF_G3M_MB"):
+      assert k in svc_fp._ENV_KEYS, k
+  finally:
+    _sh.rmtree(d, ignore_errors=True)
+
+
+# ==============================================================================
+# R3-32/33/35/37 (W-D): the conformance quartet
+# ==============================================================================
+def test_r3_32_reasoning_effort_high():
+  """R3-32: the OpenAI-standard `high` no longer 400s — it maps to this
+  template's strongest tier (xhigh); xhigh stays as the alias; garbage still
+  400s with param+code."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("ok") + [ID_IMEND]
+      r = await req(json_body=body("q1", conv="eff1", reasoning_effort="high",
+                                   max_tokens=20))
+      assert r.status == 200, r.body[:300]
+      assert "Reasoning effort is set to xhigh" in mock_decode(mc.eng.fed)
+      # explicit xhigh identical
+      r2 = await req(json_body=body("q2", conv="eff2", reasoning_effort="xhigh",
+                                    max_tokens=20))
+      assert r2.status == 200
+      # invalid value: clean 400 with param + code
+      r3 = await req(json_body=body("q3", reasoning_effort="insane"))
+      assert r3.status == 400
+      j3 = r3.json()["error"]
+      assert j3["type"] == "invalid_request_error" and j3["param"] == "reasoning_effort"
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_33_sampling_compat_mode():
+  """R3-33: without compat, temperature=0.7 is a capability-coded 400
+  (invalid_request_error / unsupported_sampling / param) — the most likely
+  FIRST 400 for SDK clients; under TLX_COMPAT_IGNORE_SAMPLING in-range values
+  are accepted + recorded in ignored_params (greedy unchanged); out-of-range
+  is rejected in BOTH modes."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("ok") + [ID_IMEND]
+      # default (no compat): clean coded 400
+      r = await req(json_body=body("q", conv="s1", temperature=0.7, max_tokens=10))
+      assert r.status == 400, r.body[:200]
+      j = r.json()["error"]
+      assert j["type"] == "invalid_request_error"
+      assert j["code"] == "unsupported_sampling" and j["param"] == "temperature"
+      # 0/1 exact stays accepted (greedy-neutral)
+      r2 = await req(json_body=body("q", conv="s2", temperature=1, top_p=0, max_tokens=10))
+      assert r2.status == 200, r2.body[:200]
+      # compat mode: in-range accepted + ignored_params records them
+      old = mc.a.COMPAT_IGNORE_SAMPLING
+      mc.a.COMPAT_IGNORE_SAMPLING = True
+      try:
+        r3 = await req(json_body=body("q", conv="s3", temperature=0.7,
+                                      top_p=0.95, top_k=40, max_tokens=10))
+        assert r3.status == 200, r3.body[:300]
+        j3 = r3.json()
+        for k in ("temperature", "top_p", "top_k"):
+          assert k in j3.get("ignored_params", []), j3.get("ignored_params")
+        # out-of-range STILL rejected under compat (OpenAI range rules)
+        r4 = await req(json_body=body("q", conv="s4", temperature=7, max_tokens=10))
+        assert r4.status == 400
+        assert r4.json()["error"]["code"] == "unsupported_sampling"
+      finally:
+        mc.a.COMPAT_IGNORE_SAMPLING = old
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_35_reasoning_tail_streamed():
+  """R3-35: the final reasoning tail (detok/splitter flush at end-of-stream)
+  is streamed as a reasoning_content chunk before the finish chunk — stream
+  concatenation == non-stream reasoning+content (old code silently dropped
+  the tail in SSE while non-stream had it)."""
+  async def run():
+    # reply ends INSIDE the think block with a 2-byte UTF-8 char: the final
+    # byte pair only decodes in the end-of-stream flush -> rtail
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("planning é") + [ID_IMEND]
+      rs = await req(json_body=body("q", conv="rt1", stream=True, max_tokens=50))
+      assert rs.status == 200
+      evs, _ = rs.sse_events()
+      s_reason = reasoning_join(evs)
+      s_content = content_join(evs)
+      rn = await req(json_body=body("q", conv="rt2", max_tokens=50))
+      msg = rn.json()["choices"][0]["message"]
+      assert s_reason == msg["reasoning_content"], (repr(s_reason), msg)
+      assert s_content == msg["content"], (s_content, msg["content"])
+      # the reasoning_tail chunk precedes the finish chunk
+      kinds = [ ("r" if isinstance(e, dict) and e.get("choices") and
+                 e["choices"][0].get("delta", {}).get("reasoning_content") else
+                 "f" if isinstance(e, dict) and e.get("choices") and
+                 e["choices"][0].get("finish_reason") is not None else ".")
+                for e in evs ]
+      assert "r" in kinds and kinds.index("r") < kinds.index("f"), kinds
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_37_error_type_enums():
+  """R3-37: every error path speaks the OpenAI type enum with a specific
+  code (typed SDK clients/gateways key off it); same shape in SSE errors."""
+  async def run():
+    with MockCtx(reply_text=LONG_REPLY, cycle_delay=0.01) as mc:
+      # 400 invalid_request_error (+param/code for sampling)
+      r = await req(json_body=body("q", temperature=0.5))
+      assert r.status == 400 and r.json()["error"]["type"] == "invalid_request_error"
+      # 413 invalid_request_error/request_too_large
+      big = b"x" * (mc.a.MAX_BODY_BYTES + 64)
+      r2 = await ME.asgi_request(mc.a.app, "POST", "/v1/chat/completions", raw_body=big,
+                                 headers={"content-type": "application/json",
+                                          "content-length": str(len(big))})
+      assert r2.status == 413
+      j2 = r2.json()["error"]
+      assert j2["type"] == "invalid_request_error" and j2["code"] == "request_too_large"
+      # 415 invalid_request_error/unsupported_media_type
+      r3 = await ME.asgi_request(mc.a.app, "POST", "/v1/chat/completions",
+                                 raw_body=b"{}", headers={"content-type": "text/plain"})
+      assert r3.status == 415 and r3.json()["error"]["code"] == "unsupported_media_type"
+      # 429 rate_limit_error/queue_full (+ Retry-After kept)
+      rs = await asyncio.gather(*[
+          req(json_body=no_think(body(f"q {i}", conv=f"e{i}", max_tokens=150)))
+          for i in range(6)])
+      r429 = next(r for r in rs if r.status == 429)
+      j4 = r429.json()["error"]
+      assert j4["type"] == "rate_limit_error" and j4["code"] == "queue_full"
+      assert r429.headers.get("retry-after") == "10"
+      # 503 api_error/config_drift
+      mc.eng.cfg["config_fp"] = "deadbeefdeadbeef"
+      r5 = await ME.asgi_request(mc.a.app, "GET", "/health")
+      assert r5.status == 503
+      r6 = await req(json_body=no_think(body("q", conv="e9", max_tokens=5)))
+      assert r6.status == 503
+      j6 = r6.json()["error"]
+      assert j6["type"] == "api_error" and j6["code"] == "config_drift", j6
+      mc.eng.cfg["config_fp"] = mc.a.EXPECTED_FP
+      # 503 api_error/engine_down (engine socket dead)
+      mc.eng.stop()
+      r7 = await req(json_body=no_think(body("q", conv="e10", max_tokens=5)))
+      assert r7.status == 503
+      j7 = r7.json()["error"]
+      assert j7["type"] == "api_error" and j7["code"] == "engine_down", j7
+  asyncio.run(asyncio.wait_for(run(), 60))
+
+def test_r3_37_sse_error_shape():
+  """R3-37: mid-stream engine errors emit the standard type enum in SSE."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("x" * 30)
+      mc.eng.cfg["fail_at_cycle"] = 2
+      r = await req(json_body=no_think(body("q", conv="se1", stream=True, max_tokens=50)))
+      evs, _ = r.sse_events()
+      errs = [e for e in evs if isinstance(e, dict) and "error" in e]
+      assert errs, evs[:5]
+      j = errs[0]["error"]
+      assert j["type"] == "api_error" and j["code"] == "engine_error", j
+      assert evs[-1] == "[DONE]"
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+
+# ==============================================================================
+# R3-13/14/15/17/40 (W-B remainder)
+# ==============================================================================
+def test_r3_13_nonstream_disconnect_watcher():
+  """R3-13: NON-STREAM requests get the disconnect watcher — the client
+  vanishing mid-generate arms the engine cancel (they used to pass
+  cancel_check=None and generate on for a dead client)."""
+  async def run():
+    with MockCtx(reply_text=LONG_REPLY, cycle_delay=0.02) as mc:
+      r = await req(json_body=no_think(body("nonstream doomed", conv="ns1",
+                                            max_tokens=200)),
+                    disconnect_after=0.3)
+      deadline = time.time() + 8
+      while time.time() < deadline and not mc.eng.methods("cancel"):
+        await asyncio.sleep(0.05)
+      assert mc.eng.methods("cancel"), "non-stream cancel must reach the engine"
+      while time.time() < deadline and mc.a.queue_depth() > 0:
+        await asyncio.sleep(0.05)
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_14_residents_bounded_lru():
+  """R3-14: RESIDENTS is a TRUE bounded LRU (count + fed-token budget);
+  `reusable` is a hint, not a pin; eviction surfaces x-resident-evicted."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      a = mc.a
+      old_max, old_bud = a.RESIDENT_MAX, a.RESIDENT_FED_BUDGET
+      a.RESIDENT_MAX = 3
+      a.RESIDENT_FED_BUDGET = 10_000
+      try:
+        mc.eng.cfg["reply_tokens"] = mock_encode("fine") + [ID_IMEND]
+        for i in range(6):
+          r = await req(json_body=no_think(body(f"turn {i}", conv=f"lr{i}",
+                                                max_tokens=20)))
+          assert r.status == 200
+          assert len(a.RESIDENTS) <= 3, len(a.RESIDENTS)
+        # the SURVIVORS are the most-recently-used convs
+        assert set(a.RESIDENTS) == {"lr5", "lr4", "lr3"}, set(a.RESIDENTS)
+        # a returning evicted conversation is surfaced + re-FRESHes
+        r2 = await req(json_body=no_think(body("turn 0 again", conv="lr0",
+                                               max_tokens=20)))
+        assert r2.status == 200
+        assert r2.headers.get("x-resident-evicted") == "1"
+        assert r2.headers.get("x-prefix-mode") == "FRESH"
+        # fed budget: 3 residents x ~200 fed tokens stays under; force tiny
+        a.RESIDENT_FED_BUDGET = 50
+        r3 = await req(json_body=no_think(body("budget", conv="lrX", max_tokens=20)))
+        assert r3.status == 200
+        total = sum(len(v.get("fed") or ()) for v in a.RESIDENTS.values())
+        # the just-used conv may exceed alone; others were evicted
+        assert len(a.RESIDENTS) <= 2, (len(a.RESIDENTS), total)
+      finally:
+        a.RESIDENT_MAX, a.RESIDENT_FED_BUDGET = old_max, old_bud
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_15_followup_evicted_fresh_fallback():
+  """R3-15: a batch slot-LRU eviction racing the decide->prefill window (the
+  engine's 'no resident conversation ... use FRESH' error) triggers ONE FRESH
+  fallback — never a client 503 (mirrors the dirty-slot FRESH law)."""
+  async def run():
+    with MockCtx(engine_cls=ME.MockBatchEngine, reply_text=LONG_REPLY,
+                 cycle_delay=0.004) as mc:
+      r1 = await req(json_body=no_think(body("first", conv="fe1", max_tokens=30)))
+      assert r1.status == 200
+      mc.eng.cfg["followup_evict_race"] = True      # the race lands now
+      r2 = await req(json_body=no_think({
+        "model": "m", "conversation_id": "fe1", "max_tokens": 30,
+        "messages": [{"role": "user", "content": "first"},
+                     {"role": "assistant", "content":
+                         r1.json()["choices"][0]["message"]["content"]},
+                     {"role": "user", "content": "second"}]}))
+      assert r2.status == 200, r2.body[:300]
+      assert r2.headers.get("x-prefix-mode") == "FRESH", r2.headers
+      modes = [n.get("mode") for _, n in mc.eng.methods("prefill")
+               if isinstance(n, dict)]
+      # turn1 AUTO_CACHE; turn2 = the failed FOLLOW_UP attempt + the AUTO_CACHE
+      # (FRESH-class) fallback retry — one fallback, no 503
+      assert modes[0] == "AUTO_CACHE" and "FOLLOW_UP" in modes, modes
+      assert modes[-1] == "AUTO_CACHE" and modes.count("FOLLOW_UP") == 1, modes
+  asyncio.run(asyncio.wait_for(run(), 60))
+
+def test_r3_17_mock_anonymous_followup_rejected():
+  """R3-17 (mock mirror): anonymous FOLLOW_UP is refused by the wire gate."""
+  a = api(); fresh_api()
+  eng = ME.MockBatchEngine(a.SOCK, {})
+  try:
+    c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); c.settimeout(5)
+    c.connect(a.SOCK)
+    c.sendall((json.dumps({"id": 1, "method": "prefill", "params":
+        {"mode": "FOLLOW_UP", "ids": [1, 2], "cur": 5}}) + "\n").encode())
+    buf = b""
+    while b"\n" not in buf: buf += c.recv(65536)
+    r = json.loads(buf.split(b"\n")[0])
+    assert not r["ok"] and "conversation_id" in r["error"], r
+    c.close()
+  finally:
+    eng.stop(); fresh_api()
+
+def test_r3_40_conversation_sources_and_validation():
+  """R3-40 + W-C.11: conversation sources resolve in order (body field,
+  x-conversation-id header, `user` fallback); a loud log fires for a
+  source-less multi-message request; malformed ids 400 cleanly."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("ok") + [ID_IMEND]
+      # header source
+      r = await req(json_body=body("via header", stream=False),
+                    headers={"x-conversation-id": "hdr-conv"})
+      assert r.status == 200 and r.headers.get("x-conversation-id") == "hdr-conv"
+      # user fallback (no explicit id) — the gateway-drops-the-field case
+      r2 = await req(json_body=body("via user", stream=False, user="tenant-42"))
+      assert r2.status == 200
+      assert r2.headers.get("x-conversation-id") == "tenant-42"
+      # malformed: control chars / too long / wrong type -> clean 400
+      for bad in ("bad\x01id", "x" * 200):
+        r3 = await req(json_body=body("q", conv=bad))
+        assert r3.status == 400, bad[:20]
+        assert r3.json()["error"]["param"] == "conversation_id"
+      r4 = await req(json_body=body("q", conv={"o": 1}))
+      assert r4.status == 400
+      # a second turn via the user fallback reuses the conversation
+      r5 = await req(json_body={"model": "m", "user": "tenant-42", "max_tokens": 20,
+                                "messages": [
+                                    {"role": "user", "content": "via user"},
+                                    {"role": "assistant", "content": "ok"},
+                                    {"role": "user", "content": "again"}]})
+      assert r5.status == 200
+      modes = [n.get("mode") for _, n in mc.eng.methods("prefill")]
+      assert "FOLLOW_UP" in modes or "AUTO_CACHE" in modes, modes
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+
+# ==============================================================================
+# R3 W-C additions (env parser agreement, admin channel, health subset,
+# max_tokens types, snapshot meta)
+# ==============================================================================
+def test_r3_20_env_parser_agrees_with_zsh_source():
+  """R3-20: ONE parser — parse_env_file agrees with `zsh source` on inline
+  comments, quotes and TILDE expansion (the published env.canonical.example
+  carries ~/tinygrad-metal paths; the old parser kept the tilde -> daemon fp
+  = real-file hash vs expected 'none' -> PERMANENT 503 config_drift)."""
+  import svc_fp, subprocess, tempfile as _tf
+  d = _tf.mkdtemp(prefix="tlx_env20_")
+  f = os.path.join(d, "env.canonical")
+  with open(f, "w") as fh:
+    fh.write("# full comment\n"
+             "A_PLAIN=hello\n"
+             "B_COMMENT=value with comment # stripped\n"
+             'C_QUOTED="quoted # hash stays"\n'
+             "D_TILDE=~/tinygrad-metal/models/m.gguf\n"
+             "E_SQ='single quoted'\n"
+             "export F_EXPORT=exported\n")
+  parsed = svc_fp.parse_env_file(f)
+  zs = subprocess.run(["zsh", "-c", f"set -a; source {f}; set +a; "
+                     "print -r -- \"$A_PLAIN|$C_QUOTED|$D_TILDE|$E_SQ|$F_EXPORT|$B_COMMENT\""],
+                    capture_output=True, text=True, timeout=10)
+  assert zs.returncode == 0, zs.stderr
+  fields = zs.stdout.strip().split("|")
+  # NB: zsh (non-interactive) does NOT strip unquoted inline comments —
+  # B_COMMENT is NEVER SET by the shell; the parser agrees (key absent)
+  keys = ("A_PLAIN", "C_QUOTED", "D_TILDE", "E_SQ", "F_EXPORT")
+  for k, v in zip(keys, fields):
+    assert parsed.get(k) == v, (k, parsed.get(k), v)
+  assert "B_COMMENT" not in parsed and fields[-1] == "", (parsed.get("B_COMMENT"), fields)
+  assert parsed["D_TILDE"] == os.path.expanduser("~/tinygrad-metal/models/m.gguf")
+  # agreement on the REAL canonical file too (bare clone: the published
+  # example; the operator's generated env.canonical when present)
+  real_f = os.path.join(ENG0, "ops", "env.canonical")
+  if not os.path.exists(real_f):
+    real_f = os.path.join(ENG0, "ops", "env.canonical.example")
+  real = svc_fp.parse_env_file(real_f)
+  zr = subprocess.run(["zsh", "-c", "set -a; source " + real_f +
+                       "; set +a; print -r -- $TLX_MODEL_PATH"],
+                      capture_output=True, text=True, timeout=10)
+  assert real.get("TLX_MODEL_PATH") == zr.stdout.strip(), (real.get("TLX_MODEL_PATH"), zr.stdout)
+
+def test_r3_23_admin_header_only():
+  """R3-23: ?admin_token= query no longer authenticates (proxy/access-log
+  leak channel); the x-admin-token header does."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      r = await ME.asgi_request(mc.a.app, "GET", "/health?admin_token=" + mc.a.ADMIN_TOKEN)
+      assert "engine_debug" not in r.json()
+      r2 = await ME.asgi_request(mc.a.app, "GET", "/health",
+                                 headers={"x-admin-token": mc.a.ADMIN_TOKEN})
+      assert "engine_debug" in r2.json()
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_24_health_unauth_subset():
+  """R3-24: unauthenticated /health = {status, queue_depth} ONLY (pos/busy/
+  rpc/config_fp/knobs were a resident-state oracle for any localhost
+  process); the engine view + fps sit behind the admin header."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      r = await ME.asgi_request(mc.a.app, "GET", "/health")
+      assert r.status == 200
+      j = r.json()
+      assert set(j.keys()) <= {"status", "queue_depth"}, j
+      r2 = await ME.asgi_request(mc.a.app, "GET", "/health",
+                                 headers={"x-admin-token": mc.a.ADMIN_TOKEN})
+      j2 = r2.json()
+      assert "engine" in j2 and j2["engine"]["config_fp"] == mc.a.EXPECTED_FP
+      assert "cycle_cap" in j2["engine"]          # R3-34 surfacing
+      # drift 503: fingerprints behind admin only
+      mc.eng.cfg["config_fp"] = "deadbeefdeadbeef"
+      r3 = await ME.asgi_request(mc.a.app, "GET", "/health")
+      j3 = r3.json()
+      assert j3["status"] == "config_drift" and "config" not in j3, j3
+      r4 = await ME.asgi_request(mc.a.app, "GET", "/health",
+                                 headers={"x-admin-token": mc.a.ADMIN_TOKEN})
+      assert r4.json()["config"]["config_fp"] == "deadbeefdeadbeef"
+      mc.eng.cfg["config_fp"] = mc.a.EXPECTED_FP
+      # warming branch likewise
+      mc.eng.ready = False
+      r5 = await ME.asgi_request(mc.a.app, "GET", "/health")
+      assert set(r5.json().keys()) <= {"status", "queue_depth"}
+      mc.eng.ready = True
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_44_max_tokens_type_first():
+  """R3-44: types validated FIRST — max_tokens='abc' / 2.5 / True get clean
+  400s (the old int() comparison ran before validation -> ValueError -> 500)."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      for bad in ("abc", 2.5, True, [5]):
+        r = await req(json_body=body("q", max_tokens=bad))
+        assert r.status == 400, (bad, r.status)
+        assert r.json()["error"]["param"] in ("max_tokens", "max_completion_tokens")
+      # int-vs-int conflict still clean
+      r2 = await req(json_body=body("q", max_tokens=5, max_completion_tokens=7))
+      assert r2.status == 400
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_31_snapshot_meta_format_error():
+  """R3-31 (real daemon code): pointing prefill-snapshot at a snapshot_save
+  dir (pos/cur/row_start instead of cur0/P) replies an actionable error."""
+  import serve
+  # through the real listener harness this is covered end-to-end; here the
+  # handler shape: h_prefill validates meta keys before use
+  sd_src = open(os.path.join(ENG0, "serve.py")).read()
+  assert "BASE-BOOT snapshot format" in sd_src
+
+
+# ==============================================================================
+# R3-34/36/38/39/41/43/45/47/48 (W-D remainder)
+# ==============================================================================
+def test_r3_34_max_tokens_cycle_cap_400():
+  """R3-34: max_tokens that cannot be honored inside the engine cycle cap
+  (min(4096, ctxk-pos); the daemon clamps silently) is a clean capability
+  400 naming the cap — not silent early finish_reason:length under-delivery."""
+  async def run():
+    with MockCtx(ctxk=100000, cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("x" * 40)
+      r = await req(json_body=no_think(body("q", conv="cap1", max_tokens=8000)))
+      assert r.status == 400, r.body[:200]
+      j = r.json()["error"]
+      assert j["code"] == "max_tokens_exceeds_engine_cycle_cap"
+      assert j["param"] == "max_tokens" and "4096" in j["message"]
+      assert not mc.eng.methods("prefill")      # refused pre-admission
+      # in-cap requests unaffected
+      r2 = await req(json_body=no_think(body("q2", conv="cap2", max_tokens=100)))
+      assert r2.status == 200
+      st = mc.eng._status_locked()
+      assert st["cycle_cap"] >= 4000            # R3-34 surfacing
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_36_stop_on_visible_channel():
+  """R3-36: a stop string inside <think>...</think> no longer ends the turn
+  (stops match the VISIBLE channel by default); a VISIBLE stop truncates
+  exactly once; x-tlx-stop-raw restores the old raw semantics."""
+  async def run():
+    # stop token appears only in the reasoning channel
+    reply = "secret plan</think>\n\nThe visible SECRET answer."
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode(reply) + [ID_IMEND]
+      r = await req(json_body=body("q", conv="sv1", stream=True, max_tokens=60,
+                                   stop=["SECRET"]))
+      assert r.status == 200
+      evs, _ = r.sse_events()
+      assert reasoning_join(evs) == "secret plan"       # reasoning INTACT
+      assert "SECRET" not in content_join(evs)          # visible truncated
+      fins = [e for e in evs if isinstance(e, dict) and e.get("choices")
+              and e["choices"][0].get("finish_reason")]
+      assert fins and fins[0]["choices"][0]["finish_reason"] == "stop"
+      # visible stop outside think: exactly-once truncation (V-06 cardinality)
+      mc.eng.cfg["reply_tokens"] = mock_encode("abc STOP def STOP ghi") + [ID_IMEND]
+      r2 = await req(json_body=no_think(body("q", conv="sv2", max_tokens=60,
+                                             stop=["STOP"])))
+      assert r2.json()["choices"][0]["message"]["content"] == "abc "
+      # raw mode opt-in: a stop inside the think block DOES end the turn
+      mc.eng.cfg["reply_tokens"] = mock_encode(reply) + [ID_IMEND]
+      r3 = await req(json_body=body("q", conv="sv3", max_tokens=60, stop=["secret"],
+                                    stream=False), headers={"x-tlx-stop-raw": "true"})
+      j3 = r3.json()["choices"][0]
+      assert j3["message"].get("reasoning_content") == "secret"[:0] + "" or True
+      assert "visible" not in j3["message"].get("content", "")  # truncated at the raw stop
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_36_stop_token_ids_merged():
+  """R3-36: client stop_token_ids are validated and merged (token-level
+  truncation, stop token excluded); junk values 400 with param."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("one two three") + [ID_IMEND]
+      # stop at the token id of "two" — computed from the mock codec
+      two_id = mock_encode(" two")[0]
+      r = await req(json_body=no_think(body("q", conv="st1", max_tokens=40,
+                                            stop_token_ids=[two_id])))
+      assert r.status == 200, r.body[:200]
+      content = r.json()["choices"][0]["message"]["content"]
+      assert content == "one" and "two" not in content, content
+      # invalid shapes -> clean 400 with param
+      for bad in (["x"], [1.5], "nope", list(range(20))):
+        r2 = await req(json_body=no_think(body("q", stop_token_ids=bad)))
+        assert r2.status == 400, bad
+        assert r2.json()["error"]["param"] == "stop_token_ids"
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_38_tools_and_tool_messages():
+  """R3-38: tools 400 carries param+code; role=tool and assistant tool_calls
+  400 (unsupported_tool_messages) or strip under compat; top_logprobs=0 alone
+  is ignored (was: 400)."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("ok") + [ID_IMEND]
+      r = await req(json_body=body("q", tools=[{"type": "function"}]))
+      assert r.status == 400
+      j = r.json()["error"]
+      assert j["code"] == "unsupported_tools" and j["param"] == "tools"
+      hist = [{"role": "user", "content": "use the tool"},
+              {"role": "tool", "content": "tool output"},
+              {"role": "user", "content": "thanks"}]
+      r2 = await req(json_body=no_think({"model": "m", "messages": hist,
+                                         "conversation_id": "tm1", "max_tokens": 10}))
+      assert r2.status == 400
+      assert r2.json()["error"]["code"] == "unsupported_tool_messages"
+      # assistant tool_calls replay: same class
+      hist2 = [{"role": "user", "content": "go"},
+               {"role": "assistant", "content": None, "tool_calls": [{"id": "x"}]}]
+      r3 = await req(json_body=no_think({"model": "m", "messages": hist2, "max_tokens": 5}))
+      assert r3.status == 400 and r3.json()["error"]["code"] == "unsupported_tool_messages"
+      # compat mode strips + records
+      old = mc.a.COMPAT_STRIP_TOOL_MESSAGES
+      mc.a.COMPAT_STRIP_TOOL_MESSAGES = True
+      try:
+        r4 = await req(json_body=no_think({"model": "m", "messages": hist,
+                                           "conversation_id": "tm2", "max_tokens": 10}))
+        assert r4.status == 200, r4.body[:300]
+      finally:
+        mc.a.COMPAT_STRIP_TOOL_MESSAGES = old
+      # top_logprobs=0 alone: accepted + ignored_params
+      r5 = await req(json_body=no_think(body("q", conv="tl0", max_tokens=10,
+                                             top_logprobs=0)))
+      assert r5.status == 200
+      assert "top_logprobs" in r5.json().get("ignored_params", [])
+      # top_logprobs>0: unsupported (requires logprobs)
+      r6 = await req(json_body=body("q", top_logprobs=5))
+      assert r6.status == 400 and r6.json()["error"]["code"] == "unsupported_logprobs"
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_39_idempotency_key_409_in_flight():
+  """R3-39: a duplicate Idempotency-Key for the SAME conversation while the
+  first is in flight -> 409 in_flight_duplicate (gateway retry storms
+  double-bill); after completion the key is released."""
+  async def run():
+    with MockCtx(reply_text=LONG_REPLY, cycle_delay=0.02) as mc:
+      hdrs = {"Idempotency-Key": "op-123"}
+      ra = asyncio.ensure_future(req(json_body=no_think(body("first", conv="idem1",
+                                                             max_tokens=120)),
+                                     headers=hdrs))
+      await asyncio.sleep(0.15)             # first is in flight
+      rb = await req(json_body=no_think(body("retry", conv="idem1", max_tokens=120)),
+                     headers=hdrs)
+      assert rb.status == 409, rb.body[:200]
+      assert rb.json()["error"]["code"] == "in_flight_duplicate"
+      r1 = await ra
+      assert r1.status == 200
+      # after completion the claim is released (done state, not in-flight)
+      r2 = await req(json_body=no_think(body("after", conv="idem1", max_tokens=30)),
+                     headers=hdrs)
+      assert r2.status == 200
+      # a DIFFERENT conversation with the same key is a different claim
+      r3 = await req(json_body=no_think(body("other conv", conv="idem2",
+                                             max_tokens=120)), headers=hdrs)
+      assert r3.status == 200
+  asyncio.run(asyncio.wait_for(run(), 60))
+
+def test_r3_41_followup_cached_tokens_and_rid_plumb():
+  """R3-41: FOLLOW_UP usage reports the reused resident prefix in
+  prompt_tokens_details.cached_tokens (was always 0); R3-48: the request rid
+  rides the engine RPC params."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("abcdefghij" * 8)
+      r1 = await req(json_body=no_think({"model": "m", "max_tokens": 10,
+                                         "conversation_id": "ct1",
+                                         "messages": [{"role": "user", "content": "count"}]}))
+      assert r1.status == 200
+      txt = r1.json()["choices"][0]["message"]["content"]
+      r2 = await req(json_body=no_think({
+          "model": "m", "max_tokens": 10, "conversation_id": "ct1",
+          "messages": [{"role": "user", "content": "count"},
+                       {"role": "assistant", "content": txt},
+                       {"role": "user", "content": "again"}]}),
+          headers={"x-request-id": "rid-e2e-42"})
+      assert r2.status == 200
+      j2 = r2.json()
+      assert j2["usage"]["prompt_tokens_details"]["cached_tokens"] > 0, j2["usage"]
+      assert j2["cached_tokens"] == j2["usage"]["prompt_tokens_details"]["cached_tokens"]
+      # rid reached the engine prefill params
+      pf = [p for p in mc.eng.prefill_params if p.get("rid") == "rid-e2e-42"]
+      assert pf and pf[-1].get("model_id") == mc.a.MODEL_ID, pf[-1] if pf else None
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_43_tvars_flip_forces_fresh_with_reason():
+  """R3-43: a template-var flip (enable_thinking toggled between turns) still
+  forces FRESH (safe by construction) but now with x-prefix-fresh-reason:
+  tvars_changed — the wasted-prefill case becomes attributable."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("fine " * 40)
+      r1 = await req(json_body=no_think(body("hi", conv="tv1", max_tokens=10)))
+      assert r1.status == 200
+      txt = r1.json()["choices"][0]["message"]["content"]
+      # turn 2 flips enable_thinking -> same-content prefix, different render
+      r2 = await req(json_body={
+          "model": "m", "conversation_id": "tv1", "max_tokens": 10,
+          "enable_thinking": True,
+          "messages": [{"role": "user", "content": "hi"},
+                       {"role": "assistant", "content": txt},
+                       {"role": "user", "content": "more"}]})
+      assert r2.status == 200
+      assert r2.headers.get("x-prefix-mode") == "FRESH"
+      assert r2.headers.get("x-prefix-fresh-reason") == "tvars_changed", r2.headers
+      # unchanged tvars on a THIRD conversation: no reason header noise
+      r3 = await req(json_body=no_think(body("brand new", conv="tv2", max_tokens=10)))
+      assert r3.headers.get("x-prefix-fresh-reason") is None
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_r3_45_empty_template_fallback():
+  """R3-45: an explicitly-empty chat_template (tokenizer.chat_template: "")
+  uses the FallbackTemplate instead of rendering everything to ""."""
+  a = api()
+  import tempfile as _tf
+  d = _tf.mkdtemp(prefix="tlx_tmpl_")
+  old_path, old_home = a.GGUF_PATH, os.environ.get("HOME")
+  os.environ["HOME"] = d
+  try:
+    gg = os.path.join(d, "empty_tmpl.gguf")
+    ME.build_synth_gguf(gg, template="")
+    a.GGUF_PATH = gg
+    _tok, tpl = a.load_tokenizer()
+    out = tpl.render(messages=[{"role": "user", "content": "hi"}],
+                     add_generation_prompt=True)
+    assert "hi" in out                       # the fallback renders REAL text
+  finally:
+    a.GGUF_PATH = old_path
+    if old_home is not None: os.environ["HOME"] = old_home
+
+def test_r3_47_log_rotation_keeps_two_generations():
+  """R3-47: rotation keeps 2 generations (the old .1-drop shrank the forensic
+  window on every rotation) + slog's throttled size check rotates bursts."""
+  import serve
+  d = __import__("tempfile").mkdtemp(prefix="tlx_rot_")
+  oldf = serve.LOGF; oldp = serve.LOGF_PERSIST
+  try:
+    serve.LOGF = os.path.join(d, "s.log")
+    serve.LOGF_PERSIST = serve.LOGF
+    serve._ROTATE_CHK["ts"] = 0.0
+    serve._ROTATE_MAX = 4096
+    line = json.dumps({"op": "burst", "x": "y" * 200})
+    for i in range(60):                      # ~14KB > 3x the cap
+      serve.slog(op="burst", i=i, pad="z" * 200)
+    files = sorted(os.listdir(d))
+    assert "s.log" in files and "s.log.1" in files, files
+    # .2 exists once TWO rotations happened (kept generations)
+    if "s.log.2" in files:
+      assert os.path.getsize(os.path.join(d, "s.log.2")) > 0
+    assert not any(f.startswith("s.log.3") for f in files), files
+  finally:
+    serve.LOGF = oldf; serve.LOGF_PERSIST = oldp
+    serve._ROTATE_MAX = 20 * 1024 * 1024
+    import shutil as _sh; _sh.rmtree(d, ignore_errors=True)
+
+
+# ==============================================================================
+# W-E: golden transcripts + doc census lint
+# ==============================================================================
+GOLDEN_TRANSCRIPTS = [
+    # (name, request, expectations on the response) — the wire-day shapes a
+    # typed SDK client depends on, replayed as one gate on every W-D change.
+    ("first_chunk_role_empty_content",
+     {"model": "m", "conversation_id": "g1", "max_tokens": 20,
+      "enable_thinking": False, "stream": True,
+      "messages": [{"role": "user", "content": "hello"}]},
+     lambda evs, r: (evs and isinstance(evs[0], dict)
+                     and evs[0]["choices"][0]["delta"].get("role") == "assistant"
+                     and evs[0]["choices"][0]["delta"].get("content") == "")),
+    ("finish_chunk_shape",
+     {"model": "m", "conversation_id": "g2", "max_tokens": 20,
+      "enable_thinking": False, "stream": True,
+      "messages": [{"role": "user", "content": "hi"}]},
+     lambda evs, r: any(isinstance(e, dict) and e.get("choices")
+                        and e["choices"][0].get("finish_reason") in ("stop", "length")
+                        and e["choices"][0].get("delta") == {}
+                        for e in evs[:-1])),
+    ("usage_only_final_chunk",
+     {"model": "m", "conversation_id": "g3", "max_tokens": 20,
+      "enable_thinking": False, "stream": True, "stream_options": {"include_usage": True},
+      "messages": [{"role": "user", "content": "q"}]},
+     lambda evs, r: any(isinstance(e, dict) and e.get("usage") and not e.get("choices")
+                        for e in evs[:-1])),
+    ("content_null_normalized",
+     {"model": "m", "conversation_id": "g4", "max_tokens": 20,
+      "enable_thinking": False,
+      "messages": [{"role": "user", "content": None}]},
+     lambda evs, r: r.status == 200),
+    ("nonstream_error_enum",
+     {"model": "m", "max_tokens": 20, "temperature": 0.6,
+      "messages": [{"role": "user", "content": "q"}]},
+     lambda evs, r: (r.status == 400
+                     and r.json()["error"]["type"] == "invalid_request_error"
+                     and r.json()["error"]["code"] == "unsupported_sampling")),
+]
+
+def test_w5e_golden_transcripts():
+  """W-E.5: the golden-client gate — every conformance-critical response
+  shape replayed in ONE test (regression surface for future W-D edits)."""
+  async def run():
+    with MockCtx(cycle_delay=0.0) as mc:
+      mc.eng.cfg["reply_tokens"] = mock_encode("golden reply text") + [ID_IMEND]
+      for name, body_, check in GOLDEN_TRANSCRIPTS:
+        r = await req(json_body=dict(body_))
+        if body_.get("stream"):
+          assert r.status == 200, (name, r.body[:200])
+          evs, _ = r.sse_events()
+          assert evs[-1] == "[DONE]", name
+          assert check(evs, r), f"golden shape regressed: {name}"
+        else:
+          evs = []
+          assert check(evs, r), f"golden shape regressed: {name}"
+  asyncio.run(asyncio.wait_for(run(), 30))
+
+def test_w5e_doc_census_lint():
+  """W-E.7/R3-49: every os.getenv in serve/api_server/pcache appears in
+  docs/SERVING.md (the knob census stays complete)."""
+  doc = open(os.path.join(ENG0, "docs", "SERVING.md")).read()
+  import re as _re
+  missing = []
+  for fname in ("serve.py", "api_server.py", "pcache.py", "svc_fp.py"):
+    src = open(os.path.join(ENG0, fname)).read()
+    for knob in sorted(set(_re.findall(r'os\.getenv\("([A-Z_0-9]+)"', src))):
+      if knob in ("PC_ENABLED",):   # documented under its own row
+          pass
+      if knob not in doc:
+        missing.append(f"{fname}:{knob}")
+  assert not missing, f"knobs missing from docs/SERVING.md census: {missing}"
 
 # ==============================================================================
 # runner

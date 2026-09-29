@@ -654,3 +654,169 @@ without failing the documented-frame families. Calibrated against the
 
 New cross-references: R6_BATCH.md (X1-X6), R8_DECODE.md (X7-X9),
 R1_PROMPTCACHE.md W3 section + FIX_CAMPAIGN.md (X10-X11).
+
+## MM. Multi-model / MoE-campaign laws (MM P0-P10; the Qwen3.6-35B-A3B port)
+
+Journals: docs/history/MM_P0_results.txt .. MM_P10_results.txt (+ MM_PLAN.md,
+MM_P2_kmix_manifest.md). The campaign ported a second architecture to the
+same dext; every law below was paid for in faults or bit-exact gates.
+
+**MM1. THE NAME LAW, SHARPENED (P0/P1).** The TinyELF/program name MUST
+equal the cubin's kernel SYMBOL. A mismatch (e.g. a file-prefixed name)
+silently skips the .nv.info parse (maxntid/stack never read) and the launch
+faults with SM "Illegal Instruction Encoding" on ALL GPCs — 100%
+correlation across ~15 boots; it was also the historical queue-replay wedge
+("graphs fault, eager clean"). Variant cubins MUST rename their symbol
+(the P6 recurrence: h6kam/spkq256m/spka256m all faulted under prefixed
+loads).
+
+**MM2. THE SINGLE-ARG SIZE CAP (P0).** Hand-NVProgram buffer args over
+~457 MB-1.16 GB fault with the same signature (457 MB x 8 args clean;
+8 GB/3.66 GB/2.38 GB/1.16 GB single args fault). Per-layer routed banks
+(~373 MB) are legal. VA POINTER TABLES (device-side tables of absolute
+64-bit VAs, read on-device) are LEGAL — the earlier "pointer-chase illegal"
+reading was this cap biting.
+
+**MM3. THE PIPELINING / WAIT-EACH LAW (P1).** Submitting a second graph
+while the first still owns the QMD races SKEDCHECK22_INVALIDATE_ACTIVE_QMD
+(timing-dependent, 0-2 cycles of grace at 256-cycle replays). THE
+discipline: WAIT every graph before the next submit. (Same root as the P7F1
+law; re-learned at MoE graph volumes.)
+
+**MM4. THE CONVERTER LAWS (P2/P34/P9 — bit-exact vs llama.cpp C):**
+IQ4_XS nibble map (elements 0-15 of a 32-group = LOW nibbles of bytes 0-15,
+16-31 = HIGH nibbles of the SAME bytes); Q3_K's `d` comes LAST
+({hmask|qs|scales|d}) and the SAME 32 hmask bytes serve BOTH 128-groups; the
+PAIR-VS-POS law (gx up-kernels consume the SHARED hn, pos-addressed — a
+per-PAIR copy diverges); mutator-sized buffers (a mutator writes past a
+readonly view's extent — the hrot OOB class); the uint8-subtract trap
+(numpy (uint8>>s&3)-4 wraps to 255 unless cast first); BF16 is TYPE 30 in
+the modern GGUF enum (verify from bytes); the OBJECT-ARRAY TRAP (npz rows
+are boxed pointers — denormal logits if read as flat).
+
+**MM5. THE NARROW-LOAD LAW (P9, ptxas load coalescing).** Consecutive
+u16/u8 reads from ONE thread get merged into 32-bit loads — MISALIGNED
+(fault or silent garbage) in any odd-stride block layout (Q3_K's 110 B
+blocks). Inline-PTX `ld.global.u8/u16` are unmergeable. The trunk's IQ3_S
+kernel never hit this because its u16s are per-LANE strided, never
+consecutive.
+
+**MM6. THE Q3_K SHARED-HMASK LAW (P9).** The hmask bit for (nn, j) is
+`1 << (4*nn + j)` — m NEVER resets between the two 128-groups (bits
+1,2,4,8 | 16,32,64,128). Using `1<<j` for both halves corrupts lanes 16-31
+(the upper 128 elements of every row).
+
+**MM7. THE SILENT-NO-LAUNCH LAW (P7).** A 1-TUPLE grid passed to the graph
+builder becomes a malformed 2-tuple global_size and the graph NEVER
+EXECUTES — silently (the output buffer is never written; a later graph's
+stale-correct output masks it). Normalize 1-tuples to scalars in every seq
+builder. Bit EVERY P7 graph on first contact (the mock-vs-rig meta-law
+again).
+
+**MM8. THE FULL-SYNC COPY LAW + THE UNCACHED SYSMEM FOLD (P7).** Allocator
+_copyin/_copyout each do a FULL dev.synchronize() (the old ~14 ms host path
+was six of them). The fix class: cpu_view() over cpu_access=TRUE +
+**uncached=TRUE** sysmem buffers — bidirectionally coherent and free
+(VRAM-vs-sysmem A/B identical); cpu_access WITHOUT uncached maps VRAM
+GPU_CACHEABLE_YES (the stale-read race class — do not use for per-cycle
+control). This is the host fold (host residue ~0.2 ms/cycle).
+
+**MM9. THE KAPool SLAB COHERENCE LAW (P9).** MGs carved from a SHARED
+kernargs pool slab WEDGE (GSP: SKEDCHECK16_CTA_THREAD_DIMENSION_ZERO — the
+GPU reads STALE kernargs/QMDs through the slab's GPU-CACHEABLE mapping) for
+graphs built/stepped after the GPU has traffic over the slab; only the
+boot-time graph set is safe. FIX: a DEDICATED uncached ka per graph-runner
+(sysmem GPU_CACHEABLE_NO — the cpu-fold class). (The dense gcycle's
+ka-slab LEAK (X5) remains the follow-up; the MoE path reuses slab slices
+across rebuilds — audited.)
+
+**MM10. THE GPU-EXIT LAW, EXTENDED TWICE (P7/P8).** (a) The GRACEFUL
+socket shutdown (bye:true) ALSO reboots the machine (6/6) — disable-first
++ `sudo sync` is MANDATORY before any stop, and an unsynced launchctl
+disable is LOST to the reboot. (b) THE SYNC LAW: a NEWLY-CREATED file +
+fsync + parent-dir fsync can still DIE in the GPU-EXIT reset; `sync; sync;
+sleep 3; sync` BEFORE the stop makes the swap intent SURVIVE. Asymmetry:
+appends to EXISTING files survive unsynced — the killer is dirent creation
+vs inode append. This is why swap intent is written (atomic + dir-fsynced)
+BEFORE the stop RPC.
+
+**MM11. THE 2D-GRID LAW + GRID NORMALIZATION (P34).** The gv8k2048p/gv8k4096r
+families are (rows/32, P) grids — a 1D grid silently runs seat 0 only (the
+S8 K-mix smoke was det-but-seat-0-only). Applies to every M-batched family
+by construction.
+
+**MM12. THE L>256 SPKQ256 LATENT BUG CLASS (P56).** A parallel-exp softmax
+that only covers positions < 256 mixes raw scores into z/out for L in
+257..1024 — invisible to any <=52-position battery. Fix: d==0-sequential
+(BIT-IDENTICAL at L<=256). Corollary: position-dependent code paths need a
+battery that crosses every hard-coded boundary.
+
+**MM13. THE SPLIT-S NUMERICS CLASS (P7).** Split attention at S != S'
+differs from itself (~7e-2 state maxdev over 256 tokens); same-S is
+bit-exact. Anchors and engines MUST pin the same S per phase (a "state
+DIFF" that looked like a chain bug was the S=32-vs-S=8 arm mismatch).
+
+**MM14. THE LONG-HORIZON LAW (P56).** The engine state after 4,000/16,288
+ingested doc tokens continues greedy-identically to the fp16 anchor
+(rebase16 16/16 EXACT at every rung) — GDN norms bounded (148). Long-context
+exactness is MEASURED, not assumed, at every ctx rung.
+
+**MM15. THE FP16-PARTIAL LAW (P34/P56).** Storing the down-proj partials
+as fp16 (per pair/rank) is the numerics tier that matches the fp16 anchor
+(348/349 vs the f32 accumulation's 347/349 — the residual is the adjudicated
+drift class). Priced, adopted.
+
+**MM16. THE SMALL-SHAPE LATENCY LAW (P34).** At P<=9 the MoE kernels are
+LATENCY-flat across K=2..K=8 (shape does not matter — launch/latency floor
+owns the cycle); per-shape tuning only pays at scale.
+
+**MM17. THE FP-EXTRA CONVERGENCE LAW (P8-SERVE).** The API and the daemon
+must derive the SAME per-model config_fp extras (dense -> cubin-set digest;
+MoE -> the packed-manifest sha) or EVERY boot drifts. Corollary: a
+mid-session repack invalidates the resident daemon the minute the packed
+manifest changes (the fp discipline firing live, correctly) — repack +
+daemon-restart are ONE operation.
+
+**MM18. THE PF-ONLY CUR LAW (P10).** After a PF-only feed (prompt length %
+256 == 0 runs ZERO T1 steps), the last hidden lives in PFB["hA"][255], NOT
+the decode graph's rig.hA — eager-head derivations that read rig.hA derive
+`cur` from a STALE decode hidden (wrong continuations, INVISIBLE to
+spec-vs-T1 gates: both arms share the same wrong cur). Track the feed's
+last op; the bit-exact chunk-256 hidden IS the T1 hidden.
+
+**MM19. THE MARGINAL-LAUNCH LAW / LAUNCH-SERIALIZATION CORRECTION
+(P10-B).** The ~0.094 ms/launch serialization slope was measured on
+TRUNCATED graphs where every kernel is tiny; in real fat-kernel graphs the
+dispatch PIPELINES BEHIND EXECUTION — the marginal launch is ~0.02 ms and
+the T=1 cycle is KERNEL-RUNTIME-bound. Launch-count-only fusion projections
+(the "165 kernels -> 17 ms" class) are INVALID; fusion pays only where it
+makes the KERNELS faster (fewer weight passes per layer).
+
+**MM20. THE FIRST-CONTACT PCACHE GATE SHAPE (P10).** A spec-vs-T1 gate run
+right after pcache ingest compares FRESH-vs-RESTORED (arm A feeds + ingests,
+arm B restores); reruns compare RESTORED-vs-RESTORED (identical inputs) and
+always pass. A "transient" first-run mismatch in this shape is a
+fresh-vs-restore divergence (or a process-layout ULP residue on degenerate
+repetitive eras — the adjudicated G3 class: state bit-proven identical, NOT
+the cur, NOT MTP), not noise and not necessarily a bug; label which shape a
+gate runs.
+
+**MM21. THE STAYDOWN-DELETER (P10, open).** The daemon's hard-death path
+(shutdown RPC -> bye -> death INSIDE dev.synchronize(), no clean_exit slog)
+deletes/never-writes the staydown marker and launchd relaunches within
+~30-60 s. Holding a GPU window through a shutdown currently needs an
+external marker-keeper; root cause open.
+
+**MM22. THE PING-PONG / SCRATCH-STRIDE / CONTAINER-CWD / QQ-WINDOW set
+(P34/P56):** build_seq must alternate hin=hA/hB per layer exactly as the
+combine reads (a fixed buffer = every layer reads layer-0's partials);
+spkq256m scratch = 16*P_MAX*CTX (the 16k rung faulted at 143*16384 >
+16*65536 — size scratch by the REAL max, not the current rung); the nvcc
+shim's paths must be ABSOLUTE (container CWD differs); drafts follow the
+EXTENDED qq match window, not the trimmed one.
+
+New cross-references: R6_BATCH.md (X1-X6), R8_DECODE.md (X7-X9),
+R1_PROMPTCACHE.md W3 section + FIX_CAMPAIGN.md (X10-X11),
+MM_PLAN.md + MM_P0..P10_results.txt (MM1-MM22), M1C_STABILITY.md
+R3 live-window section (the L1-L5 ops fixes: pipe-vs-heredoc zsh tokens,
+client-side staydown markers, stop-order, dir-fsync).

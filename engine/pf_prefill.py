@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """P3: batched M=16 prefill assembly (pf_prefill.py).
 
 Chunked prefill over arbitrary prompt lengths on the P2 kernel set
@@ -1237,7 +1234,9 @@ def prefill_batch_m64(E, G, ids, prog=None, log=None, chunk_times=None, on_chunk
     P.win_up("pos_w64", 0, np.array([p0, p0 + 16, p0 + 32, p0 + 48], dtype=np.int32))
     if os.getenv("PF_PG", "1") == "1":
       vend = _pf_submit_chunk(E, p0, which="m64")
-      if os.getenv("PG_WAIT", "1") == "1":
+      # L7: the wait is UNCONDITIONAL on the cancel-capable path (prog present)
+      # — prog's quiescent checkpoint must never raise over an un-waited chunk.
+      if os.getenv("PG_WAIT", "1") == "1" or prog is not None:
         dev.timeline_signal.wait(vend)
     else:
       _run_plan(E._pf_plan64)
@@ -1539,7 +1538,8 @@ def prefill_batch_m128(E, G, ids, prog=None, log=None, chunk_times=None, on_chun
     P.win_up("pos_w128", 0, np.array([p0 + 16*k for k in range(8)], dtype=np.int32))
     if os.getenv("PF_PG", "1") == "1":
       vend = _pf_submit_chunk(E, p0, which="m128")
-      if os.getenv("PG_WAIT", "1") == "1":
+      # L7: wait UNCONDITIONAL on the cancel-capable path (see m64 note)
+      if os.getenv("PG_WAIT", "1") == "1" or prog is not None:
         dev.timeline_signal.wait(vend)
     else:
       _run_plan(E._pf_plan128)
@@ -1632,7 +1632,8 @@ def prefill_batch(E, G, ids, prog=None, log=None, chunk_times=None, on_chunk=Non
       # P7F: captured chunk (plan [+ dfill windows when M32+DFILL]) as graph
       # submits; per-chunk host work = the win_up DMAs above (timeline-chained).
       vend = _pf_submit_chunk(E, pos0 + CH * c, which="m32")
-      if os.getenv("PG_WAIT", "1") == "1":
+      # L7: wait UNCONDITIONAL on the cancel-capable path (see m64 note)
+      if os.getenv("PG_WAIT", "1") == "1" or prog is not None:
         dev.timeline_signal.wait(vend)   # chunk-end completion (matches eager sync)
       # PG_WAIT=0: pipelined -- the win_up copy-queue DMAs order themselves after
       # this chunk (they wait timeline value-1 = vend), so no ids race; the host

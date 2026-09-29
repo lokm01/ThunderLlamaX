@@ -7,15 +7,21 @@ the driver layer is ThunderSilicon, the prompt cache is LongMemory — the real
 component names are `engine0` (published as `engine/`), the dext, `pcache`.
 
 The engine (`engine/`, originally `engine0/`) is a from-scratch decode loop
-for the Qwen3.8-27B hybrid architecture (48 gated-delta-net blocks + 16
-full-attention blocks + IQ3_S embedding + Q5_K output head + one MTP draft
-block). It bypasses tinygrad's scheduler entirely: static raw buffers, ~330
-hand-CUDA kernel sources compiled to per-kernel cubins, and a graph-replay
-submit path. tinygrad is used only as the *driver runtime*
-(NVProgram/TinyELF/NVComputeQueue from the fork — see `patches/`). On top of
-the decode loop sit the deep-K LOOKUP speculative layer, the batched-prefill
-pipeline, the durable prompt cache and the serving layer (sections below;
-[history/PREFILL.md](history/PREFILL.md) and [SERVING.md](SERVING.md)).
+that now serves **two models**: the original **Qwen3.8-27B** hybrid (48
+gated-delta-net blocks + 16 full-attention blocks + IQ3_S embedding + Q5_K
+output head + one MTP draft block) and, since the multi-model campaign, the
+**Qwen3.6-35B-A3B MoE** (30 GDN + 10 full-attention blocks at hidden 2048;
+every layer routes top-8 of 256 experts plus one shared expert — ~35.1B
+parameters total, ~3B active; its own `blk.40` MTP layer is the shipped
+first-party drafter). Both bypass tinygrad's scheduler entirely: static raw
+buffers, ~330 (dense) + ~60 (MoE) hand-CUDA kernel sources compiled to
+per-kernel cubins, and a graph-replay submit path. tinygrad is used only as
+the *driver runtime* (NVProgram/TinyELF/NVComputeQueue from the fork — see
+`patches/`). On top of the decode loops sit the deep-K LOOKUP speculative
+layer, the batched-prefill pipeline, the durable prompt cache and the
+multi-model serving layer (sections below; [history/PREFILL.md](history/PREFILL.md)
+and [SERVING.md](SERVING.md); the MoE campaign plan is
+[history/MM_PLAN.md](history/MM_PLAN.md)).
 
 ## How eGPU LLM inference works on Apple Silicon
 
@@ -150,6 +156,87 @@ between it and a deep-K cycle:
   R4_TRACE/R4_DIF/R4_BISECT harness triad (env-gated in `test_w100k.py`)
   proves all probe rows bit-identical to the T=3 path.
 
+## The MoE engine (Qwen3.6-35B-A3B — four new kernel classes)
+
+*Plain language: a mixture-of-experts layer is a router that picks, for
+every token, eight small expert networks out of 256, plus one always-on
+shared expert. Doing that on this dext meant four genuinely new kernel
+shapes — a deterministic router, a gather-GEMV that walks expert slabs in a
+fixed order, a combine that sums partials in a fixed rank order, and a
+split-KV attention retargeted to the model's head geometry. Determinism is
+the load-bearing constraint throughout: the router must pick exactly the
+same experts, in the same order, every time — or bit-exactness dies.*
+
+The MoE port reused the dense engine's laws and machinery (split-KV, the
+GDN scan family, accept/commit, the graph discipline, pcache) and added
+four kernel classes plus a first-party MTP chain (campaign journals
+[history/MM_P0_results.txt](history/MM_P0_results.txt) ..
+[history/MM_P10_results.txt](history/MM_P10_results.txt)):
+
+- **Router — `rt8e256.cu`**: the 2048->256 router GEMV in fp32 with a
+  FIXED-ORDER top-8 (8 masked-argmax passes, tie -> lower id — no runtime-
+  indexed locals), softmax -> top-k -> renorm -> cast in the template's
+  exact op order, plus the shared-expert sigmoid gate. Emits the canonical
+  (expert-id, row, gate) pair list — NO sort anywhere.
+- **Gather-GEMV — `gx8e256up`/`gx8e256dn` (+ `up4`/`dn6` quant variants)**:
+  grouped GEMVs that walk the selected pairs FLAT and SEQUENTIALLY (no
+  grid-stride — the dext's gridDim=0 law), reading 16B-aligned per-expert
+  packed slabs through a device-side expert-pointer table (VA pointer
+  tables are legal on this dext — the P0 law). The up kernel carries the
+  SiLU*gate epilogue; the down kernel stores fp16 partials per (pair, rank).
+  The measured gather tax vs dense GEMV is ~0 — the MoE decode weights
+  stream at the same class of bandwidth.
+- **Combine — `mx8e256cmb`**: fixed-rank-order fp32 combine of the routed
+  partials x gates PLUS the always-resident shared-expert FFN — a fixed
+  summation order is what keeps the MoE layer bit-stable.
+- **Split-KV attention — `spkq256`/`spka256`/`spkc256`** (with the
+  warp-per-position `spkq256m`/`spkq256s` variants): retargeted to the
+  model's head_dim 256 / GQA 16:2 geometry with the output sigmoid-gate
+  fused into the combine epilogue; the P7 warp-per-position rewrite removed
+  the O(L) score wall (4x at 16k).
+
+Around them: the `k2s36`/`gconv36` GDN scan at the 2048-hidden dims (the
+"36" = the 30-GDN+6-attn slot layout of the rescaled state), `h6kam` (the
+fused head-argmax that folds the vocab projection and argmax into one
+kernel), `acc36`/`selc36` (the ON-DEVICE accept + IN-GRAPH commit — the
+host fold, below), `embg248` (the 248320-vocab embedding gather with the
+h-rot clamp), the RMSNormZeroCentered `(1+w)` norm variants, and
+`rowcp2048` (the MTP chain's hidden carry).
+
+**The host fold (P7)** — the reason the MoE engine feels like the dense
+one: accept (`acc36`), commit (`selc36`) and the per-cycle control/emit
+readback all run on-device; the host sees the engine through an UNCACHED
+sysmem `cpu_view` window (bidirectionally coherent, free by A/B). Host
+residue is ~0.2 ms/cycle (was ~14 ms through six full-sync copies — the
+FULL-SYNC COPY law).
+
+**The MTP K=4 chain (P9/P10)** — the first-party drafter: the model's own
+`blk.40` MTP layer (eh_proj + a full-attn+MoE layer + the SHARED output
+head), repacked into the engine pack (routers dequantized to F32; experts
+kept at their Q3_K/Q4_K quants with verbatim-ggml dequant ports). The chain
+runs one cycle late (the EAGLE/llama.cpp shape): after each probe's accept,
+`rowcp2048` copies the committed hidden into the chain's H0/H1
+double-buffer, a TRUE-pair seed step runs at the committed position (no
+head — its c1 already knows the boundary), then four head steps draft the
+next cycle's proposals. The KV invariant: every row the chain reads was
+written by a true seed, an accepted draft's own step, or the chain's own
+earlier steps — rejected rows are overwritten by the next seed before any
+read. Lookup cycles mark the chain STALE (the quote path stays untouched);
+the first miss after a hit streak pays one T=1 re-anchor. Acceptance:
+depth-1 = 0.875 exactly; E[acc]@K4 = 2.58-3.08 (see
+[PERFORMANCE.md](PERFORMANCE.md)).
+
+**The mode mix**: a scan oracle picks per cycle — `n>=8 -> D8` (K=8
+lookup), `n>=4 -> D2`, miss+live-chain -> P5+MTP, miss+stale -> one T=1
+re-anchor then seed. `force_mode` (`t1`|`spec`|`mtp`) overrides for gates.
+
+**What was tried and honestly falsified on the MoE path**: the pairwise
+kernel fusion (P10-B — bit-exactness diverged at token 27; `MM_FUSE2` stays
+off, and its launch-count arm corrected the launch-serialization law — see
+[DEXT_LAWS.md](DEXT_LAWS.md)); the K=8-variant graph budget at 96k (the
+<=8-variants-per-model law from the plan held); the 96k CPU anchor (the
+16 GB host RAM wall — anchors stream now).
+
 ## Kernel inventory (engine/*.cu, the load-bearing families)
 
 | kernel(s) | role | key technique |
@@ -180,6 +267,12 @@ between it and a deep-K cycle:
 | `p8_w4ffn.cu` + `pack_w4.py` -> `packed4/` | the v1 int4-plane W4A8 variant (kept for partial-coverage experiments) | 12.6% weight-RMS raw requant; +5.88 GB planes vs <1.9 GB 100k-state headroom — full coverage VRAM-dead; superseded by the packed7-reading v2 |
 | `p8q8_v{0..9}.cu`, `p8q8_w{a,b,d,e}.cu`, `p8q8_time.py` | the W4A8 act-quant/IMMA bench+dbg ladder (the discriminator genealogy) | the v0..we iteration trail that isolated the ternary-negation packing law, the per-word scale law, and the char4-store codegen fault |
 | `k1_*var`/`amx3` | argmax + misc fused epilogues | in-graph argmax (dtype-safe via max/where/arange) |
+| **MoE: `rt8e256.cu`** | the router GEMV + fixed-order top-8 + renorm + shared gate | 8 masked-argmax passes (tie -> lower id), canonical pair list, NO sort |
+| **MoE: `gx8e256up`/`dn` (+`up4`/`dn6`)** | grouped gather-GEMV over the selected experts (up = gate+up w/ SiLU·gate epilogue; dn = down, fp16 partials) | flat sequential pair walk (no grid-stride); device-side expert-pointer tables (VA tables legal); 16B-aligned expert slabs |
+| **MoE: `mx8e256cmb.cu`** | fixed-rank-order fp32 combine × gates + the resident shared-expert FFN | fixed summation order = bit-stable MoE layer |
+| **MoE: `spkq256`/`spka256`/`spkc256` (+`m`/`s` variants)** | split-KV attention at head_dim 256, GQA 16:2, output sigmoid-gate fused | warp-per-position score loop (the O(L)-wall fix, 4x @16k) |
+| **MoE: `k2s36`/`gconv36`/`h6kam`/`embg248`/`rmsz2048`** | GDN scan + gated conv at 2048-hidden, fused head-argmax, 248k-vocab embedding gather, (1+w) norms | the dense families rescaled; `h6kam` folds head GEMV + argmax |
+| **MoE: `acc36`/`selc36`/`rowcp2048`** | on-device accept, in-graph commit, MTP-chain hidden carry | the host fold (~0.2 ms/cycle host residue) |
 
 ## Graph & submit model
 
@@ -253,6 +346,14 @@ prefill share ONE resident copy instead of two.*
 | R7a norms per-row CTAs + uint4 hygiene | **68.62 tok/s** | worked — the CTA-serialization law; the W-merge kept as free bit-identical hygiene |
 | R7a K=8 + draft-skip | **71.51-72.02 tok/s** | worked — gen_m9 first-build-green; lookup-only draft graph on deep cycles (emit byte-identical) |
 | R8 K=9 -> K=10 | **74.70 -> 75.56 tok/s** (75.81 through the W5 fixed stack) | worked — gen_m10/m11 first-build-green; the K-ladder stops at ten (increments < +1 tok/s/rung) |
+| P8+A adaptive T=1 prose mode (dense) | prose 14.67 -> **20.56 tok/s** (+40.2%), output bit-identical | worked — the alpha-death signal switches to T=1 cycles; quote classes never trigger it (75.35 canonical with the mode ON) |
+| MM P0-P2 MoE decoders + converter | bit-exact dequant vs llama.cpp C; both repack tiers (16.553/13.945 GiB) | worked — the four kernel classes (router/gather-GEMV/combine/split-KV) at production bandwidth; ~15 converter laws banked |
+| MM P3-P6 the MoE train + spec path | full 40-layer T=1 GREEN vs the fp32 anchor; spec==T1; quote 118.6 tok/s in-harness | worked — GDN/attn ports, the 60-prompt Tier-1 bank, K-mix graph sets |
+| MM P7 host fold + chunk-256 + 96k | host residue ~0.2 ms/cycle; 181-204 tok/s prefill @2k-16k; 96k ship config unblocked | worked — acc36/selc36 on-device, the uncached-sysmem cpu_view, S-split anchors |
+| P8 multi-model serving | registry + swap + per-model pcache live; full swap round-trip through the reboot | worked — dense <-> MoE promotion tracked across /v1/models |
+| MM P8-SERVE the MoE serving bridge | bank60 60/60 THROUGH THE DAEMON; pcache CACHE_HIT exact; soak 148 rounds 0 fail | worked — serve.py as an imported library; 29/29 mock battery |
+| MM P9/P10-A the first-party MTP K=4 | prose 19.6 -> 42-47 (harness) / **19.1 -> 40.1 through the API**; mtp==t1 60/60 det x2 | worked — the blk.40 drafter at 0.875 depth-1 acceptance; the PF-only cur fix; soak 106 rounds 0 fail |
+| MM P10-B pairwise MoE fusion | DIVERGED @ token 27; NOT shipped | honestly falsified — and it corrected the launch-serialization law (fat kernels pipeline dispatch; the T=1 cycle is kernel-RUNTIME-bound) |
 | R2c decode-r7 shared packed7 plane | prefill +22.9% @100k | worked — one resident weight copy serves decode + prefill |
 | P8 packed5 + o-proj M-grid fold | prefill 530.6 @2k / 328.0 @100k (Tier-1) | worked — true-16B qkv units + one g=160 o-proj launch; both bit-identical |
 | T2 W4A8 packed7-IMMA ffn (`PF_W4A8=1`) | prefill **569.2 @2k / 510.1 @8k / 342.0 @100k** (Tier-2) | worked — the existing packed7 planes read through a linearized int4 codebook view; zero new VRAM, decode Tier-1 untouched; the honest IMMA verdict x1.06 (the banked x4.58 was a discriminator frame artifact — 750 closed) |
@@ -350,6 +451,77 @@ Full reference: [SERVING.md](SERVING.md). Two processes over a unix socket
 - **tok_hist seeding (R5d)** — `serve.py` seeds the token history on
   boot/FRESH/FOLLOW_UP/CACHE_HIT/snapshot paths; the deep-K LOOKUP drafter
   self-matches a -1 prefix without it and faults.
+
+## Multi-model serving (P8): the registry, the swap, the per-model caches
+
+*Plain language: the service now hosts a model REGISTRY — several models
+declared with their engine host, env file, context cap and cache root — and
+swaps which one owns the GPU through a deliberate, crash-safe lifecycle.
+Only one model is resident at a time (the 24 GB card holds one); the API
+makes that explicit instead of lying about it.*
+
+- **The registry** (`engine/ops/model_registry.json`): per model — id,
+  display name, arch class, `engine_host` (the python entry point that owns
+  the GPU: `test_w100k.py` dense / `test_moe36.py` MoE), `model_path`,
+  per-model env file, `ctxk`, `max_output_tokens`, pcache root + quota GB.
+  The `default_model` boots when no state says otherwise; `ops/state/`
+  (`current_model`, `next_model`, `swap_in_progress`) carries the swap
+  intent.
+- **The split env** (`ops/env.common` + `ops/env.canonical.d/<model>.env`,
+  generated from the published `env.common.example`): shared secrets/ops
+  knobs in env.common, per-model numerics/paths in the per-model env. The
+  dense union is variable-identical to the old monolithic
+  `ops/env.canonical` (config_fp unchanged — pcache continuity); the
+  monolithic file remains the pre-P8 rollback source.
+- **The swap FSM** (wrapper `engine_daemon.sh` + `enginectl switch <id>`):
+  validate (registry entry, env file, engine host, model file) -> drain
+  check -> write `next_model` atomically (tmp+rename+fsync+DIR-fsync — the
+  L5/GPU-EXIT-sync laws; a system `sync` before the stop) -> graceful
+  shutdown RPC -> the GPU-EXIT reboot the stop provokes IS the transport ->
+  the wrapper's boot selection promotes `next_model > current_model >
+  default`, clears a swap-authored staydown (never a breaker-authored one),
+  quarantines invalid intents (keep current + refuse, exit 17), exports
+  `TLX_MODEL_ID` to the engine. Auto-swap on request is DELIBERATELY
+  refused (thrash); the API answers 409 `model_not_resident` + a switch
+  hint instead.
+- **Model identity is load-bearing**: the engine loads `TLX_MODEL_PATH`
+  (was hardcoded) and `serve.py` boot-asserts loaded == fingerprinted
+  (exit 18 on mismatch). The API and the daemon derive the SAME per-model
+  config_fp extras (dense -> cubin-set digest; MoE -> the packed-manifest
+  sha) — the FP-EXTRA CONVERGENCE law, or every boot would look like
+  config drift.
+- **Per-model prompt caches**: `PC_ROOT`/`PC_QUOTA_GB` per model env
+  (30 GB dense / 26 GB MoE); nodes are config-fp-scoped by construction,
+  so the two caches never cross. The MoE daemon additionally runs its own
+  `pcache_moe.py` bridge (r1moe1 nodes; ~76 MB per 1024-token node; the
+  G4 gate proves a CACHE_HIT continuation EXACT vs the FRESH arm).
+- **The API surface** (`/v1/models` registry-driven with
+  resident/loadable/unavailable + swap states; `model` field 404 unknown /
+  409 not-resident / absent = resident; swap-in-progress -> 503 +
+  Retry-After, file-derived). Conversations are model-scoped by the
+  (model_id, conversation) key — a cross-model follow-up is FRESH by law.
+- **The MoE daemon** (`engine/serve_moe.py`): imports the dense `serve.py`
+  protocol primitives as a library (framing, send locks, validation, admin
+  ACL, watchdog patterns) and swaps the module state for the MoE engine —
+  the dense daemon is untouched. `test_moe36.py` is the engine host;
+  `engine/mm/` carries the campaign workbench (harness, kernels, banks).
+- **The R3 + L7 hardening** both daemons carry: the R3 review campaign
+  (51 findings, five waves: W-A liveness — restore beats, idle-arm
+  watchdog, watched shutdown, boot deadline, the consecutive breaker with
+  ready-uptime attribution, the rebuild budget; W-B event loop — the
+  promote-vs-cancel grant release, evq coalesce-first, conv-lock held for
+  the stream lifetime, encode-once-off-loop, bounded residency; W-C
+  integrity — one env parser, fail-closed peercred, 0600/0600 cache
+  perms, header-only admin, /health redaction, HMAC key placement; W-D
+  conformance — reasoning_effort tiers, sampling compat, error enums,
+  reasoning tail, honest max_tokens 400s, idempotency keys,
+  cached_tokens, tvars; W-E the real-listener harness + knob census) and
+  the L7 abort-safety protocol (mid-prefill aborts fence, invalidate and
+  force FRESH — the unfenced-abort class that panicked the box; the global
+  graph-submit budget `TLX_GLOBAL_CYCLE_REBUILD_EVERY=928`; admission
+  hardening with an idle-engine-heals-only permit watchdog). The knob
+  census and drift runbook live in `engine/docs/SERVING.md` (the R3
+  serving runbook).
 
 ## The prefill layer
 

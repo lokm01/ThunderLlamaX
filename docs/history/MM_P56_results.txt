@@ -1,0 +1,136 @@
+MM P5+P6 RESULTS (2026-09-25, GLM implementation agent)
+Harness MM_P56_lib.py (Rig/GraphRunner/KAPool) + MM_P5_run.py + MM_P6_run.py + MM_W1.py.
+
+═══ P5.1 — THE FP16-PARTIAL DECISION ═══
+  The engine-order anchor (fp16 MoE partials modeled in numpy; MM_P34_ports
+  Anchor(fp16_partials=True)) re-run on the 20-prompt battery:
+    engine vs OLD f32 anchor:  347/349, 18/20 prompts  (exact P34 repro)
+    engine vs fp16 anchor:     348/349, 19/20 prompts
+  => the FP16-PARTIAL LAW CONFIRMED: modeling the gxdn fp16 store in the
+  anchor HEALS the prompt-2 drift flip (the dominant drift term). Residual:
+  prompt 16 pos 15 (drift-overtaken class under BOTH anchors; f32-anchor gap
+  was the adjudicated 6.5e-3 near-tie, fp16-anchor trajectory diverges there).
+  DECISION: ADOPT (a) — the fp16-partial engine-order anchor is the
+  ANCHOR-OF-RECORD for all P5 gates (strictly dominates). The strict (b)
+  alternative (fp32 partials in gx8e256dn + cmbz2048-fp32 + full P2/P34
+  re-gate of every downstream result) is PRICED as a follow-up, not taken:
+  one adjudicated residual flip does not justify invalidating the day's
+  green gates (the 27B Tier-1 precedent accepted exactly this class).
+  TIER-1 CONTRACT NOTE: engine = fp16 MoE partials + kernel-order fp32;
+  anchor-of-record = numpy + fp16 partial round; tolerance = adjudicated
+  near-tie/drift class (0 <1e-3 in the battery census).
+
+═══ P5.2b — THE 60-PROMPT BANK ═══
+  60 diverse prompts (20 P34 + 40 new; tokenizer roundtrip-verified; eos
+  248046 identical to the 27B family). A60 = 927 prompt positions, near-tie
+  census 0 <1e-3 / 4 <1e-2. THE BANK (T1 graph train, ~/mm_p5_bank60.json):
+    det (FULL x2 rerun of all 60 prompts): OK
+    prompt-pass vs the fp16 anchor: 925/927 EXACT, 58/60 prompts full
+      (the 2 flips: prompt 2 pos 18 + prompt 29 pos 6 — BOTH the adjudicated
+      drift class, anchor gaps 7.0e-3/3.6e-2, smooth-trajectory top1<->top2)
+    anchor-x8 continuation spots (12 prompts): EXACT 12/12
+  THE 60/60 TIER-1 GATE AT DEPTH = G3b (P6): spec == T1 on the SAME 60-prompt
+  battery, 60/60 EXACT, det x2 OK.
+
+═══ P5.2c — THE CTX LADDER (doc100k corpus, 97809 tok, tokenization verified) ═══
+  rung 1024: the battery (all prompts <=52 pos; the P34 gates).
+  rung 4096:  feed 4000 (440 D8-slot cycles + tail) | first-64 engine-vs-anchor
+             63/64 | cont32 det x2 OK | REBASE16 16/16 EXACT | GDN |S|=1.481e2
+  rung 16384: feed 16288 (1808 D8 cycles) 2231s | first-64 63/64 | cont32 det
+             x2 OK | REBASE16 16/16 EXACT | GDN |S|=1.475e2 max=21.5
+  *** THE LONG-HORIZON LAW (measured, not assumed): the engine state after
+  4000/16288 tokens continues GREEDY-IDENTICALLY to the fp16 anchor for 16
+  tokens (snapshot-rebase: engine S/conv/KV -> anchor forward). The
+  fp32-GDN-state x int8-KV numerics risk does NOT materialize at 16k. GDN
+  state norms BOUNDED and stable 4k->16k (148 vs 147.5). ***
+  rung 65536: SKIPPED — the spkq256m 3-pass serial p-loop costs ~O(L) per
+  CTA-wave; 16k feed = 1808 cycles/2231s wall => 64k projects to ~5h feed
+  alone. The split-KV attention (the 27B K1/K2 pattern) is the P7 fix.
+  NOTE the 64k-gated kernels were BUILT and G1e-gated (spkq256m_65536).
+  The first-64 single flip at 4k+16k ADJUDICATED (stage E): doc pos 21,
+  eng 8364 vs anchor 22525, anchor gap 2.647e-2, top-5 sets IDENTICAL
+  ([8364,4649,22525,...] vs [22525,8364,4649,...]) = top1<->top2 exchange on
+  a compressed top-3 — the drift-overtaken numerics class (same family as
+  the P34 prompt-2 adjudication), NOT a wiring bug.
+
+═══ P5.3 — THE KA-SLAB POOL ═══
+  One host-mapped arena carved across ALL graphs (MM_P56_lib.KAPool). The
+  16k rung audit: 4 slabs / 4 graphs (T1 pair + D8 pair) / 1.33MB used;
+  ONE 1024-cycle fence REBUILT both graphs into the SAME slices (fence
+  count 1, ZERO new slabs) — the KERNARGS-SLAB LEAK is mitigated exactly
+  where it bit: rebuilds no longer leak (P34 leaked per-build; at the 27B
+  256-cycle cadence over a long session that was ~100 x 1.33MB).
+
+═══ P6 — THE SPEC PATH (the payoff) ═══
+  Kernels (all gated, ZERO spill, NAME-LAW-COMPLIANT):
+    k2s36s_3/9  k2s + per-t GDN state slots [t][30] t-major; slot[T-1]==live
+                BIT-EXACT; chain vs numpy ref maxdev 6e-8 (the expf ULP class)
+    gconv36s_3/9 conv + per-t slots BIT-EXACT
+    selc36      commit m -> contiguous 60MiB GDN + 2.8MiB conv copy; BIT-EXACT
+    h6kam_3/9   fused head+argmax: 1x HEAD read for P seats; amds == per-row
+                h6k2048+np.argmax EXACT on all seats; tie-class -> row 0
+    amred36     packed-u64 reduce (order-free max, lower-row tie-break)
+    spkq256m_*  the 3-pass long-ctx attention (scores->global scratch);
+                BIT-EXACT vs the FIXED spkq256 at L=900 and vs spkq_h_ref
+                (5.96e-08) on every head
+  *** THE L>256 SPKQ256 LATENT BUG (found by G1e, fixed, banked): the P34
+  softmax's parallel-exp form only covered positions < 256 (thread count);
+  L in 257..1024 mixed RAW scores into z/out (maxdev 3.0e2 vs ref). Never
+  hit by the <=52-pos battery. Fix = d==0-sequential exp+div, BIT-IDENTICAL
+  at L<=256 (proven vs the pre-fix cubin), correct to LMAX=1024. Serving
+  conversations beyond 256 tokens would have hit this. ***
+  G2 P-BATCH CORE: D8/D2 probe seat-0 top1 == T1 at all positions AND the
+  slot-0 GDN state BIT-EXACT vs the T1 live state.
+  *** THE 2D-GRID LAW (the G3 root cause): gv8k2048p/gv8k4096r are
+  (rows/32, P) grids with seat = blockIdx.y — a 1D grid silently computes
+  seat 0 ONLY. The P34 S8 K-mix smoke was det-but-seat-0-only (deterministic
+  wrongness). Symptom class: probe amds[1:] == 0 (all-zero h -> all-tie
+  logits -> row 0). Fix: build_seq emits (gx, P) grids. ***
+  G3 THE TIER-1 GATE AT DEPTH: spec == T1 on the 20-prompt battery 20/20
+  EXACT (32-tok continuations), det x2 OK. G3b: THE 60-PROMPT BATTERY
+  60/60 EXACT, det x2 OK. (The n-gram LOOKUP host port: incremental 4-gram
+  index, longest-suffix 4..16, drafts follow the EXTENDED match — the qq
+  law; deterministic latest-occurrence tie-break.)
+  G4 THE PAYOFF TABLE (sel-mode, greedy, 32-48 tok gens):
+    quote-alpha  118.6 tok/s  (D8 cycles, E[m|hit]=8.0 — FULL acceptance at
+                               K=8; THE DEPTH LAW TRANSFERS to the MoE)
+    quote-code   109.8 tok/s  (E[m|hit]=7.0)
+    quote-docx2   25.3 tok/s  (natural-doc quote; weak hits — the QUOTE-
+                               CEILING law holds here too)
+    prose-0/2/9   19.3-19.6 tok/s (no hits; T1 path unharmed)
+  vs the 18.48 T=1 baseline = 6.4x on quote-class. THE 140 QUESTION, HONEST
+  ANSWER: NOT CLEARED at v0 — quote cycles run ~66ms (trunk 49.6 + am-head
+  ~1 + selc36 commit ~1.5 + ~14ms host: amds readback, 3 copyins, the
+  eager commit launch). E[m]=8 at 66ms = 121 tok/s ceiling in this harness;
+  140 needs the ~14ms host overhead folded (selc36 as the probe graph's
+  first node + batched copyins + the readout-order pipelining) — mechanical,
+  not architectural. The measured accept behavior (8/8 on true repeats)
+  says 140-180 is reachable once the host path is tight.
+
+═══ OPS ═══
+  - Daemon stop under launchd = KNOWN ISSUE #7 LIVE: unload raced a KeepAlive
+    restart (instance 2 boot-prefilled 97k); fix = launchctl disable FIRST,
+    wait for boot-complete, then the graceful socket shutdown RPC. Pattern
+    banked for enginectl.
+  - One machine REBOOT (~09:32, the G1 name-law fault era) healed by launchd.
+  - 16GB RAM WALL: the CPU anchor (~5GB) + any GPU harness (~6-15GB peak)
+    TOGETHER THRASH-SWAP -> strict one-heavy-process-at-a-time (the anchor
+    died once; the 4k rebase crawled 70min under contention vs 15min alone).
+  - colima REBUILT fresh-disk (the P34 containerd corruption) + cuda-nvcc:12.8
+    image rebuilt from the rb6 recipe; THE CONTAINER-CWD LAW: the nvcc shim
+    resolves relative paths at the CONTAINER's cwd — output-file AND source
+    must be absolute (cost us one round of cubins-in-container-/).
+  - nvcc/cuobjdump LIVE again; the ~457MB single-arg cap + spill audits run.
+
+═══ HANDOFF TO P7 (prefill chunk-256 grouped GEMM) ═══
+  1. The m-kernel slope: 16k feed = 1808 cycles/2231s wall => 64k ~5h — the
+     split-KV attention (27B K1/K2 pattern re-dimensioned for 2 kv-heads x
+     256 dims) is REQUIRED before any 64k/96k serving; numerics class =
+     per-split partials + combine (needs its own kernel-order anchor ref).
+  2. The 2D-GRID LAW applies to the P7 M-batched families by construction —
+     every (rows/32, M) kernel must be launched with the M grid dimension.
+  3. The spec host path: ~14ms/cycle overhead = the 140 gap; selc36 as the
+     probe-graph first node + amds/drafts/pos batched copyins + MB readback.
+  4. (b)-spec: fp32 partials in gxdn (kills the fp16 anchor divergence class
+     entirely) = gx8e256dn + cmbz2048-fp32 + full re-gate.
+  5. The bank60 + A60 record appended below at completion.

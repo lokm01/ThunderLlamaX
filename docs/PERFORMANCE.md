@@ -1,6 +1,6 @@
 # LLM benchmarks: Apple Silicon eGPU vs native — tokens per second
 
-LLM tokens-per-second benchmarks for Qwen3.8-27B running on a Mac: an RTX
+LLM tokens-per-second benchmarks for **two models** running on a Mac: an RTX
 3090 eGPU in a Thunderbolt 4 enclosure on a MacBook Air M2, driven through
 the custom DriverKit dext — with a clearly labeled native-Linux reference on
 the same GPU class for the "Apple Silicon vs NVIDIA for LLM inference"
@@ -11,12 +11,21 @@ workload-dependence are measured and published, not footnoted away. Deep
 dives: [history/CAMPAIGN.md](history/CAMPAIGN.md) (the condensed ladder),
 [history/PREFILL.md](history/PREFILL.md) (prefill),
 [history/R8_DECODE.md](history/R8_DECODE.md) (the 75-cross),
+[history/MM_PLAN.md](history/MM_PLAN.md) (the multi-model/MoE campaign plan;
+its per-phase journals MM_P0..MM_P10 sit next to it),
 [history/PERFLOG.md](history/PERFLOG.md) (the running log).
 
+The two models:
+
+| Model | architecture | quant | context |
+|---|---|---|---|
+| **Qwen3.8-27B** (dense) | 48 gated-delta-net + 16 full-attention blocks | IQ3_XXS body (12.6 GB GGUF) | 100,352 |
+| **Qwen3.6-35B-A3B** (MoE) | 30 GDN + 10 full-attention blocks, 256 routed experts top-8 + 1 shared per layer (~35.1B total / ~3B active) | UD-IQ4_XS experts (13.9 GiB packed) | 98,304 |
+
 Reference rig: RTX 3090 24 GB (sm_86) in a TB4 enclosure on a MacBook Air
-M2, driven through the DriverKit dext. Decode context = 100,352-token KV,
-97,810-token prompt, greedy. Prefill "100k rebuild" = full-context
-ingestion from scratch.
+M2, driven through the DriverKit dext. Decode context = the model's full KV
+(97,810-token prompt for the dense model; the 96k split for the MoE),
+greedy. Prefill "100k rebuild" = full-context ingestion from scratch.
 
 ## How to read these numbers (the gate contract)
 
@@ -77,6 +86,74 @@ zero numerics, and the ladder reads ... -> 71.51 -> 74.70 -> 75.56 ->
 | K=8 + draft-skip (R7a) | 71.51-72.02 | lookup-only draft graph on deep cycles (emit byte-identical) |
 | K=9 -> K=10 (R8) | 74.70 -> **75.56** | the same generator discipline; **the K-ladder stops at ten** (increments fell to +0.86 tok/s/rung, hit decay ~-1.6pt/rung) |
 | review-fix campaign re-validation (W5) | **75.81** | five waves of serving/security/tripwire fixes + fork tripwires — zero numerics change, re-gated live on the rig |
+| adaptive T=1 prose mode (P8+A, `TLX_T1_MODE=1`) | quote 75.35 / **prose 14.67 -> 20.56** | after 4 zero-accept K2 cycles the session runs T=1-only cycles (the alpha-death signal); first 8-gram hit exits straight into a deep cycle. Output stream BIT-IDENTICAL to pure spec (120/120) + Tier-1 60/60 x2 |
+
+### Decode: the second model — Qwen3.6-35B-A3B (MoE, MM campaign)
+
+The MoE engine (see [ARCHITECTURE.md](ARCHITECTURE.md) for the kernel
+classes) runs the same speculative discipline with a mode mix selected per
+cycle by a scan oracle: `n>=8 -> D8` (K=8 n-gram LOOKUP) | `n>=4 -> D2` |
+miss with a live chain -> **P5+MTP (the first-party MTP K=4 drafter)** |
+miss with a stale chain -> one T=1 re-anchor, then seed. All numbers below
+are greedy, Tier-1 gated (`spec == T=1`, 60/60 x2 deterministic on the
+60-prompt bank, through the daemon and the API).
+
+**Through the full API surface (the P10 ship, MTP mode default-on):**
+
+| workload class | tok/s | vs T1-only serving (P8S) |
+|---|---|---|
+| quote-alpha (re-reading long documents) | **97.6** | 98.1 — unchanged (lookup class) |
+| quote-code | **104.0** | 96.3 |
+| quote-docx2 | **65.9** | 25.4 (+160%) |
+| prose-0 (novel text, start) | **40.1** | 19.1 (+110%) |
+| prose-1 | **39.1** | 19.2 (+103%) |
+| prose-9 (deep into novel text) | **29.9** | 18.9 (+58%) |
+
+**In-harness references** (the P7 folded engine, quieter machine): quote-
+alpha 118.6-121.6 tok/s at E[m|hit]=8.0 (the depth law transfers to the MoE
+— every deep hit accepts ALL EIGHT), T=1 decode 17.2-17.3 tok/s @64k-96k
+(57.8 ms/cycle), MTP-mode prose 42-47 tok/s. The daemon/API numbers above
+carry the serving stack's ambient; the RELATIVE gains are the deliverable
+(the full G-tables are in [history/MM_P8S_results.txt](history/MM_P8S_results.txt),
+[history/MM_P9_results.txt](history/MM_P9_results.txt) and
+[history/MM_P10_results.txt](history/MM_P10_results.txt)).
+
+**The MTP acceptance measurements** (the first-party drafter = the model's
+own `blk.40` MTP layer, quantized in-pack; the EAGLE/llama.cpp
+one-cycle-late chain shape — seed on the committed hidden, then K=4 draft
+steps; every KV row the chain reads is true by construction):
+
+| class | P(accept first draft) | E[accepted] @ K=4 | tok/cycle |
+|---|---|---|---|
+| quote (wiring check) | **0.875** | 2.75-3.08 | 3.75-4.08 |
+| prose-0 | 0.875 | 2.58 | 3.58 |
+| prose-9 | 0.708 | 1.79 | 2.79 |
+
+Depth-1 acceptance is 0.875 EXACTLY the offline anchor number — the shipped
+MTP layer drafts strong on these weights (depth-4 conditional acceptance
+still >= 0.74 on quote/prose-0). The chain goes stale on lookup cycles
+(quote work keeps the untouched lookup path) and re-anchors with ONE T=1
+cycle on the first miss after a hit streak. Long-ctx (96k) MTP alpha is
+measured only at the harness level so far — an honest open item.
+
+**Prefill (MoE)**: chunk-256 bit-exact prefill runs 181-204 tok/s @2k-16k
+(class honest: the grouped M-GEMM is the 850+ path if it ever lands); a
+full 96k context feeds in ~800 s (~122 tok/s end-to-end incl. anchors) and
+64k in ~461 s (~140 tok/s). Context-ladder exactness: the engine state
+after 4,000/16,288 doc tokens continues greedy-identically to the fp16
+anchor (rebase16 16/16 EXACT at every rung — the LONG-HORIZON law; GDN
+norms bounded).
+
+**The fusion that didn't ship (P10-B, honestly falsified):** the pairwise
+MoE kernel fusion (router+shared-expert, gate+down merged per pair — zero
+spill, verbatim bodies) DIVERGED from the unfused engine at token 27 in the
+bit-exact gate: NOT shipped (`MM_FUSE2` stays off). Its launch-count arm
+(-74 launches for -1.34 ms of 52.1) also corrected a law: fat-kernel graphs
+pipeline dispatch behind execution, so the 0.094 ms/launch serialization
+slope measured on tiny-kernel graphs does NOT transfer — the T=1 cycle is
+kernel-RUNTIME-bound (the marginal launch is ~0.02 ms). Future fusion work
+must make the KERNELS faster (fewer weight passes), not the launch count
+smaller.
 
 ## Batched decode (the B axis — R6, opt-in)
 
@@ -133,29 +210,50 @@ line-for-line**. Battery + banks: [history/T2_P8W4.md](history/T2_P8W4.md).
 
 | Operation | Time |
 |---|---|
-| Cached 100k-context restore (prompt cache hit) | **~6.5 s** (vs ~13 min FRESH; 60/60 exact across 4 restarts) |
-| FRESH 100k prefill (at 342.0 tok/s) | ~4.8 min |
-| FRESH 8k prefill (at 510.1 tok/s) | ~16 s |
+| Cached 100k-context restore, dense (prompt cache hit) | **~6.5 s** (vs ~13 min FRESH; 60/60 exact across 4 restarts) |
+| MoE prompt-cache node (per 1024 tokens) | ~76 MB (+10.4 KB/token); CACHE_HIT continuation EXACT vs the FRESH arm (G4) |
+| FRESH 100k prefill (dense, at 342.0 tok/s) | ~4.8 min |
+| FRESH 8k prefill (dense, at 510.1 tok/s) | ~16 s |
+| FRESH 96k feed (MoE, chunk-256 + anchors) | ~800 s (~122 tok/s end-to-end) |
 | 200-token follow-up turn @2k-class (resident state) | ~2.1 s (vs ~6.1 s FRESH) |
-| Daemon boot to ready @100k ctx | ~6-7 min (weights ~11 s warm + KV quantize ~40 s + warmup + graphs) |
+| Daemon boot to ready @100k ctx (dense) | ~6-7 min (weights ~11 s warm + KV quantize ~40 s + warmup + graphs) |
+| Model swap (enginectl switch, dense <-> MoE) | the graceful stop + GPU-EXIT reboot + boot of the target model (minutes-class, by design — the reboot IS the transport; the swap intent survives it) |
 | Cancellation latency | next cycle boundary (tens of ms) |
+
+**Serving soaks** (the honest reliability numbers): dense W5 soak 15 min /
+32 rounds zero faults; MoE P8S soak 148 rounds / 15 min zero failures;
+MoE P10 (MTP default) soak 106 rounds / 15 min zero failures — streams +
+follow-ups + quote classes + cancels + health polls, dirty never set. The
+R3/L7 hardening behind this: 51 review findings fixed in five waves +
+the abort-safety protocol (below).
 
 ## What this rig can and can't do (measured)
 
-**The decode speed is workload-dependent — the two classes, both measured:**
+**Decode speed is workload-dependent — measured, per model, per mode:**
 
 - **Hit-class** (documents, code, quotes, repetitions — the model re-reading
-  text it has): **75.81 tok/s** (75.56 at the R8 ship; same engine, re-gated
-  through the fixed stack). The n-gram drafter fires on 76.7% of
-  cycles and every hit accepts all ten.
-- **Prose-class** (novel text): **~15.1 tok/s** (1.02 tok/cycle, 0/60 lookup
-  hits). On text the model hasn't seen, the K=2 MTP draft accepts ~nothing
-  and the deep-K drafter never fires. The prose lever is NOT a longer
-  lookup window (the BIMODAL MATCH LAW: on natural-text histories, match
-  lengths are either 8 or nothing — LMIN 6/7 adds ~0.2% fires, all
-  spurious); it is draft fidelity (a DFlash2-class block drafter) or cheaper
-  K=2 cycles. The offline "87.9% quote rate" is a model-quotes-perfectly
-  CEILING, not a workload (the quote-ceiling law, R5).
+  text it has): **75.81 tok/s** dense / **97.6-104.0 tok/s** MoE. The n-gram
+  drafter fires on 76.7% of dense cycles and every hit accepts all ten
+  (dense) / all eight (MoE).
+- **Prose-class** (novel text): the honest floor has MOVED twice, both times
+  by shipping a first-party drafter rather than a longer lookup window:
+  - dense, adaptive T=1 mode (P8+A, shipped ON): **20.56 tok/s** (was 14.67
+    pure-spec) — after 4 zero-accept K2 cycles the session switches to T=1
+    cycles and the per-cycle lookup scan keeps the exit trigger live; the
+    mixed-mode output is BIT-IDENTICAL to pure spec (120/120 positions).
+  - MoE, first-party MTP K=4 chain (P9/P10-A, shipped default): **40.1
+    tok/s** prose-0 through the API (was 19.1 T1-only), 29.9 at prose-9.
+  An earlier reading on this page bounded prose at "~15 tok/s with
+  56-70 tok/s only via a future DFlash2-class drafter" — that ceiling was a
+  category error (it priced the K2-cycle weight floor, not the drafted
+  modes). The measured answer is 20.6 / 40.1 with the shipped drafters; the
+  BIMODAL MATCH LAW still holds (the lookup tier gains nothing on prose —
+  the wins above come from T=1 mode-switching and MTP, not from lookup).
+- **What is still honestly open on prose**: dense has no first-party MTP
+  chain yet (its MTP block drafts through a 40960-row vocab slice — 89.8%
+  of prose targets fall OUT of the slice, so T=1-at-physics-cap is the
+  honest dense endpoint for that drafter); the MoE's long-ctx (96k) MTP
+  alpha is unmeasured; prose-9 decay (29.9) is real and unsolved.
 
 **The measured walls (why prefill stops where it stops):**
 
@@ -173,9 +271,12 @@ line-for-line**. Battery + banks: [history/T2_P8W4.md](history/T2_P8W4.md).
   the honest +7.3/+6.4/+4.3%. The remaining measured route is a
   persistent-CTA megakernel where the pipeline lives inside one CTA.
 
-**Decode ceilings**: the K-ladder is done (K=10; increments < +1 tok/s/rung);
-the probe is 59.5 of the 118.0 ms K=10 cycle; deeper-K continuation was
-priced offline at K=12-16 optimum ONLY IF per-rung cost halves (D4).
+**Decode ceilings**: the dense K-ladder is done (K=10; increments < +1
+tok/s/rung); the probe is 59.5 of the 118.0 ms K=10 cycle; deeper-K
+continuation was priced offline at K=12-16 optimum ONLY IF per-rung cost
+halves (D4). The MoE T=1 cycle (52-58 ms) is kernel-RUNTIME-bound (the
+P10-B marginal-launch law) — its compression route is fewer weight passes
+per layer, not fewer launches.
 
 ## Comparison context: eGPU on a Mac vs native Linux (clearly labeled: NOT this stack)
 

@@ -113,6 +113,13 @@ the Mac — harmless but wasted).
 
 ## 4. Model preparation
 
+The service is multi-model: a registry
+(`engine/ops/model_registry.json`) declares the models, and the wrapper
+boots whichever model `ops/state/current_model` names (or the registry
+default). Two models ship today:
+
+### Model A — Qwen3.8-27B (dense)
+
 - **GGUF**: `Qwen3.8-27B-IQ3_XXS` (bartowski). The engine hard-codes this
   model's exact per-layer quant mix (documented in
   [docs/history/W1B_TRUNK.md](history/W1B_TRUNK.md)). Weights are NOT in this
@@ -129,6 +136,20 @@ the Mac — harmless but wasted).
 
 - The a3b override JSONs (`lineage/a3b/override*.json`) reference their
   template `.cu` files relative to the `lineage/` directory.
+
+### Model B — Qwen3.6-35B-A3B (MoE, the multi-model campaign)
+
+- **GGUF**: `Qwen3.6-35B-A3B` UD-tier (the ship pack was built from
+  UD-IQ4_XS; the repacker measured both UD-IQ3_S and UD-IQ4_XS tiers —
+  16.553 / 13.945 GiB packed). Weights are NOT in this repo. The engine's
+  per-tensor quant map is fixed in the MM converter (`engine/mm/`).
+- **Offline repack** (one-time): `cd engine/mm && python pack36.py` builds
+  the expert-major packed slabs + the trunk retarget for the 2048-hidden
+  dims; `mm_repack_mtp.py` folds the model's own `blk.40` MTP layer into
+  the pack (the first-party drafter — routers F32, experts at their
+  Q3_K/Q4_K quants). Manifest, per-file sha256 and alignment gates are
+  built in.
+- Context: 96k default (98,304 KV) on the same 24 GB card.
 
 ## 5. Build the kernels
 
@@ -173,24 +194,43 @@ The 2k gate is `python test_w2.py`; kernel-level differentials live in
 ### The service — the supervisor mode (the sanctioned way)
 
 The shipped way to run the service is the launchd supervisor (the TLX W2/W5
-campaign hardened it: a persistent circuit breaker, env single-sourcing, and
-self-heal across GPU-fault reboots). One-time setup:
+campaigns hardened it; R3 hardened it further; P8 made it multi-model).
+One-time setup:
 
 ```sh
 cd engine/ops
-# 1. generate your env.canonical (the live file is NOT in the repo — it
-#    carries the admin token; the example carries a placeholder):
-cp env.canonical.example env.canonical && chmod 600 env.canonical
-TLX_TOK=$(openssl rand -base64 24)
+# 1. generate env.common (shared secrets; the live file is NOT in the repo):
+cp env.common.example env.common && chmod 600 env.common
+TLX_TOK=$(openssl rand -base64 24); TLX_KEY=$(openssl rand -hex 32)
 sed -i '' -e "s|REPLACE_WITH_openssl_rand_base64_24|$TLX_TOK|" \
-          -e "s|~/tinygrad-metal/models/Qwen3.8-27B-IQ3_XXS.gguf|/path/to/your/Qwen3.8-27B-IQ3_XXS.gguf|" \
-          env.canonical
+          -e "s|REPLACE_WITH_openssl_rand_hex_32|$TLX_KEY|" env.common
+#    (per-model numerics env files already ship in env.canonical.d/; edit
+#     their paths to point at YOUR gguf/pack/pcache locations — and the
+#     model_path entries in model_registry.json to match)
 # 2. personalize the launchd plists (they ship with a %USER% placeholder):
 sed -i '' "s/%USER%/$USER/" com.tlx.llm-engine.plist com.tlx.llm-api.plist
 # 3. install + start (engine boot ~6-7 min; watch it come up):
 ./enginectl install
 tail -f ~/tinygrad-metal/logs/llm-engine-launchd.log
 ```
+
+The env layout (P8): the wrapper sources `env.common` FIRST, then
+`env.canonical.d/<current-model>.env` — per-model numerics, `TLX_MODEL_PATH`,
+per-model pcache root/quota (`PC_ROOT`/`PC_QUOTA_GB`), and for the dense
+model `TLX_T1_MODE=1` (the adaptive T=1 prose mode) / for the MoE
+`MM_MTP=1` (the first-party MTP K=4 chain). The union of env.common + the
+dense env is variable-identical to the old monolithic env.canonical
+(config_fp unchanged); `env.canonical.example` still documents every knob
+of the monolithic rollback form.
+
+**Multi-model operation**: `./enginectl models` shows the registry + which
+model is resident; `./enginectl switch <model-id>` swaps the resident model
+(validate -> drain check -> atomic intent -> graceful stop -> the reboot is
+the transport -> the wrapper promotes the target and boots its engine
+host). The API reflects it: `/v1/models` shows resident/loadable/unavailable,
+and a request naming a non-resident model gets 409 `model_not_resident`
+with a switch hint (no auto-swap by design). Full semantics:
+[SERVING.md](SERVING.md).
 
 What this buys over a manual boot:
 
@@ -247,15 +287,27 @@ prefill planes; steady state with all planes is ~23.5 GB of 24 GB.
 
 ### The GPU-free test battery
 
-`engine/tests/` carries the mock-engine battery (85 tests: serving
-correctness, api mocks, pcache hardening, manifest/tripwire laws) — it runs
-without a GPU and is the fastest sanity check after touching the serving
-layer:
+`engine/tests/` carries the mock-engine batteries (serving correctness, api
+mocks, pcache hardening, manifest/tripwire laws, the L7 abort-safety and
+admission batteries, the P8 multi-model/swap-FSM batteries, the real-
+listener harness) — ~180 tests, all runnable without a GPU; the fastest
+sanity check after touching the serving layer:
 
 ```sh
 cd engine && python3 tests/test_api_mocks.py && \
-  python3 tests/test_pcache_w3.py && python3 tests/test_w4_engine.py
+  python3 tests/test_pcache_w3.py && \
+  python3 tests/test_serve_listener.py && \
+  python3 tests/test_l7_abort.py && python3 tests/test_l7_admission.py && \
+  python3 tests/test_p8_multiplayer.py
+python3 moe_serve_mock.py        # the MoE serving-bridge battery (29/29)
+zsh tests/test_swapfsm_p8.zsh    # the model-swap FSM battery (9/9)
+zsh tests/test_ops_r3.zsh        # the wrapper/breaker battery (6/6)
 ```
+
+(`test_w4_engine.py` asserts boot tripwires against BUILT cubins — run it
+on the rig after a kernel build. Two api tests read the operator-generated
+`ops/env.canonical`; on a bare clone they fall back to the published
+example — generate the file for the full rig-fidelity run.)
 
 ### What the knobs mean
 
@@ -285,7 +337,12 @@ cd engine && python3 tests/test_api_mocks.py && \
 | `PC_ENABLED=1` | the durable prompt cache (LongMemory) |
 | `NV_SMEM_CFG_AUTO=1 NV_SMEM_CFG_AUTO_NAMES=pfg,pfa32c` | dynamic smem carveout for the big prefill kernels |
 | `NV_SPILL_EXEMPT_NAMES=pf,p8` | fork tripwire scoping — the Tier-2 prefill families run 104-592 B stack FRAMES by design (warn-only for these names; the hard >100 B spill law stays for the decode/canon set) |
-| `TLX_ADMIN_TOKEN` / `TLX_MODEL_PATH` | ops: the privileged-RPC token + the model path feeding the config fingerprint (live in env.canonical, not the repo) |
+| `TLX_ADMIN_TOKEN` / `TLX_MODEL_PATH` | ops: the privileged-RPC token + the model path feeding the config fingerprint (live in env.canonical/env.common, not the repo) |
+| `TLX_T1_MODE=1` | dense: the adaptive T=1 prose mode (4 zero-accept K2 cycles -> T=1 cycles; first 8-gram hit exits to deep). Output-invariant by gate; ships ON in the dense model env |
+| `TLX_GLOBAL_CYCLE_REBUILD_EVERY=928` | L7 fix 5: the global graph-submit budget across all graph classes (the ~950-cycle dext envelope; fence resets it) |
+| `MM_MTP=1` | MoE: the first-party MTP K=4 chain as the default miss path (prose 19.1 -> 40.1 tok/s through the API; kill-switch = 0; draft-source-only, not an fp knob) |
+| `MM_MODEL` / `MM_PACKED` / `MM_CTXS` / `MM_SPEC` / `MM_LK` | MoE engine: the gguf path, the packed-slab dir, the context capacity, the lookup-spec mode, the deep-K scan arm |
+| `PC_ROOT` / `PC_QUOTA_GB` | per-model durable prompt-cache root + quota (30 GB dense / 26 GB MoE on the rig) |
 | `BATCH_B=2` (+ R6 knobs) | the opt-in batch serving mode — see [SERVING.md](SERVING.md) and [history/R6_BATCH.md](history/R6_BATCH.md) before flipping |
 | `DO_T1=0` | (bench harness) skip the T=1 reference pass |
 

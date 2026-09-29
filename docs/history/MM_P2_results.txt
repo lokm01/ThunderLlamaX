@@ -1,0 +1,127 @@
+MM P2 — RESULTS (2026-09-24, GLM implementation agent; the MoE layer is REAL)
+Harness MM_P2_run.py (runs 1-7; the gate record = run 7, the first fully-green run);
+ports/refs MM_P2_ports.py; kernels MM_P2_*.cu; trunk generator gen_m36.py.
+ALL GATES GREEN (progress file ~/mm_p2_progress.txt, fsync'd per line):
+
+═══ ITEM 1 — gx8e256dn (down-proj grouped GEMV) + THE Q6_K DECISION ═══
+  gx8e256dn  (IQ4_XS lane, 37 modal layers): A/B vs gxdn4_ref on REAL L00
+    down bytes (experts 0-7): FP16-BIT-EXACT, det x2 OK, 0 spill, REG 60.
+  gx8e256dn6 (Q6_K lane, L34/38/39): A/B vs gxdn6_ref on REAL L34 bytes:
+    FP16-BIT-EXACT, det x2 OK, 0 spill, REG 63.
+  gx8e256up4 (IQ4_XS gate+up lane, L39 only): A/B vs gxup4_ref on REAL L39gu
+    bytes: allclose (expf-silu ULP), det x2 OK, 0 spill, REG 64.
+  In-graph: the S3b trains [rmsz->rt->gxup->gxdn6] (L34) and
+  [rmsz->rt->gxup4->gxdn6 split banks] (L39) x256 wait-each: CLEAN, det OK
+  (0.77 / 0.56 ms/cyc at P=3); the modal lane's in-graph is the S3 slice below.
+  THE Q6_K DECISION — TWO KERNELS (dn/dn6), not a unified lane:
+    (a) the block geometries differ fundamentally (272B = 2x136B IQ4_XS rows vs
+        420B = 2x210B Q6_K rows; nibble-LUT decode vs ql/qh/sc bit-unpack) and a
+        runtime class switch per block bloats regs/instrs risking the 0-spill law;
+    (b) graphs are per-layer anyway (each layer uses exactly ONE down class) --
+        a second cubin symbol costs ZERO extra nodes (the layer's node just binds
+        its lane kernel; kernargs identical shape);
+    (c) SASS audit: dn 60 REG / dn6 63 REG, both STACK:0 LOCAL:0 -- clean split.
+    REJECTED alternative (requant Q6_K downs -> IQ4_XS at repack): breaks the
+    Tier-1 contract (b) "expert bodies bit-exact GIVEN ids" vs the llama.cpp
+    reference dequants for 3/40 layers -> the stock-bank greedy gate would fail.
+    The per-layer ptbl handles the address differences: L34/38 down at
+    slab+901120 in the single bank; L39 down at the SPLIT dn-bank base+0.
+  NEW LAW-GRADE BUG CLASSES found on the way (all fixed, all general):
+    1. THE IQ4_XS NIBBLE LAW: elements 0-15 of a 32-group = LOW nibbles of bytes
+       0-15; elements 16-31 = HIGH nibbles. Byte index = (l & 15), high/low by
+       (l >> 4) -- NOT byte (l >> 1) by parity. (Cost: run-1 all-wrong; the CPU
+       kernel-semantics simulator caught it in minutes.)
+    2. THE UNSIGNED-SUBTRACT TRAP: (x & 0xFu | y << 4) - 32 in C UNSIGNED
+       arithmetic WRAPS to ~4.29e9 for x < 32. The llama.cpp reference casts to
+       int8_t BEFORE subtracting; hand kernels MUST (int)(...) - 32.
+    3. THE PAIR-VS-POS LAW: gx up-kernels consume the SHARED hn (pos-addressed,
+       8 pairs -> 1 row); the dn consumes PER-PAIR moe_act [NPAIR][512]
+       (pair-addressed). A P=1 test cannot distinguish them -- the slice (P=3)
+       is the minimum discriminating shape (exactly one good pair per position).
+    4. hrot-style drift kernels stamp their FULL row range: an [88][2048]-writer
+       over a [3][2048] buffer = 680KB OOB per replay -> progressive-corruption
+       device fault at ~256 replays (run-1 S3g). Buffers must be sized to the
+       MUTATOR, not the consumer.
+
+═══ ITEM 2 — mx8e256cmb (combine) + THE SHARED EXPERT ═══
+  mx8e256cmb: fixed-rank-order fp32 (r=0..7 asc, then sg*shared), fp16 store:
+    A/B vs cmb_ref FP16-BIT-EXACT, det OK. REG 40, 0 spill.
+  shexp8 (the shared-expert FFN, q5g8v-class retargeted to 2048-hidden on the
+    GGUF-native Q8_0 shared tensors; one CTA/position, fused dual-dot phase A
+    silu(g)*u -> smem t[512] -> down phase B): A/B vs shexp_ref on REAL L00
+    tensors: allclose maxdev 1.86e-09 (expf ULP), det OK. REG 63, smem 2048B.
+  rmsz2048 (RMSNormZeroCentered (1+w), eps = fp32(1e-6) from the GGUF kv):
+    A/B vs rmsz_ref BIT-EXACT (IEEE sqrtf+div, per-thread strided partials,
+    warp-asc sequential sum), det OK. REG 25. The dense 27B default is untouched
+    (separate cubin; manifest-selected).
+
+═══ ITEM 3 — THE FIRST SINGLE-LAYER MoE SLICE (layer 0, REAL everything, P=3) ═══
+  h_in -> rmsz2048 -> [rt8e256 -> gx8e256up -> gx8e256dn] ||
+  shexp8 -> mx8e256cmb -> h_out, on the REAL 373MB L00 bank + real F32 router +
+  wsh + norm + Q8_0 shared expert, seeded h.
+  EAGER A/B vs the full numpy slice ref: ids EXACT, hn EXACT (bit-equal norm),
+  gates/sg OK (expf ULP), act OK, shared OK, parts OK, y OK; det x2 exact.
+  IN-GRAPH [hrot -> rmsz -> rt -> shexp -> gxup -> gxdn -> cmb] x256 wait-each
+  (two alternating trains): ids EXACT vs the rt ref on the FINAL DRIFTED h,
+  full y A/B OK, det x2 OK — THE MOMENT THE MoE LAYER BECAME REAL.
+  Numbers: 1335 us/cycle = 1.335 ms per FULL LAYER-CYCLE at P=3 (K=2 shape)
+    -> 38 GB/s effective on 51.3 MB/cycle (pacing-dominated at this small
+    shape: the wait-each host pacing is ~0.3-0.6 ms/replay per P1; the 4-kernel
+    L34/L39 exception trains run 0.77/0.56 ms; kernel-only at the K=8 shape
+    will be the P3 measurement). 40-layer projection at this v0 wiring:
+    ~53 ms/token-class MoE stack at K=2 — the P3/P4 optimization surface.
+
+═══ ITEM 4 — TRUNK RETARGET (hidden 5120 -> 2048; gen_m36.py) ═══
+  The dimension-parameterized generator emits the 2048-hidden dense families
+  reading GGUF-NATIVE trunk bytes (Q8_0 projections / F32 router+norms / Q8_0
+  embed / Q6_K head) — no repack needed (all rows 16B-aligned at these shapes:
+  2176/4352/544/1680B). Families x dims x audits (all STACK:0 LOCAL:0):
+    gv8k2048  REG 40 | gv8k4096 REG 40 | gv8k512 REG 40 | rmsz2048 REG 25
+    embg248   REG 30 | h8i2048  REG 64
+  GATES on REAL tensors (all BIT-EXACT vs the numpy ports + det x2 OK):
+    gv8k2048 [blk_0 attn_qkv 8192r] | [blk_3 attn_q DOUBLED 8192r] |
+    gv8k4096 [blk_0 ssm_out 2048r] | [blk_3 attn_output 2048r] |
+    gv8k512  [blk_0 ffn_down_shexp 2048r] | gv8k2048 [blk_3 attn_k 512r] |
+    embg248  [the REAL 540MB embed table; ids 0/1/12345/248319/300000/999999/
+              -7/4242 incl. the >vocab clamps] |
+    h8i2048  [int8-g128 synthetic 256r; quantizer h8i_quant landed in ports]
+  THE DOUBLED-Q MAPPING (noted): attn_q [2048,8192] is ONE gv8k2048 output;
+  rows 0..4095 = Q (16 heads x 256), rows 4096..8191 = the sigmoid gate. No
+  kernel variant needed — the split is a consumer offset; the gate-sigmoid fuse
+  belongs to the P4 attention epilogue.
+  DEFERRED to P5 (needs tokenizer stats): the h8i slice SELECTION (which 40960
+  vocab rows) — the kernel family + quantizer are landed and gated.
+
+═══ ITEM 5 — K-MIX GRAPH-VARIANT MANIFEST (design only) ═══
+  MM_P2_kmix_manifest.md: D2 (K=2 prose default) + D8 (K=8 deep-on-trigger,
+  LOOKUP_TRIG=2-class with hysteresis) + PF (prefill, P7) + B2 (reserve) = 4 of
+  the <=8 budget; ~500-520 nodes/cycle; cubin inventory; ~46KB/variant kernargs
+  slabs (the ka-slab leak is the real line); VRAM ~20.1 GiB @96k with 9 GDN
+  state slots (K=8 max, K=2 reuses a subset).
+
+═══ PORTS (MM_P2_ports.py) — the correctness substrate ═══
+  dq_q6_k + dq_q8_0 numpy ports VERBATIM from ggml-quants.c, cross-validated
+  BIT-EXACT vs the compiled llama.cpp C reference on REAL bytes (L34 Q6_K down
+  experts 0/7/123; L00 shexp gate+down). Kernel-order refs for every kernel
+  (the Q6_K lane is a GATHER not a reshape: l + {0,32,64,96}). The C ref
+  builder now covers all 5 classes (iq2_s/iq3_s/iq4_xs/q6_k/q8_0).
+
+═══ OPS ═══
+  Engine launchd service: disabled FIRST (survived both reboots), bootout ->
+  GPU-EXIT reboot; session spans 7 harness runs + 3 reboots; RE-ENABLED at
+  session end (launchctl enable + bootstrap, /health verified).
+
+═══ HANDOFF TO P3 (the decode graph assembly: 40 layers + GDN/attn) ═══
+  1. Wire the 40-layer train: per-layer MoE nodes (this session's kernels, the
+     per-layer lane kernel + ptbl from manifest.json; L39 = two tables) + the
+     P4 GDN/attn trunk ports + embed/head + draft/accept per K (the K-mix
+     manifest). Depth-1, wait-each, 256-cycle GLOBAL rebuild.
+  2. The h contract: fp32 [P][2048] trunk; fp16 only at cmb store + KV.
+  3. ka-slab reuse (the leak) BEFORE soak-class runs; S3g's 7-node x 256 x 2
+     clean is the floor proof; 520-node budget untested.
+  4. Perf surface: 1.335 ms/layer-cycle at P=3 is v0 wiring (pacing-heavy);
+     kernel-only K=8 shape measurement + the gx kernel-count-vs-shape sweep
+     (24 vs 72 pair CTAs) is P3's first bench. The P1 146 GB/s @704-pair and
+     D6's @240 GB/s envelopes remain the targets.
+  5. Quality: D7 oracle still PENDING (needs a Linux box) — IQ2_S gate/up risk
+     only affects the iq3_s fallback tier, not this iq4_xs primary.

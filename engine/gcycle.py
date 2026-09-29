@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """W1-c G_CYCLE: capture the ENTIRE per-token program (embed -> 64 blocks -> head
 -> argmax, 452 kernels) as ONE bound NVComputeQueue per conv-parity = ONE gpfifo
 entry + doorbell per token. Kernels chain via QMD dependent pointers inside the
@@ -53,6 +50,12 @@ class ParityGraph:
     # 452 kernels chain inside QMDs, so _q is only a few dozen words.
 
   def submit(self, prev_v, cur_v):
+    # L7 FIX 5 (the R6 GRAPH-CLASS PREFILL BUDGET law): count EVERY graph
+    # class against the global dext budget — prefill chunk replays spent the
+    # ~950-cycle envelope invisibly while the engine's rebuild counters
+    # tracked decode cycles only. serve.py consults/reset dev.global_cycle_ctr
+    # (env TLX_GLOBAL_CYCLE_REBUILD_EVERY; 0 = off restores legacy blindness).
+    self.dev.global_cycle_ctr = getattr(self.dev, "global_cycle_ctr", 0) + 1
     self.q.submit(self.dev, {self.prev_var.expr: int(prev_v), self.cur_var.expr: int(cur_v)})
 
 class GCycleEngine:

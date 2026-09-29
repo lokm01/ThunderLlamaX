@@ -12,10 +12,15 @@ attaching an NVIDIA RTX 3090 eGPU over Thunderbolt 4. macOS supports no eGPU
 on Apple Silicon and ships no NVIDIA driver, so this project brings its own:
 an open DriverKit driver that talks raw PCIe to the GPU (no CUDA runtime, no
 CUDA driver, no NVIDIA userspace), a hand-written kernel engine, and an
-OpenAI-compatible API on top. The result: **75.81 tokens per second** decode
-at 100k-token context on Qwen3.8-27B — **bit-exact** against greedy decoding
-— with 569/510/342 tok/s prefill and a durable prompt cache that restores a
-100k context in ~6.5 seconds. Local inference, on a Mac, at workstation speed.
+OpenAI-compatible API on top. The result: **two models served from one
+service** — Qwen3.8-27B dense at **75.81 tokens per second** decode
+(bit-exact against greedy decoding, 100k-token context, 569/510/342 tok/s
+prefill) and Qwen3.6-35B-A3B MoE at **97.6-104 tok/s** quote-class /
+**40.1 tok/s** prose-class — with a durable prompt cache that restores a
+100k context in ~6.5 seconds, speculative decoding that drafts from the
+document being read AND from the model's own MTP layer, and a model
+registry that swaps residents through a crash-safe lifecycle. Local
+inference, on a Mac, at workstation speed.
 
 The X reads as *ten*: K=10 speculative depth is the signature number
 (75.81 tok/s, bit-exact, see below).
@@ -30,29 +35,35 @@ dext, `pcache`.
 
 | Capability | Detail |
 |---|---|
-| OpenAI-compatible API | `/v1/chat/completions` (stream + non-stream + usage), `/v1/models`, `/health` on 127.0.0.1:8080 |
-| Model class | Qwen3.8-27B hybrid (48 gated-delta-net + 16 full-attention blocks), IQ3_XXS GGUF body |
-| Context | 100,352-token KV; gates run at a 97,810-token prompt |
-| Decode speed @100k ctx | **75.81 tok/s** hit-class / ~15.1 prose-class (see honesty section) |
-| Prefill speed | **569.2 tok/s @2k · 510.1 @8k · 342.0 @100k** (Tier-2 default; bit-identical Tier-1 path one env away) |
+| OpenAI-compatible API | `/v1/chat/completions` (stream + non-stream + usage), `/v1/models` (with per-model residency), `/health` on 127.0.0.1:8080 |
+| Models | **Qwen3.8-27B** dense hybrid (48 gated-delta-net + 16 full-attention blocks, IQ3_XXS) · **Qwen3.6-35B-A3B** MoE (30 GDN + 10 attn blocks, 256 routed experts top-8 + shared, ~3B active, UD-IQ4_XS) |
+| Context | 100,352-token KV (dense) / 98,304 (MoE); gates run at a 97,810-token prompt |
+| Decode speed, quote-class @100k | **75.81 tok/s** dense (K=10 LOOKUP) · **97.6-104.0 tok/s** MoE (K=8 LOOKUP) — bit-exact in both |
+| Decode speed, prose-class | **20.6 tok/s** dense (adaptive T=1 mode) · **40.1 tok/s** MoE (first-party MTP K=4) |
+| Speculative decoding | n-gram LOOKUP from the document being read (K up to 10) **plus the model's own MTP layer as a first-party drafter** (K=4 chain, 0.875 depth-1 acceptance) |
+| Prefill speed (dense) | **569.2 tok/s @2k · 510.1 @8k · 342.0 @100k** (Tier-2 default; bit-identical Tier-1 path one env away); MoE chunk-256 prefill 181-204 tok/s @2k-16k |
+| Multi-model serving | A model registry (`model_registry.json`), per-model env files + caches, `enginectl switch` — one resident at a time, 409 `model_not_resident` with a switch hint |
 | Batch mode (opt-in) | B=2 concurrent streams, per-stream bit-exact; 81.33 tok/s engine-class harness aggregate / honest 1.20x service-measured — see honesty section |
-| Prompt cache | A 100k context restores in **~6.5 s** vs ~13 min fresh; survives restarts |
+| Prompt cache | A 100k context restores in **~6.5 s** vs ~13 min fresh; survives restarts; per-model roots + quotas |
 | Follow-up turns | Resident conversation state: a 200-token turn @2k-class in **~2.1 s** vs ~6.1 s fresh |
 | Supervised operation | launchd supervisor + circuit breaker + env single-sourcing + boot-time kernel tripwires; survives GPU-fault reboots |
-| Exactness | **Bit-exact by default** — the speculative stream is token-for-token identical to a non-speculative greedy rollout (Tier-1) |
+| Exactness | **Bit-exact by default** — every speculative mode emits the identical token stream a non-speculative greedy rollout produces (Tier-1) |
 
 ## Qwen on a Mac with an RTX 3090: the benchmark numbers
 
-All decode numbers are greedy, at 100k-token context (97,810-token prompt), on
-the reference rig (RTX 3090 24 GB in a TB4 enclosure, MacBook Air M2).
-"Tier-1" means bit-exact (see FAQ). Full context and the complete ladders:
+All decode numbers are greedy, at full model context (97,810-token prompt
+for the dense model; the 96k split for the MoE), on the reference rig
+(RTX 3090 24 GB in a TB4 enclosure, MacBook Air M2). "Tier-1" means
+bit-exact (see FAQ). Full context and the complete ladders:
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+
+**Qwen3.8-27B (dense):**
 
 | Metric | Value |
 |---|---|
 | Decode, K=10 deep-K LOOKUP (hit-class workload) | **75.81 tok/s** (~118 ms/cycle, 8.92 tok/cycle; R8 + the W5 re-validation, ladder ... -> 71.51 -> 74.70 -> 75.56 -> 75.81-through-the-fixed-stack) |
 | Decode, K=9 / K=8 / K=7 / K=2 rungs (same engine) | 74.70 / 71.5-72.0 / 63.11 / 40.35 tok/s |
-| Decode on novel prose (0 lookup hits, honest floor) | ~15.1 tok/s — the deep-K gain is workload-dependent, see FAQ |
+| Decode on novel prose (adaptive T=1 mode, shipped) | **20.56 tok/s** (was 14.67 pure-spec; output bit-identical) |
 | T=1 engine, no speculation, @100k | 21.78 tok/s (45.92 ms/token) |
 | Prefill FRESH @2k / @8k / 100k rebuild — Tier-2 W4A8 (default) | **569.2 / 510.1 / 342.0 tok/s** (+7.3/+6.4/+4.3% over Tier-1) |
 | — same, Tier-1 bit-identical path (kill-switch) | 530.6 / 479.4 / 328.0 tok/s |
@@ -61,19 +72,37 @@ the reference rig (RTX 3090 24 GB in a TB4 enclosure, MacBook Air M2).
 | Tier-1 gate: speculative == greedy T=1 rollout | **60/60 bit-exact, x2 deterministic; 59/59 vs stock tinygrad** |
 | Deep-K acceptance (K=10) | E[m\|deep] = 10.000 — 92/92 deep cycles accept ALL TEN; 76.7% deep hits |
 
+**Qwen3.6-35B-A3B (MoE, through the full API, MTP mode default):**
+
+| Metric | Value |
+|---|---|
+| Decode, quote-alpha / quote-code (K=8 LOOKUP class) | **97.6 / 104.0 tok/s** |
+| Decode, quote-docx2 | 65.9 tok/s (+160% over the T=1-only daemon) |
+| Decode, novel prose (first-party MTP K=4 chain) | **40.1 tok/s** prose-0 / 39.1 prose-1 / 29.9 prose-9 (was 19.1 T1-only) |
+| MTP acceptance (depth-1 / E[acc]@K=4) | **0.875** / 2.58-3.08 accepted drafts per cycle |
+| T=1 decode @64k-96k | 17.2-17.3 tok/s (57.8 ms/cycle) |
+| Prefill, chunk-256 (bit-exact class) | 181-204 tok/s @2k-16k; full 96k feed ~800 s end-to-end |
+| Tier-1 gate through the daemon | 60/60 mtp == t1 bit-exact, x2 deterministic (60-prompt bank) |
+| Prompt-cache hit | continuation EXACT vs the FRESH arm (G4); ~76 MB per 1k-token node |
+
 **Audited, not just benchmarked.** Before this snapshot was published, the
-whole stack went through an external-model review: 10 model reviews produced a
-60-finding ledger (3 P0 / 23 P1 / 25 P2 / 9 P3), which landed as five fix
-waves — serving correctness (SSE slot lifetime, per-conversation locks,
-stop/think semantics), security/ops (socket trust boundary, admin-token ACL,
-config-fingerprint drift 503s, a persistent-breaker launchd supervisor,
-single-sourced environment), prompt-cache hardening (fsync+sha256 durability,
-transactional restore, backpressure), engine tripwires (boot-time launch-grid
-and spill-frame asserts, K-rung manifests, a 782-cubin census), and a live
-re-validation on the rig: 85/85 GPU-free tests, Tier-1 decode re-gated at
-75.81 tok/s, api gates 25/25, a 15-min soak with zero faults. The full record,
+whole stack went through repeated external-model review: a 10-review audit
+that became a 60-finding ledger and five fix waves — serving correctness
+(SSE slot lifetime, per-conversation locks, stop/think semantics),
+security/ops (socket trust boundary, admin-token ACL, config-fingerprint
+drift 503s, a persistent-breaker launchd supervisor, single-sourced
+environment), prompt-cache hardening (fsync+sha256 durability, transactional
+restore, backpressure), engine tripwires (boot-time launch-grid and
+spill-frame asserts, K-rung manifests, a 782-cubin census) — then a live
+re-validation (Tier-1 decode re-gated at 75.81, 15-min soak, zero faults).
+A second 51-finding round (R3) hardened the serving layer again
+(liveness/watchdogs, event-loop admission, integrity, OpenAI-conformance
+error enums, a real-listener test harness), L7 closed the abort-safety
+class that crashed the box under cancelled prefills, and the multi-model
+campaign carried its own gate battery end-to-end (the full record,
 including the findings that remain open, is
-[docs/history/FIX_CAMPAIGN.md](docs/history/FIX_CAMPAIGN.md).
+[docs/history/FIX_CAMPAIGN.md](docs/history/FIX_CAMPAIGN.md) +
+[docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) and the MM_P* journals).
 
 ## Can you use an eGPU with Apple Silicon?
 
@@ -128,24 +157,56 @@ What this project does instead:
 ## How it works (the engine, in plain language)
 
 **A hand-written kernel engine instead of a framework.**
-The decode loop is not built on a tensor framework's scheduler. It is ~350
+The decode loop is not built on a tensor framework's scheduler. It is ~390
 hand-written CUDA kernels (dequant-GEMVs, a fused gated-delta-net scan,
-split-KV flash attention with int8 KV and tensor-core dots), static
+split-KV flash attention with int8 KV and tensor-core dots, and — for the
+MoE model — the router / gather-GEMV / combine / split-KV quartet), static
 pre-allocated buffers, and the whole per-token program captured into a handful
-of GPU graphs — so one token cycle costs about one doorbell ring of host work.
-Weights live in offline-repacked, alignment-lawed planes (`packed7`/`packed5`)
-that serve decode and prefill from one resident copy.
+of GPU graphs — so one token cycle costs about one doorbell ring of host work
+(the MoE engine folds accept/commit fully on-device: ~0.2 ms host per cycle).
+Weights live in offline-repacked, alignment-lawed planes (`packed7`/`packed5`;
+expert-major slabs for the MoE) that serve decode and prefill from one
+resident copy.
 
-**Speculative decoding that drafts from the document being read — and
-verifies bit-exactly.**
+**Speculative decoding that drafts from the document being read — and from
+the model itself — while verifying bit-exactly.**
 While ingesting or revisiting long documents, the model's own context is the
 best drafter: a GPU-side n-gram scan finds where the current 8-token suffix
 last occurred and proposes the next K tokens from history (K has climbed
-2 -> 10; that's the X). A T=K+1 probe verifies all proposals in one batched
-pass, and — the load-bearing trick — **every batched kernel preserves the
-single-token kernel's floating-point op order exactly, so acceptance can never
-flip a near-tie**: the speculative stream is bit-identical to plain greedy
-decoding, at 8.9 tokens per cycle on hit-class work.
+2 -> 10; that's the X). On novel prose — where there is nothing to copy —
+the engines now ship their own answers: the dense model adaptively switches
+to lean T=1 cycles when drafting stops paying (+40% prose), and the MoE
+model runs a **first-party MTP K=4 chain**: the model's own multi-token
+prediction layer (the `blk.40` head the checkpoint ships for exactly this)
+drafts four tokens ahead of the verifier, accepting 0.875 of first drafts.
+In every mode the load-bearing trick is the same: **every batched kernel
+preserves the single-token kernel's floating-point op order exactly, so
+acceptance can never flip a near-tie** — the speculative stream is
+bit-identical to plain greedy decoding, at 8.9 tokens per cycle on
+hit-class work.
+
+**A second architecture: the MoE engine (four new kernel classes).**
+The Qwen3.6-35B-A3B port (256 routed experts + 1 shared per layer, ~3B of
+~35B parameters active per token) needed four genuinely new hand-kernel
+shapes on this dext: a **deterministic router** (fp32 top-8 with
+tie-to-lower-id, no sorts, no runtime-indexed locals), a **gather-GEMV**
+that walks the selected experts' packed slabs in a fixed order through
+device-side pointer tables, a **fixed-rank-order combine** with the shared
+expert folded in, and a **split-KV attention** retargeted to the model's
+head geometry. Accept and commit moved fully on-device (the "host fold" —
+~0.2 ms of host work per cycle). Full story:
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) + the
+[docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) campaign.
+
+**Multi-model serving: a registry, not a lie.** One 24 GB card holds one
+model, so the service says so: `ops/model_registry.json` declares the
+models (engine host, env file, context cap, cache root), `/v1/models` shows
+which is **resident / loadable / unavailable**, a request naming a
+non-resident model gets a clean **409 `model_not_resident`** with a switch
+hint, and `enginectl switch <id>` performs the deliberate swap — intent
+written atomically before the stop, the platform's GPU-exit reboot used AS
+the transport, the target promoted on the way back up. Each model keeps its
+own prompt-cache root and quota. [docs/SERVING.md](docs/SERVING.md).
 
 The third quiet idea: **honesty as a feature**. Numbers come with their gate
 context, the walls are measured and published, and the workloads where this
@@ -162,7 +223,7 @@ rig does and doesn't shine are written down (see FAQ and
 | Host RAM | >= 16 GB | 16 GB |
 | macOS + dext | TinyGPU DriverKit system extension (`org.tinygrad.tinygpu.driver2`) installed and active | — |
 | Toolchain | Python 3.11 + numpy; tinygrad fork (patch in `patches/`); Docker (Colima) with a CUDA 12.8 `nvcc` image for cubin builds (build-time only) | — |
-| Model files | Qwen3.8-27B GGUF (IQ3_XXS body) — **not included**; the offline repacker builds the engine's weight planes | — |
+| Model files | Qwen3.8-27B GGUF (IQ3_XXS body) and/or Qwen3.6-35B-A3B UD GGUF (IQ4_XS/IQ3_S) — **not included**; the offline repackers build each engine's weight planes | — |
 
 Full details, paths, and gotchas: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
 
@@ -212,14 +273,15 @@ if you need a 70B-class model resident and can wait, unified memory wins.
 
 ## Performance
 
-The condensed table is above; the full story — decode ladder 40 -> 75.81,
-prefill ladder 21.8 -> 569.2, the benchmark methodology (what "Tier-1
-bit-exact" means as a gate contract), cache timings, and the measured walls —
-is [docs/PERFORMANCE.md](docs/PERFORMANCE.md). For comparison context: the
-same GPU class running a tuned native-Linux vLLM stack does 86 tok/s decode /
-662 tok/s prefill @100k — ThunderLlamaX's decode is at 88% of that reference
-from behind a Thunderbolt cable and a userspace driver, and the gap that
-remains is measured and explained, not hand-waved.
+The condensed tables are above; the full story — decode ladder 40 -> 75.81
+(dense) and the MoE/MTP numbers, prefill ladder 21.8 -> 569.2, the benchmark
+methodology (what "Tier-1 bit-exact" means as a gate contract), cache
+timings, and the measured walls — is [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
+For comparison context: the same GPU class running a tuned native-Linux
+vLLM stack does 86 tok/s decode / 662 tok/s prefill @100k on the dense
+model — ThunderLlamaX's decode is at 88% of that reference from behind a
+Thunderbolt cable and a userspace driver, and the gap that remains is
+measured and explained, not hand-waved.
 
 ## FAQ
 
@@ -275,11 +337,24 @@ gates; see [docs/PERFORMANCE.md](docs/PERFORMANCE.md#tier-2-the-one-authorized-n
 
 **75 tok/s sounds too good — what's the catch?** The deep-K speedup comes
 from the model re-reading text it already has (documents, code, quotes,
-repetitions). On the gate workload (a 100k prompt with a repeat region) it
-sustains 75.81; on novel prose the n-gram drafter never fires and the engine
-runs its K=2 path at ~15.1 tok/s. Both numbers are measured and published —
+repetitions). On the gate workload (a 100k prompt with a repeat region) the
+dense engine sustains 75.81; on novel prose the n-gram drafter never fires —
+and that's exactly where the two shipped prose modes kick in: the dense
+engine detects the dead drafter and switches to lean T=1 cycles (20.56
+tok/s, output bit-identical to the speculative stream), and the MoE engine
+runs its first-party MTP K=4 chain (40.1 tok/s through the API, 0.875
+first-draft acceptance). All of these numbers are measured and published —
 see "What this rig can and can't do" in
 [docs/PERFORMANCE.md](docs/PERFORMANCE.md#what-this-rig-can-and-cant-do-measured).
+
+**Can it serve more than one model?** Yes — that's the model registry:
+declare models in `engine/ops/model_registry.json`, and the service exposes
+all of them through `/v1/models` (with residency status). One model is
+resident at a time (one 24 GB card, one engine); `enginectl switch <id>`
+swaps residents through a crash-safe lifecycle, each model keeps its own
+prompt cache, and requests naming a non-resident model get a clean 409 with
+a switch hint instead of a wrong-model answer. Two ship today: the
+Qwen3.8-27B dense engine and the Qwen3.6-35B-A3B MoE engine.
 
 **And the batch number?** The B=2 batched-decode mode (R6) is opt-in and
 honest about what it buys: 81.33 tok/s aggregate in the engine harness
@@ -306,35 +381,44 @@ reference, the same GPU on a tuned native-Linux stack does 86 tok/s decode
 @100k; we measure, publish, and explain the remaining gap.)
 
 **Do I need the model weights?** Yes, separately — Qwen3.8-27B in GGUF
-(IQ3_XXS body; per-layer quant mix is fixed in the engine). Weights are
-governed by their own license and are not part of this repo. The repacker
-(`engine/pack_*.py`) builds everything else.
+(IQ3_XXS body; per-layer quant mix fixed in the engine) and/or
+Qwen3.6-35B-A3B in a UD GGUF tier (IQ4_XS ships; IQ3_S measured). Weights
+are governed by their own license and are not part of this repo. The
+repackers (`engine/pack_*.py`, `engine/mm/pack36.py`) build everything
+else.
 
 **Sampling / temperature?** Greedy only, so far — temp=0 keeps the bit-exact
 contract trivially. The sampling kernel is roadmap (M2).
 
 ## Project status + roadmap
 
-**Status (2026-09-24):** the service is real and daily-driven — daemon +
+**Status (2026-09-29):** the service is real and daily-driven — daemon +
 OpenAI API + prompt cache under the launchd supervisor, with the environment
-single-sourced (`engine/ops/env.canonical`, generated from the published
-`env.canonical.example`) and the kernel set asserted against rung manifests at
-every boot. The decode K-ladder is **finished at K=10** (increments fell
-below +1 tok/s/rung; the ladder's shape is measured), and the whole stack
-carries the five-wave review-fix campaign's audit record
-([docs/history/FIX_CAMPAIGN.md](docs/history/FIX_CAMPAIGN.md) — including its
-open findings). Prefill sits at its Tier-2 ship with the "750 tok/s" question
-honestly closed (the x4.58 IMMA reading that motivated it was a measurement
-frame artifact; the true advantage is x1.06 — full story in
-[docs/history/T2_P8W4.md](docs/history/T2_P8W4.md)). Batch serving (B=2,
-per-stream bit-exact) ships as a documented opt-in.
+split per model (`env.common` + `env.canonical.d/<model>.env`, generated
+from the published examples) and the kernel set asserted against rung
+manifests at every boot. **Two models serve from the one registry**: the
+dense Qwen3.8-27B (K=10 decode finished at 75.81; adaptive T=1 prose mode
+shipped at +40%) and the MoE Qwen3.6-35B-A3B (K=8 quote at 97.6-104 tok/s;
+first-party MTP K=4 prose at 40.1 — the multi-model campaign MM P0-P10,
+including its honestly-falsified fusion, is
+[docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) + the MM_P* journals).
+The serving layer carries two full review campaigns (the W1-W5 fix waves +
+the 51-finding R3 hardening) and the L7 abort-safety protocol; the GPU-free
+battery is ~180 tests across serving/api/pcache/L7/P8/swap-FSM. Prefill
+sits at its Tier-2 ship with the "750 tok/s" question honestly closed
+(full story in [docs/history/T2_P8W4.md](docs/history/T2_P8W4.md)). Batch
+serving (B=2, per-stream bit-exact) ships as a documented opt-in.
 
 **Roadmap (roughly ordered):**
 - The pcache T1-boundary node class — restore bit-exactness for
   midprefill/turnend CACHE_HIT continuations (FIX_CAMPAIGN finding #5, the
   one open exactness item; FOLLOW_UP, the hot path, is unaffected).
-- The prose-class lever: a DFlash2-class block drafter (draft-alpha program) —
-  the only measured route past ~15 tok/s on novel text.
+- MoE decode compression via fewer weight passes per layer (the corrected
+  P10-B route: the single-CTA expert quartet doing one weight sweep), not
+  launch-count fusion.
+- MoE long-ctx (96k) MTP alpha battery; the dense first-party-MTP question
+  (its shipped drafter is vocab-slice-limited — a full-vocab head retest is
+  priced).
 - M2: the sampling kernel (temp>0, distribution-exact contract).
 - Persistent-CTA GEMM megakernel — the remaining measured prefill route
   (159 ms/chunk GEMM pool; meet-based warp-spec and X-widening are falsified).
@@ -342,20 +426,29 @@ per-stream bit-exact) ships as a documented opt-in.
   campaign), not more wiring.
 - CTA/SM unlock investigation at the driver level (the 1-CTA/SM limit is the
   structural tax behind the remaining walls; the QMD construction is ours).
+- Other GPUs (sm_86 is the one tested class) + hardening for non-reference
+  hosts; the engine as a more generic Mac-eGPU framework.
 - Anthropic-style thin adapter (outside the engine process).
 
 ## Repository layout
 
 ```
-engine/      the DraftHorse engine: ~300 python driver files + ~350 hand-CUDA
+engine/      the DraftHorse engine: ~330 python driver files + ~390 hand-CUDA
              kernel sources (.cu) — trunk, MTP + deep-K LOOKUP cycle (K=2..10
              kernel sets + rung manifests), graph replay, batched prefill,
              prompt cache, serving daemon + api_server, the B=2 batch engine,
-             kernel builders + gen_m5..11 generators, decider harnesses
-engine/tests/ the GPU-free mock battery (85 tests: serving, api, pcache,
-             manifest/tripwire laws)
-engine/ops/  serving ops: enginectl, launchd plists, the supervisor wrapper,
-             env.canonical.example (generate your env.canonical from it)
+             kernel builders + gen_m5..11 generators, decider harnesses;
+             serve_moe.py/pcache_moe.py/test_moe36.py = the MoE daemon bridge
+engine/mm/    the MoE campaign workbench: the router/gather-GEMV/combine/
+             split-KV kernel sources, the repacker (pack36), the MTP chain
+             (MM_P9_mtp), the harness libs + Tier-1 banks
+engine/tests/ the GPU-free mock battery (~180 tests: serving, api, pcache,
+             manifest/tripwire laws, L7 abort-safety, P8 multi-model +
+             swap-FSM, the real-listener harness)
+engine/ops/  serving ops: enginectl (+ model registry / switch), launchd
+             plists, the supervisor wrapper, env.common.example +
+             env.canonical.example + per-model env.canonical.d/
+engine/docs/ the R3 serving runbook (knob census, drift 503s, alarms)
 tools/       standalone probes: dext bandwidth bench, graph-budget probe,
              bootstraps, sync-cost microbench
 lineage/     the pre-engine tinygrad-stack MTP work (historical; needs the fork)

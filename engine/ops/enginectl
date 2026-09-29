@@ -7,9 +7,18 @@
 #     socket shutdown RPC (flushes pcache, leaves the staydown marker),
 #     (2) pidfile SIGTERM if the socket is dead, (3) launchctl unload if managed.
 #   - breaker state lives in ~/tinygrad-metal/logs/ (persistent, V-26).
-# Usage: enginectl {start|stop|restart|status|install|uninstall|clear-breaker|logs}
-#        [engine|api|all]
+# Usage: enginectl {start|stop|restart|status|install|uninstall|clear-breaker|
+#                   models|switch|logs} [engine|api|all]
+# TLX P8 multi-model:
+#   models                — list the registry + live state (current/next)
+#   switch <model_id>     — the durable swap: validate -> drain check -> arm
+#                           next_model + swap_in_progress (atomic+fsync+dirfsync,
+#                           BEFORE the shutdown RPC — the reboot law) -> graceful
+#                           stop. The wrapper promotes on the next boot and
+#                           sources the model env; the GPU-EXIT reboot the stop
+#                           provokes is EXPECTED (documented; launchd heals).
 set -u
+SELF=${0:a}   # zsh: $0 inside functions = the function NAME; the script path is captured here
 SVC=${2:-all}
 ENG_LABEL=com.tlx.llm-engine
 API_LABEL=com.tlx.llm-api
@@ -21,11 +30,16 @@ ENGINE_PIDFILE=$LOGS/engine.pid
 STAYDOWN=$LOGS/llm_engine_staydown
 CRASHLOG=$LOGS/llm_engine_crashes.log
 ENVFILE=$OPS/env.canonical
+# P8 multi-model state
+REGISTRY="$OPS/model_registry.json"
+STATEDIR="$OPS/state"
 
 _svc_start() {
   local label=$1 plist=$2
-  if launchctl list "$label" >/dev/null 2>&1; then
-    launchctl kickstart -k "system/$label"
+  # LIVE FIX (L4): the jobs are SYSTEM LaunchDaemons — the user-domain list
+  # never sees them, so start no-op errorred on an already-loaded job.
+  if sudo launchctl list "$label" >/dev/null 2>&1; then
+    sudo launchctl kickstart -k "system/$label"
   else
     sudo launchctl load -w "$plist"
   fi
@@ -44,9 +58,46 @@ _admin_token() {
 socket_shutdown() {
   local tok; tok=$(_admin_token)
   [ -z "$tok" ] && { echo "no TLX_ADMIN_TOKEN in $ENVFILE — cannot do a graceful stop" >&2; return 2; }
-  /usr/bin/python3 - "$ENGINE_SOCK" "$tok" <<'PYEOF'
-import json, socket, sys
-sock, tok = sys.argv[1], sys.argv[2]
+  # R3-23: the token never travels in argv (ps-visible for the call's
+  # lifetime) or a query string.  LIVE FIX (R3 live window): the original
+  # `print "$tok" | python3 - <<PYEOF` hands python the PIPE as its program
+  # on this zsh (a heredoc does not override a pipe for stdin) — the token
+  # text itself was executed as the script (NameError on ANY token; the
+  # graceful stop silently degraded to the SIGTERM/GPU-EXIT fallback, which
+  # rebooted the box live). python now reads the token from ENVFILE; argv
+  # carries paths only.
+  /usr/bin/python3 - "$ENGINE_SOCK" "$ENVFILE" <<'PYEOF'
+import json, os, socket, sys, time
+sock, envf = sys.argv[1], sys.argv[2]
+tok = ""
+try:
+    with open(envf) as f:
+        for ln in f:
+            if ln.startswith("TLX_ADMIN_TOKEN="):
+                tok = ln.split("=", 1)[1].strip()
+                break
+except OSError:
+    pass
+# LIVE FIX (L4): write the persistent staydown marker the moment the daemon
+# ACKS the shutdown — BEFORE its dev.synchronize()/flush (the GPU-EXIT
+# reboot lands inside that window live; a handler-side marker never gets
+# written). Client-side intent + fsync survives the reboot the stop
+# provokes; enginectl clear-breaker removes it like any staydown.
+def _mark(reason):
+    for base in ("~/tinygrad-metal/logs", os.environ.get("TLX_LOGS_DIR", "")):
+        if base and os.path.isdir(base):
+            try:
+                mp = os.path.join(base, "llm_engine_staydown")
+                with open(mp, "a") as f:
+                    f.write(f"{time.time()} {reason}\n")
+                    f.flush(); os.fsync(f.fileno())
+                # L5: a NEW file's dirent needs the parent-dir fsync to
+                # survive the GPU-EXIT HARD reset (file-fsync alone ate it live)
+                dfd = os.open(base, os.O_RDONLY)
+                try: os.fsync(dfd)
+                finally: os.close(dfd)
+            except OSError:
+                pass
 try:
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(10)
     s.connect(sock)
@@ -59,6 +110,9 @@ try:
             if not ch: break
             buf += ch
         print("engine shutdown reply:", buf.decode(errors="replace").strip()[:200])
+        if b'"bye"' in buf:
+            _mark("operator_stop_intent")
+            print("staydown marker written (client-side, fsynced)")
     except Exception:
         pass
     sys.exit(0)
@@ -69,24 +123,164 @@ PYEOF
 }
 
 stop_engine() {
-  if launchctl list "$ENG_LABEL" >/dev/null 2>&1; then
+  # R3-07 (known-open #7): ALWAYS attempt the graceful socket shutdown FIRST —
+  # the old launchd branch unloaded immediately, so launchd SIGTERMed the
+  # wrapper which SIGTERMed the GPU python = the GPU-EXIT/REBOOT class, with
+  # no _clean_exit, no pcache flush, no staydown (contradicting the header
+  # order above). Order: (1) shutdown RPC + wait-for-exit, (2) launchd unload,
+  # (3) pidfile SIGTERM fallback. The wrapper records a SIGTERM-after-graceful
+  # as operator-class (R3-05), never a crash.
+  if [ -S "$ENGINE_SOCK" ]; then
+    socket_shutdown || echo "graceful shutdown RPC failed — continuing" >&2
+    local waited=0
+    while [ "$waited" -lt 15 ] && [ -S "$ENGINE_SOCK" ]; do
+      sleep 1; waited=$((waited+1))
+    done
+    if [ ! -S "$ENGINE_SOCK" ]; then
+      # LIVE FIX (R3 window, L3): the socket unlink is the FIRST thing
+      # _clean_exit does — the flush can run for many seconds AFTER it.
+      # Wait for the pid to actually exit before declaring clean (the old
+      # code SIGTERM'd the flushing daemon and the GPU-EXIT reboot ate the
+      # staydown marker + the wrapper's exit accounting).
+      local pid w2; pid=$(head -1 "$ENGINE_PIDFILE" 2>/dev/null | tr -d '[:space:]'); w2=0
+      while [ "$w2" -lt 45 ] && [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 1; w2=$((w2+1))
+      done
+      if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+        echo "(daemon exited cleanly; staydown honored until clear-breaker)"
+      else
+        echo "(pid $pid still alive after ${w2}s — flush wedged; SIGTERM)" >&2
+        kill -TERM "$pid"
+      fi
+    fi
+  fi
+  if sudo launchctl list "$ENG_LABEL" >/dev/null 2>&1; then
+    # LIVE FIX (L3): the engine job is a SYSTEM LaunchDaemon — a user-domain
+    # `launchctl list` never sees it, so the managed branch never fired.
     echo "(launchd-managed: unloading $ENG_LABEL)"
     _svc_stop_launchd "$ENG_LABEL" "$PLIST_DIR/$ENG_LABEL.plist"
     return
   fi
-  if [ -S "$ENGINE_SOCK" ]; then
-    socket_shutdown && return
-    echo "graceful shutdown failed — trying the pidfile" >&2
-  fi
-  if [ -f "$ENGINE_PIDFILE" ]; then
-    local pid; pid=$(head -1 "$ENGINE_PIDFILE" 2>/dev/null | tr -d '[:space:]')
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-      echo "SIGTERM to engine pid $pid (wrapper will record the exit)"
-      kill -TERM "$pid"
-      return
+  if [ -S "$ENGINE_SOCK" ] || [ -f "$ENGINE_PIDFILE" ]; then
+    if [ -f "$ENGINE_PIDFILE" ]; then
+      local pid; pid=$(head -1 "$ENGINE_PIDFILE" 2>/dev/null | tr -d '[:space:]')
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        echo "SIGTERM to engine pid $pid (wrapper records operator-class)"
+        kill -TERM "$pid"
+        return
+      fi
     fi
   fi
   echo "engine not running (no launchd entry, socket, or pidfile)"
+}
+
+# ---- P8: model registry helpers ------------------------------------------------
+_state_write() {  # atomic + fsync + dir-fsync (the L5 law)
+  /usr/bin/python3 - "$STATEDIR" "$1" "$2" <<'PYEOF'
+import os, sys, tempfile
+sd, name, val = sys.argv[1], sys.argv[2], sys.argv[3]
+os.makedirs(sd, exist_ok=True)
+fd, tmp = tempfile.mkstemp(dir=sd, prefix=f".{name}.")
+with os.fdopen(fd, "w") as f:
+    f.write(val if val.endswith("\n") else val + "\n")
+    f.flush(); os.fsync(f.fileno())
+os.replace(tmp, os.path.join(sd, name))
+dfd = os.open(sd, os.O_RDONLY)
+try: os.fsync(dfd)
+finally: os.close(dfd)
+PYEOF
+}
+_state_read() { head -1 "$STATEDIR/$1" 2>/dev/null | tr -d '[:space:]'; }
+
+_models_cmd() {
+  /usr/bin/python3 - "$REGISTRY" "$STATEDIR" <<'PYEOF'
+import json, os, sys
+reg, sd = sys.argv[1], sys.argv[2]
+def st(name):
+    try: return open(os.path.join(sd, name)).readline().strip()
+    except OSError: return ""
+r = json.load(open(reg))
+cur, nxt = st("current_model") or r.get("default_model", "?"), st("next_model")
+swap = os.path.isfile(os.path.join(sd, "swap_in_progress"))
+print(f"registry: {reg}")
+print(f"current_model: {cur}" + (f"   next_model: {nxt} (swap {'IN PROGRESS' if swap else 'armed'})" if nxt else ""))
+for mid, m in sorted(r.get("models", {}).items()):
+    envf = os.path.join(os.path.dirname(reg), "env.canonical.d", os.path.basename(m["env_file"]))
+    mp = m.get("model_path", "")
+    host = m.get("engine_host", "test_w100k.py")
+    boot = os.path.isfile(envf) and (not mp or os.path.isfile(mp)) and (
+        os.path.isfile(host) or os.path.isfile(os.path.join(os.path.dirname(os.path.dirname(reg)), host)))
+    tag = "RESIDENT" if mid == cur else ("SWAPPING-IN" if mid == nxt else "loadable" if boot else "unavailable")
+    print(f"  {mid:28s} [{tag}] {m.get('display_name','')}")
+    print(f"      host={host} ctxk={m.get('ctxk')} path={'ok' if (not mp or os.path.isfile(mp)) else 'MISSING'} env={'ok' if os.path.isfile(envf) else 'MISSING'}")
+PYEOF
+}
+
+_switch_cmd() {  # switch <model_id>
+  local want=${1:-}
+  [ -z "$want" ] && { echo "usage: enginectl switch <model_id>   (see: enginectl models)" >&2; return 2; }
+  # D1 validate: registry entry + env file + model path + engine host
+  local chk
+  chk=$(/usr/bin/python3 - "$REGISTRY" "$OPS/env.canonical.d" "$want" "${TLX_ENGINE_DIR:-~/tinygrad-metal/engine0}" <<'PYEOF'
+import json, os, sys
+reg, envd, mid, engdir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try: r = json.load(open(reg))
+except Exception as e:
+    print(f"err registry unreadable: {e}"); sys.exit(1)
+m = r.get("models", {}).get(mid)
+if m is None:
+    print(f"err unknown model id '{mid}' (known: {', '.join(sorted(r.get('models', {})))})"); sys.exit(1)
+envf = os.path.join(envd, os.path.basename(m["env_file"]))
+if not os.path.isfile(envf): print(f"err env file missing: {envf}"); sys.exit(1)
+mp = m.get("model_path", "")
+if mp and not os.path.isfile(mp): print(f"err model file missing: {mp}"); sys.exit(1)
+host = m.get("engine_host", "test_w100k.py")
+if not (os.path.isfile(os.path.join(os.path.dirname(os.path.dirname(envd)), host)) or os.path.isfile(host)
+        or os.path.isfile(os.path.join(engdir, host))):
+    print(f"err engine host missing: {host} (the serving bridge for this model is not installed)"); sys.exit(1)
+print(f"ok {host} {mp}"); sys.exit(0)
+PYEOF
+)
+  if [ "${chk%% *}" != "ok" ]; then
+    echo "switch REFUSED: ${chk#err }" >&2
+    return 2
+  fi
+  local cur; cur=$(_state_read current_model)
+  [ -z "$cur" ] && cur=$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("default_model",""))' "$REGISTRY" 2>/dev/null || echo "?")
+  if [ "$want" = "$cur" ] && [ ! -f "$STATEDIR/next_model" ]; then
+    echo "'$want' is already the current model — nothing to do."
+    return 0
+  fi
+  # D2 drain check: refuse to yank the GPU under an in-flight generation.
+  local busy
+  busy=$(curl -s --max-time 3 http://127.0.0.1:8080/health 2>/dev/null | /usr/bin/python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin); print(1 if (d.get("queue_depth") or 0) > 0 else 0)
+except Exception: print(0)')
+  if [ "$busy" = "1" ]; then
+    echo "switch REFUSED: API queue_depth > 0 (in-flight requests) — retry when idle." >&2
+    return 3
+  fi
+  # D3 arm the durable intent BEFORE any shutdown RPC (the reboot law): the
+  # wrapper validates + promotes on the next boot.
+  _state_write next_model "$want"
+  _state_write swap_in_progress "$(date +%s) from=$cur to=$want"
+  # P8 LIVE FINDING (law-grade): on THIS box's GPU-EXIT reset class, a
+  # NEWLY-CREATED file dies even with fsync + parent-dir fsync (the 14:08
+  # staydown-marker loss; the 16:03 intent loss) — the reset cuts the storage
+  # cache flush window. A system-wide sync (x3, settle) BEFORE the stop makes
+  # the intent survive (proven live 16:09: swap_promoted after the reboot).
+  sync; sync; sleep 3; sync
+  echo "swap intent ARMED: $cur -> $want (ops/state/next_model + swap_in_progress, fsynced + system-synced)"
+  # D4 graceful stop (the GPU-EXIT reboot it provokes is expected; the wrapper
+  # promotes on relaunch). If the engine is already down, just report.
+  if [ -S "$ENGINE_SOCK" ]; then
+    echo "stopping the resident engine (expect a reboot; boot ~10-13 min for the new model)..."
+    "$SELF" stop engine
+  else
+    echo "engine not running — start it to boot the new model: enginectl start engine"
+  fi
+  echo "swap armed. On the next boot the wrapper promotes '$want'; the API serves 503 swap-in-progress until the engine socket returns."
 }
 
 case ${1:-} in
@@ -105,6 +299,10 @@ case ${1:-} in
   start)
     [[ "$SVC" == engine || "$SVC" == all ]] && _svc_start "$ENG_LABEL" "$PLIST_DIR/$ENG_LABEL.plist"
     [[ "$SVC" == api   || "$SVC" == all ]] && _svc_start "$API_LABEL" "$PLIST_DIR/$API_LABEL.plist" ;;
+  models)
+    _models_cmd ;;
+  switch)
+    _switch_cmd "${2:-}" ;;
   stop)
     [[ "$SVC" == api   || "$SVC" == all ]] && _svc_stop_launchd "$API_LABEL" "$PLIST_DIR/$API_LABEL.plist"
     [[ "$SVC" == engine || "$SVC" == all ]] && stop_engine ;;
@@ -128,10 +326,41 @@ case ${1:-} in
     else
       echo "clear"
     fi
-    echo "== health =="; curl -s --max-time 3 http://127.0.0.1:8080/health || echo "(api not answering)" ;;
+    echo "== health =="; curl -s --max-time 3 http://127.0.0.1:8080/health || echo "(api not answering)"
+    # R3-50: the last engine slog ops (clean_exit/device_fault reasons) and
+    # pcache quota state through the admin /health view
+    echo "== last engine slog ops =="
+    [ -f "$LOGS/m1a_serve.log" ] && tail -10 "$LOGS/m1a_serve.log" || echo "(no persistent slog)"
+    echo "== engine/pcache detail (admin) =="
+    local _tok; _tok=$(_admin_token)
+    if [ -n "$_tok" ]; then
+      curl -s --max-time 3 -H "x-admin-token: $_tok" http://127.0.0.1:8080/health |         /usr/bin/python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    e = (d.get("engine") or {})
+    pc = e.get("pc")
+    if not e: print("(engine view unavailable: " + str(d.get("status")) + ")")
+    else: print(json.dumps({"model_id": e.get("model_id"), "cycle_cap": e.get("cycle_cap"), "cycles_since_rebuild": e.get("cycles_since_rebuild"), "pc": pc}, indent=1))
+except Exception as ex: print("(parse failed: %r)" % ex)' 2>/dev/null || true
+    else
+      echo "(no TLX_ADMIN_TOKEN — engine view stays gated)"
+    fi ;;
   clear-breaker)
-    rm -f "$STAYDOWN" "$CRASHLOG" /tmp/llm_engine_staydown /tmp/llm_engine_crashes.log
-    echo "breaker cleared (persistent + legacy /tmp paths)" ;;
+    # R3-07: under the SAME flock the wrapper's crashlog mutations use — the
+    # old bare rm raced a wrapper append into recreating the crashlog with
+    # stale lines still in it.
+    /usr/bin/python3 - "$STAYDOWN" "$CRASHLOG" <<'PYEOF' 2>/dev/null || true
+import fcntl, os, sys
+stay, crash = sys.argv[1], sys.argv[2]
+lock = crash + ".lock"
+open(lock, "a").close()
+with open(lock, "r+") as lf:
+    fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+    for p in (stay, crash, "/tmp/llm_engine_staydown", "/tmp/llm_engine_crashes.log"):
+        try: os.unlink(p)
+        except FileNotFoundError: pass
+PYEOF
+    echo "breaker cleared (flocked; persistent + legacy /tmp paths)" ;;
   logs)
     case "$SVC" in
       engine) tail -f "$LOGS/llm-engine-launchd.log" /tmp/m1a_serve.log "$LOGS/m1a_serve.log" 2>/dev/null ;;

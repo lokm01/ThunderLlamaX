@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "default_model": "qwen3.8-27b-egpu",
+  "models": {
+    "qwen3.8-27b-egpu": {
+      "display_name": "Qwen3.8-27B dense (IQ3_XXS)",
+      "arch": "dense-gdn",
+      "engine_host": "test_w100k.py",
+      "model_path": "~/tinygrad-metal/models/Qwen3.8-27B-IQ3_XXS.gguf",
+      "env_file": "env.canonical.d/qwen3.8-27b-egpu.env",
+      "ctxk": 100352,
+      "max_output_tokens": 32768,
+      "pcache_root": "~/prompt_cache/qwen3.8-27b-egpu",
+      "pcache_quota_gb": 30,
+      "notes": "The production Tier-1 dense engine (75.81 tok/s quote-class)."
+    },
+    "qwen3.6-35b-a3b-egpu": {
+      "display_name": "Qwen3.6-35B-A3B MoE (UD-IQ3_S)",
+      "arch": "moe-gdn",
+      "engine_host": "test_moe36.py",
+      "model_path": "~/models36/Qwen3.6-35B-A3B-UD-IQ3_S.gguf",
+      "env_file": "env.canonical.d/qwen3.6-35b-a3b-egpu.env",
+      "ctxk": 98304,
+      "max_output_tokens": 32768,
+      "pcache_root": "~/prompt_cache/qwen3.6-35b-a3b-egpu",
+      "pcache_quota_gb": 26,
+      "notes": "The MM-campaign MoE harness (P7 state: 118-121 tok/s quote-class in-harness). The serving bridge (test_moe36.py) is the P8 integration item; until it lands the registry entry is loadable-but-not-bootable — enginectl switch validates engine_host exists before arming."
+    }
+  }
+}

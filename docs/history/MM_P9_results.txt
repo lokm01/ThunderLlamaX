@@ -1,0 +1,112 @@
+MM P9 RESULTS (2026-09-28, GLM implementation agent — THE MTP K=4 CHAIN +
+the P2 launch-serialization measurement; commits on 4346ae1)
+
+Files: MM_P9_mtp.py (MtpRig + GraphRunnerUnc + SpecEngineMTP) +
+MM_P9_run.py (stages A/B/C/D) + MM_P9_gxk3e256up.cu / gxk4e256dn.cu /
+gv8k4096r2.cu / rowcp2048.cu (+cubins) + p2_measure.py. Harness resumable
+via ~/mm_p9_progress.txt; perf json ~/mm_p9_perf.json.
+
+═══ PART 1 — THE MTP K=4 CHAIN: LANDED, ALL GATES GREEN ═══
+ARCHITECTURE (the EAGLE/llama.cpp one-cycle-late shape):
+  - THE P=5 PROBE: build_seq7(P=5, gconv36s_5/k2s36s_5/h6kam_5, slots,
+    tail_acc_K=4) — the proven D2/D8 machinery at T=5. B1/B2: spec==T1
+    60/60 EXACT det-x2 OK (the P5 graph in isolation, lookup drafts).
+  - THE CHAIN (after each probe's eb read): rowcp2048(hA[m] -> HSEED) +
+    SEED step (TRUE pair (hA[m], ids[m]) @ pos+m, NO head — its c1 predicts
+    the already-known boundary) + 4 head steps (step1 processes the TRUE
+    bnd; steps 2-4 process own drafts) -> drafts c2..c5 = the next cycle's
+    4 drafts. H0/H1 double-buffered (A->B->A->B runners).
+  - THE KV INVARIANT (the trunk's own protocol transplanted): every row a
+    chain reads was written by a true seed / an accepted draft's own step /
+    this chain's own earlier step (spka before spq per step); rejected rows
+    are overwritten by the next seed before any read. D8/D2 lookup cycles
+    leave zero-gaps (never-written rows) — the SAME zero-prefix conditioning
+    class the P8S anchor measured (its chain_kv was fresh zeros).
+  - THE STALE-RECOVERY DISCIPLINE: lookup cycles do NOT run the chain (the
+    quote path stays untouched); the chain goes STALE (a deferred chain
+    cannot seed — hA[m] is overwritten). The first miss after a lookup
+    streak pays ONE T1 cycle whose hA[0] re-anchors the chain.
+  - MODE MIX: n>=8 -> D8 (lookup); n>=4 -> D2 (lookup); miss -> P5+MTP
+    (was T1 — the prose class).
+
+GATES (~/mm_p9_progress.txt):
+  A1  gxk3e256up (Q3_K gate+up) vs the validated numpy dq: maxdev 1.2e-7 PASS
+  A2  gxk4e256dn (Q4_K down, fp16 partials): BIT-EXACT 0/1024 mismatches PASS
+  A3  MTP step vs numpy MtpLayer: head argmax 4/4 (ADVISORY — the engine's
+      SPLIT-KV attention class vs the serial anchor amplifies router top-8
+      flips: h maxdev O(1), ~50% KV quant-boundary flips — expected class)
+  A4  *** THE ENGINE-SIDE ALPHA (the anchor protocol transplanted):
+        quote:   E[acc]@K4 = 3.08 -> 4.08 tok/cyc  [0.875, 0.952, 0.95, 0.737]
+        prose-0: E[acc]@K4 = 2.58 -> 3.58 tok/cyc  [0.875, 0.81, 0.765, 0.846]
+        prose-9: E[acc]@K4 = 1.79 -> 2.79 tok/cyc  [0.708, 0.588, 0.9, 0.778]
+      depth-1 = 0.875 EXACTLY the P8S offline anchor number.
+  C1/C2 *** THE MISSION GATE: spec-with-MTP == T1 60/60 EXACT det-x2 OK ***
+
+D1 THE PERF BATTERY (BOTH arms at this session's post-reboot ambient — the
+   quote-alpha/spec reads 74 here vs the P7-era 119 on a fresh-boot machine;
+   the RELATIVE gains are the deliverable; cycle ~= 70ms P5 + 10ms chain):
+        spec    mtp     delta
+  quote-alpha  74.4   69.4    -7% (48-tok sample noise; 4 lookup misses
+                                became P5 cycles at 26 tok/s > T1's 19.6)
+  quote-code  108.5  107.2    -1% (unchanged within noise)
+  quote-docx2  25.4   40.1    +58%
+  prose-0      19.6   42.4    +116%   (E[m|mtp] 2.1)
+  prose-1      19.2   46.7    +143%   (E[m|mtp] 2.4)
+  prose-9      19.4   26.8     +38%   (E[m|mtp] 1.0)
+  => THE PROSE TARGET (30-50 tok/s ambient-adjusted) HIT: 42-47 on the
+     strong prose class; the P5 cycle structure = 3-3.5 tok/cycle.
+
+═══ PART 2 — THE LAUNCH-SERIALIZATION MEASUREMENT (the fusion pricing) ═══
+  Truncated-model T1 graphs (valid timing, wrong outputs), this ambient:
+    531 kernels 49.83 ms | 266 kernels 26.12 ms | 133 kernels 12.80 ms
+  => PERFECTLY LINEAR: ~0.089-0.100 ms PER KERNEL DISPATCH (the in-graph
+    launch floor). The MoE T1 cycle (~54ms, 1.4GB active) is ~96% KERNEL
+    DISPATCH (the memory floor is ~1.7ms at 880 GB/s).
+  => THE FUSION CAMPAIGN IS THE ENTIRE T1 GAME: 40 layers x ~13.3 kernels
+    -> ~4 fused/layer (~165 kernels) => T1 ~ 17ms => ~55-60 tok/s T1 and
+    every spec mode scales with it. The MoE quartet fusion (rt8e256 +
+    gx8e256up + gx8e256dn + cmbz2048 + shexp8 -> one cooperative kernel)
+    is the highest-value single fusion (5 of 13.3 kernels/layer, and the
+    router+gather+combine structure is self-contained per layer).
+
+═══ NEW LAWS (P9) ═══
+  1. *** THE KAPool SLAB COHERENCE LAW ***: MGs carved from the SHARED
+     pool slab WEDGE (GSP: SKEDCHECK16_CTA_THREAD_DIMENSION_ZERO — the GPU
+     reads STALE kernargs/QMDs through the slab's GPU-CACHEABLE mapping)
+     for graphs built/stepped once the GPU has traffic over the slab; only
+     the boot-time graph set is safe. FIX: GraphRunnerUnc — a DEDICATED
+     uncached ka per MG (sysmem GPU_CACHEABLE_NO, the cpu-fold class).
+     Proven interleaved with the pool-based trunk graphs.
+  2. THE NARROW-LOAD LAW (ptxas load coarsening): consecutive u16/u8 reads
+     from ONE thread get merged into 32-bit loads — MISALIGNED (fault or
+     silent garbage) in any odd-stride block layout (Q3_K's 110B blocks).
+     Inline-PTX ld.global.u8/u16 are unmergeable. (The trunk's IQ3_S
+     kernel only ever had per-LANE strided u16s — never consecutive.)
+  3. THE Q3_K SHARED-HMASK LAW (bit-level): the hmask bit for (nn, j) is
+     1 << (4*nn + j) — m NEVER resets between the two 128-groups (bits
+     1,2,4,8 | 16,32,64,128). Using 1<<j for both halves corrupts lanes
+     16-31 (the upper 128 elems of every row).
+  4. THE UINT8-SUBTRACT TRAP (numpy): (uint8 >> shift & 3) - 4 wraps
+     (255) unless cast to int8/int FIRST — bit both my debug emulation
+     and (previously) the dq port.
+
+═══ OPEN / NEXT ═══
+  - THE FUSION CAMPAIGN (P2 build): the quartet megakernel first; the
+    measured 0.09-0.1 ms/kernel slope prices every fusion precisely.
+  - ROW-BATCHED ATTENTION (Part 3): the spkq256s KV re-read per seat —
+    the split infrastructure + the warp-per-position pattern extend to
+    all-T-rows-one-KV-pass; needs the per-(row,split) partial layout
+    rework + the anchor mirror. Unbuilt this session.
+  - THE SERVING WIRE (serve_moe + test_moe36): the harness engine is
+    gated; the daemon integration = the P5 graph + the chain runners +
+    the stale-recovery cycle in serve_moe's loop (the machinery is all
+    in MM_P9_mtp.py; the daemon was NOT modified this session).
+  - THE LONG-CTX MTP MEASUREMENT: the alpha + chain cost at 96k ctx (the
+    KV dilution question) — unmeasured.
+  - The A3 advisory gap: an S=32 split numpy anchor for the MTP layer
+    would close the last numpy-vs-engine class difference (low value).
+
+OPS: the daemon was DOWN for this window (manual MoE boot from P8S); the
+restore = the standard enginectl/manual boot. All cubins rebuilt + audited
+(zero spill). The pcache/config_fp: NO pack change (the routed L40 bank was
+already in the pack from P8S) — no cache invalidation.

@@ -1,0 +1,123 @@
+MM P0 WEEK-1 DECIDERS — RESULTS LOG (2026-09-24, GLM implementation agent)
+Model: unsloth/Qwen3.6-35B-A3B-MTP-GGUF (UD-IQ4_XS 18.21GB + UD-IQ3_S 15.35GB in ~/models36/)
+
+D1 GGUF HEADER + TENSOR MAP — GO (18/18 spec checks OK)
+  arch=qwen35moe; 41 blocks (40 + 1 MTP blk.40, DROP); vocab 248320; eos 248046
+  (SAME id as Qwen3.8 im_end); hidden 2048; 256 experts top-8 @ inter 512 + shared 512;
+  full_attention_interval 4; 16Q:2KV head_dim 256; rope 64 dims theta 1e7; ctx 262144.
+  NAMING MAP (surprise #1): GDN layers carry their projections under attn_* names —
+  blk.N.attn_qkv [2048,8192] = GDN in_proj_qkv; blk.N.attn_gate [2048,4096] = in_proj_z;
+  full-attn layers (3,7,...,39) have attn_q [2048,8192] (DOUBLED Q+gate), attn_k/v
+  [2048,512], attn_output [4096,2048], q/k_norm [256]. Router = ffn_gate_inp F32
+  [2048,256] (native fp32 = the gold-router contract); shared gate ffn_gate_inp_shexp F32.
+  MIXED-QUANT (surprise #2): unsloth UD tiers are PER-TENSOR mixes:
+    UD-IQ4_XS: 37x{down IQ4_XS(136B/256), gate/up IQ3_S(110B/256)}, 2x{down Q6_K,
+      gate/up IQ3_S}, 1x{down Q6_K, gate/up IQ4_XS}; trunk Q8_0; router/norms F32;
+      embed Q8_0; head Q6_K.
+    UD-IQ3_S: 37x{down IQ4_XS, gate/up IQ2_S(82B/256)}, 2x{down Q6_K, gate/up IQ2_S},
+      1x{down Q6_K, gate/up IQ3_S}; trunk Q6_K; embed Q6_K; head Q6_K.
+  Experts stored as MERGED per-layer 3D tensors (ffn_{gate,up,down}_exps [ne0,ne1,256])
+  = ALREADY EXPERT-MAJOR (byte-copy repack). MTP (blk.40, 20 tensors, 0.34-0.40GB) DROP.
+  Harness: MM_P0_d1_header.py + MM_P0_d1_tensors_hdr_*.json
+
+D2 REPACK FEASIBILITY + VRAM — GO (both tiers fit; dequant ports BIT-EXACT vs llama.cpp C)
+  Block geometry (empirical from offsets): IQ4_XS 136B/256, IQ3_S 110B/256, IQ2_S 82B/256,
+  Q6_K 210B/256, Q8_0 272B/256.
+  Repack = byte-copy per (expert,mat): every row 16B-aligned in the ACTUAL mixes
+  (880B gate/up rows, 272B IQ4_XS down rows; Q6_K down rows 420B = 4B-aligned only,
+  3 layers/file — expert slabs still 16B-aligned). Roundtrip byte-exact; dequant
+  numpy ports BIT-EXACT vs compiled llama.cpp C reference on real rows (IQ4_XS, IQ3_S,
+  IQ2_S all exact; MM_P0_d2_ref.c is generated verbatim from ggml-quants.c).
+  VRAM (exact from header; ctx adds KV int8 10KiB/tok + GDN 60MiB/slot x11 + ~2.0GiB
+  act/ovh at the 23.0GiB working limit):
+    UD-IQ4_XS: weights 16.553 GiB -> 20.17 GiB @96k / 20.48 GiB @128k  (2.5-2.8 GiB margin)
+    UD-IQ3_S:  weights 13.945 GiB -> 17.56 GiB @96k / 17.87 GiB @128k  (~5.1 GiB margin)
+  Per-expert modal slab: 1.391 MiB (IQ4_XS tier) / 1.172 MiB (IQ3_S tier) vs the plan's
+  1.67MB all-4.25bpw assumption. kimi's 22.5GB@128k was pessimistic; mimo's 11.5 wrong.
+  TIER RECOMMENDATION: UD-IQ4_XS @96k default (2.8GiB margin); 128k opt-in after P9
+  VRAM audit; UD-IQ3_S the fallback tier. Harness: MM_P0_d2_repack.py
+
+D3 GATHER-GEMV POC — GO on correctness/determinism/scatter-tax; BW class measured
+  under eager-launch overheads (graph path = open item, see faults below)
+  Kernel gx8e256nw32: one CTA/pair, FLAT sequential row walk, warp-per-row IQ3_S
+  dequant GEMV (ao8nw32_5 lane pattern), VA-table expert addressing, nw32 1024thr,
+  0 smem, sequential loops. Bank = 20x373MB (5120 experts, 7.3GB).
+  CORRECTNESS: BIT-EXACT vs the D2-validated dequant with kernel accumulation order
+  (NaN-agreement rows: ~78% fully finite-checked rows all exact); det x2 OK.
+  SCATTER TAX ~= ZERO: grouped-8 == contig-64 == scattered-256 == bankwide-7.3GB
+  at the 88-pair shape (0.707-0.710ms all; overhead-dominated) — no TLB cliff.
+  BW: eager per-launch (wait=True) carries ~0.62ms submit+sync overhead:
+    88-pair (39.65MB): ~0.71ms -> kernel-only ~0.09ms ~ 440 GB/s class
+    704-pair (317MB): ~2.9ms -> kernel-only ~2.3ms ~ 138 GB/s class (8.6-wave tail)
+    256-cycle eager-batched [mut->gx]: 670us/cycle = 59 GB/s submit-bound floor
+  vs GO bar (>=180 grouped / >=120 scattered): the 704-shape clears 120 even at the
+  worst reading; the 88-shape is 2-3x over. VERDICT: GO (with the graph path open).
+  Harness: MM_P0_d3_final.py (+ probe2-7 forensics)
+
+D4 MUTATING IDS — GO (eager path; queue path open)
+  256+256 [mut->gx] cycles: eids EXACTLY match the numpy affine sim after 256
+  device-side mutations (NO kernargs staleness); deterministic x2.
+  Router chain [hrot->rt8e256poc->gx704]: rt top-8 EXACT vs numpy (fp32, tie->lower);
+  4096 mixed cycles fault-free; eids-vs-ref ALL OK at every checkpoint;
+  determinism x2 OK. CAVEAT: the h-drift rarely changed the top-8 (distinct=8 at
+  checkpoints) — id-CHANGE coverage is weak; P3's gates must exercise real routing.
+  D4's queue/NVComputeQueue replay path FAULTS with our gx (first wait wedges ->
+  device fault) even though single-kernel eager is clean — mechanism unresolved;
+  P1 must resolve (the production G_CYCLE depends on it). The 256-rebuild cadence
+  and ~950-cycle budget remain untested (blocked behind the queue fix).
+
+D5 K2S GDN BENCH @ [32][128][128] fp32 — GO, THE SLEEPER IS DEAD
+  Per-layer us (grid 32 CTAs x 256thr, 30 layers, per-T cubins):
+    T=1: 46.5us | T=2: 45.8 | T=3: 46.4 | T=5: 47.4 | T=8: 63.4 | T=11: 79.4us
+  30-layer probe adds 1.40ms (T=1) .. 2.38ms (T=11) per cycle = ~2-4% of a cycle.
+  Chain slope +3.3us/t — NO blowup; HMMA-ize NOT needed (state traffic saturates
+  ~317 GB/s at T=11). The MM_PLAN premise "32x larger state than Qwen3.8" was WRONG:
+  today's k2s state is per-block [48 heads][128v][128k] = 3MiB; the new model's
+  [32][128][128] = 2MiB is SMALLER (fewer heads and fewer blocks: 30 vs 48).
+  Harness: MM_P0_k2s36.cu + per-T cubins in MM_P0_d3_final.py S5.
+
+D6 OCCUPANCY MONTE CARLO — GO (K-mix policy fixed)
+  E[distinct experts | M] (2000 trials, Gumbel-top-8 over 256):
+    uniform: M=1: 8.0 | 2: 15.7 | 3: 23.2 | 8: 57.4 | 10: 69.6 | 11: 75.5
+    Zipf(1.1): 14.0/39.4/45.9/49.0 (M=2/8/10/11); Dir(0.05): 12.7/26.1/28.5
+  Decode envelope (exact byte model @ probe M=K+1, dense 2.12GiB/cycle incl
+  KV@96k 0.47 + GDN trunk 1.0 + attn 0.27 + shared 0.13 + head-slice 0.06):
+    IQ4_XS tier @240GB/s: K=2 prose ~92 tok/s | K=8 quote ~369 | K=10 quote ~426
+    IQ3_S  tier @240GB/s: K=2 prose ~99 | K=8 quote ~417 | K=10 quote ~485
+    (@120GB/s halve; @300GB/s x1.25)
+  POLICY: prose -> K=2 (deeper K is NET-NEGATIVE on prose at every BW); quote/lookup-
+  triggered -> K=8 (K=10 only +15% over K=8 on quote — not worth the graph-variant
+  budget at 96k; matches the plan's <=8 variants/model law).
+  Harness: MM_P0_d6_occupancy.py
+
+D7 QUALITY ORACLE — PENDING (no Linux CUDA box available; NOT faked).
+  Router weights extractable from the GGUF (F32 [2048,256] x40) for the CPU probe
+  once a Linux box or on-P5 trunk exists. UD-IQ3_S's gate/up at IQ2_S (2.56bpw) is
+  the quality-risk tier — the oracle matters before shipping it.
+
+NEW PLATFORM LAWS FOUND (the D3 fault forensics, ~15 boots):
+  1. THE NAME LAW (the big one): the TinyELF/program name MUST equal the cubin's
+     kernel SYMBOL. A mismatch (e.g. file-prefix name) silently skips the
+     .nv.info parse (maxntid/stack unparsed) and the launch faults with SM
+     "Illegal Instruction Encoding" on ALL GPCs. Every historical clean run had
+     matching names; every faulting run had a prefixed name. 100% correlation.
+  2. SINGLE-ARG SIZE CAP: hand-NVProgram buffer args >~457MB-1.16GB fault (same
+     signature). 457MB/arg x 8 args clean; 8GB/3.66GB/2.38GB/1.16GB single args
+     fault. Engine's proven hand-kernel arg class = 183MB (packed per-block) —
+     per-layer routed banks (373MB) are legal.
+  3. VA POINTER TABLES ARE LEGAL (ptbl of absolute 64-bit VAs read from device
+     memory works) — the earlier "pointer-chase illegal" reading was an artifact
+     of law 2. Duplicate buffer args suspected bad (1 datapoint) — avoid.
+  4. GPU-process exit -> GPU-EXIT reboot held 5/5 this session (also on CLEAN
+     exits). One GPU python process per boot; batch everything into it.
+  5. THE QUEUE FAULT (open): NVComputeQueue-replayed [wait->exec(gx)->signal]
+     wedges on the first wait even though eager gx is clean and gcycle's own
+     queues run 452-kernel graphs daily. Mechanism unknown — P1 item #1.
+
+P1 BUILD FIRST (from this evidence):
+  1. The queue-replay fault root-cause (everything production depends on G_CYCLE).
+  2. MoE repacker: byte-copy expert-major slabs per layer-bank (<=373MB/arg), drop
+     blk.40 + (1+w) norm variants + router kept F32.
+  3. rt8e256 + gx8e256_up/dn production kernels (the POC lane pattern ports).
+  4. k2s rescale is TRIVIAL (dims shrink) — not a risk item anymore.
+  5. K-mix: K=2 prose + K=8 deep set.

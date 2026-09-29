@@ -33,3 +33,9 @@ __pycache__/
 
 # runtime logs dir (rig: ~/tinygrad-metal/logs)
 logs/
+
+# generated operator env (carries secrets — generated from the published examples)
+engine/ops/env.canonical
+engine/ops/env.common
+engine/ops/state/next_model
+engine/ops/state/swap_in_progress

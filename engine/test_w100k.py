@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """W3-100k GOAL RUN: engine split-KV @100352 ctx.
  (1) T=1 greedy reference 60 tokens; (2) spec K=2 Tier-1 gate (bit-exact x2);
  (3) 3 timing reps + phase breakdown; alpha from m_hist; stock cross-check.
@@ -13,6 +10,7 @@ sys.path.insert(0, "~/tinygrad-src")
 sys.path.insert(0, "~/tinygrad-metal/engine0")
 import numpy as np
 from mtp import MTPEngine, DecodeSession, RBLK, CBLK, SLICE, CTXK
+import mtp as _mtpmod
 from trunk import CTX as TRUNK_CTX
 from engine0 import dev
 from gcycle import GCycleEngine
@@ -21,6 +19,8 @@ SNAP = os.getenv("SNAPDIR", "~/snap100k")
 NTOK = int(os.getenv("NTOK", "60"))
 SYNC_EVERY = int(os.getenv("SYNC_EVERY", "1"))
 DO_T1 = os.getenv("DO_T1", "1") == "1"
+TLX_T1_MODE = int(os.getenv("TLX_T1_MODE", "0"))   # A.1: the adaptive T=1 mode (see mtp.py)
+TLX_RANK_HIST = os.getenv("TLX_RANK_HIST", "0") == "1"   # A.2: the MTP rank histogram (prose harness)
 
 meta = json.load(open(f"{SNAP}/meta.json"))
 P0 = int(meta["P"]); assert CTXK == int(meta["CTXK"])
@@ -112,6 +112,7 @@ if int(os.getenv("BATCH_B", "1")) >= 2:
 if DO_T1:
   G = GCycleEngine(E)
   G.build(); dev.synchronize()
+  if TLX_T1_MODE: E.gcycle = G   # A.1: the session's T=1 parity graphs
   t0 = time.perf_counter()
   G.run_tokens(NTOK, wait_each=True)
   dt1 = time.perf_counter() - t0
@@ -124,6 +125,7 @@ else:
   ref = np.load(f"{SNAP}/engine_t1_ref{REFSUF}.npy").tolist()
   G = GCycleEngine(E)   # P7E3: build G without the T1@97810 decode (machine fault class — cached ref)
   G.build(); dev.synchronize()
+  if TLX_T1_MODE: E.gcycle = G   # A.1
   print("[ref] CACHED (T1@97810 decode skipped — P7E3 machine-fault workaround)", flush=True)
   G = None
 
@@ -649,12 +651,63 @@ if os.getenv("R5_QUOTE", "0") == "1":
   print(f"[quote] ref[:16] {qref[:16].tolist()}", flush=True)
 
   # ---- spec decode (LOOKUP_K set) x2 + timing ----
+  if TLX_T1_MODE and Gq is not None:
+    E.gcycle = Gq   # A.1: the T=1 mode's parity graphs in this harness
+    print(f"[t1] TLX_T1_MODE on (trig={_mtpmod.TLX_T1_TRIG}): prose class runs the adaptive T=1 mode", flush=True)
+  # A.2 (TLX_RANK_HIST=1): the MTP rank histogram. After each K2 cycle, at the
+  # quiescent point, re-run the draft chain's STEP-0 kernels eagerly on the
+  # POST-ACCEPT state (cur_slot, h_seed, kv_d) — a deterministic idempotent
+  # replay that recomputes the MTP head's FULL slice distribution for the
+  # NEXT cycle's query. slogits is dead scratch post-cycle (the graph's step-1
+  # overwrote step-0), which is why the replay is needed. Pair each replay
+  # with the NEXT cycle's probe row-0 argmax (the target of that query).
+  RANKS = []; OOS = 0; NTOT = 0; PROP_HIT = 0
+  def _rank_instrument(r_prev_dist, r_target, dr0):
+    global OOS, NTOT, PROP_HIT
+    NTOT += 1
+    if int(dr0) == int(r_target): PROP_HIT += 1
+    if r_prev_dist is None: return
+    sid = STAB_MAP.get(int(r_target))
+    if sid is None: OOS += 1; return
+    l = r_prev_dist
+    lt = float(l[sid])
+    RANKS.append(1 + int((l > lt).sum()))
+  STAB_MAP = {}
+  if TLX_RANK_HIST:
+    _stab = E.P.down("stab", (SLICE,), np.int32).tolist()
+    STAB_MAP = {int(t): i for i, t in enumerate(_stab)}
+    print(f"[rank] instrument on: slice {SLICE}, {len(STAB_MAP)} distinct ids", flush=True)
   outs = []
   for rep in range(2):
     new_cur, pos_q, n_fed = quote_anchor()
     sess.begin()
     t0 = time.perf_counter()
-    emt, pend = decode_n(NTOK)
+    if TLX_RANK_HIST:
+      # instrumented decode: per K2 cycle, eager draft-step-0 replay + slogits
+      emt = []
+      prev_dist = None
+      r = None
+      for _ in range(NTOK):
+        deep_at_entry = int(getattr(sess, "deep", 0))
+        t1_at_entry = int(getattr(sess, "t1mode", 0))
+        r = sess.step()
+        if not t1_at_entry and not deep_at_entry:
+          dr0 = int(E.P.down_at("dring0", 0, 1, np.int32)[0])
+          _rank_instrument(prev_dist, r["tokens"][0], dr0)
+          # replay the MTP draft step-0 on the post-accept state (idempotent:
+          # same inputs -> same kv_d row write -> same distribution)
+          for p_, a_, g_ in E._draft_entries(E.P.d["cur_slot"], E.P.d["pos_slot"], E.P.d["h_seed"], E.P.d["hd_d0"], E.P.d["dring0"])[:-1]:
+            _nm = getattr(p_, "name", "")
+            p_(*a_, global_size=(g_, 1, 1),
+               local_size=((1024,1,1) if "nw32" in _nm else (768,1,1) if "nw24" in _nm else (512,1,1) if "nw16" in _nm else (256,1,1)))
+          dev.synchronize()
+          prev_dist = E.P.down_at("slogits", 0, SLICE, np.float16).astype(np.float32)
+        else:
+          prev_dist = None   # deep/T1 cycles break the query chain — drop the pair
+        emt += r["tokens"]
+      pend = r["pos_new"]
+    else:
+      emt, pend = decode_n(NTOK)
     dt = time.perf_counter() - t0
     h = hist(E)
     base = pb   # the spec cycles start at the same re-anchored pos
@@ -665,8 +718,9 @@ if os.getenv("R5_QUOTE", "0") == "1":
     # fed onward; use the T=1 stream anchored at the same fed prefix:
     agree = int((outw == qref).sum())
     fd = next((k for k in range(NTOK) if outw[k] != qref[k]), None)
+    _nt1 = int(getattr(sess, "nt1cycles", 0))
     print(f"[quote] rep{rep}: {agree}/{NTOK} exact vs T=1 (first div {fd}); emitted {len(emt)} toks, "
-          f"{dt*1e3/NTOK:.2f} ms/tok-stream", flush=True)
+          f"{dt*1e3/NTOK:.2f} ms/tok-stream, t1-cycles(life) {_nt1}", flush=True)
     if agree < NTOK:
       print(f"[quote] out: {outw[:32].tolist()}")
       print(f"[quote] ref: {qref[:32].tolist()}")
@@ -679,6 +733,26 @@ if os.getenv("R5_QUOTE", "0") == "1":
   print(f"[quote] lookup cycles {ncy}, hits {int(hitm.sum())} ({100.0*hitm.sum()/max(ncy,1):.1f}%), "
         f"E[m|hit] {float(mh[hitm].mean()) if hitm.any() else 0:.3f}, "
         f"tok/cyc {float((mh[:ncy]+1).mean()):.2f}", flush=True)
+  if TLX_RANK_HIST and RANKS:
+    ra = np.array(RANKS)
+    # THE HONEST VERDICT RULE: out-of-slice targets are UNRANKABLE by the
+    # slice-limited drafter (an effective rank > SLICE) — they must count in
+    # the population median, not be dropped (the dropped-median was selection
+    # bias: only prompt-frequent targets were in-slice).
+    ra_all = np.array(RANKS + [SLICE + 1] * OOS)
+    med = float(np.median(ra_all))
+    print(f"[rank] N {NTOT} paired {len(RANKS)} out-of-slice {OOS} ({100.0*OOS/max(NTOT,1):.1f}%) | "
+          f"top1==target {PROP_HIT}/{NTOT} ({100.0*PROP_HIT/max(NTOT,1):.1f}%)", flush=True)
+    print(f"[rank] rank-dist r1..r16: {[int((ra == v).sum()) for v in range(1, 17)]} | >16: {int((ra > 16).sum())}", flush=True)
+    print(f"[rank] in-slice median {float(np.median(ra)):.1f}  p75 {float(np.percentile(ra, 75)):.1f}  "
+          f"mean {float(ra.mean()):.2f} | FULL-POPULATION median (oos->inf) {med:.1f}", flush=True)
+    # the A.2 verdict rule (the prose plan): median<=4 -> a trained drafter
+    # could reach p 0.3-0.5; median>8 -> T=1 at the physics cap is the honest
+    # endpoint. Out-of-slice = > SLICE ranks => the median is driven by the
+    # slice boundary, not head quality.
+    verdict = ("DRAFTER FIXABLE (median<=4)" if med <= 4 else
+               ("INCONCLUSIVE (4<median<=8)" if med <= 8 else "T=1 ENDPOINT (median>8)"))
+    print(f"[rank] VERDICT: {verdict}" + ("  [note: driven by the SLICE boundary — a full-vocab head re-test is the Tier-2 follow-up]" if OOS * 2 > NTOT else ""), flush=True)
   raise SystemExit(0)
 
 # P3 prefill-assembly gates (PF_GATE=1): batched M=16 prefill vs T=1, inside the
@@ -783,6 +857,7 @@ if KV8:
 
 # ---------- speed: 3 reps ----------
 times = []
+_emt_counts = []
 for rep in range(3):
   reset_spec(E)
   t0 = time.perf_counter()
@@ -790,15 +865,27 @@ for rep in range(3):
   dt = time.perf_counter() - t0
   h = hist(E); out = h[P0:P0+NTOK]
   times.append(dt)
+  _emt_counts.append(len(emt))
   m2 = E.P.down("m_hist", (1024,), np.int32)
   acc_pos = float(m2[:NTOK].sum()) / (2.0*NTOK)
   tpc = float((m2[:NTOK] + 1).sum()) / NTOK
   agree = int((out == np.array(ref)).sum())
-  print(f"[time] rep{rep}: {dt*1e3:.1f} ms/60cyc = {dt/NTOK*1e3:.2f} ms/cyc, agree {agree}/{NTOK}, alpha={acc_pos:.3f}, tok/cyc={tpc:.2f}, tok/s={tpc/(dt/NTOK):.2f}", flush=True)
+  if TLX_T1_MODE:
+    # A.1: T=1 cycles emit without an m_hist entry — the honest per-rep metric
+    # is emitted-tokens / wall-time (the m_hist-derived tok/cyc undercounts).
+    print(f"[time] rep{rep}: {dt*1e3:.1f} ms/{NTOK}-tok stream = {dt/NTOK*1e3:.2f} ms/tok, agree {agree}/{NTOK}, "
+          f"t1-cycles(life) {int(getattr(sess, 'nt1cycles', 0))}, tok/s={len(emt)/dt:.2f} (emit-based)", flush=True)
+  else:
+    print(f"[time] rep{rep}: {dt*1e3:.1f} ms/60cyc = {dt/NTOK*1e3:.2f} ms/cyc, agree {agree}/{NTOK}, alpha={acc_pos:.3f}, tok/cyc={tpc:.2f}, tok/s={tpc/(dt/NTOK):.2f}", flush=True)
 best = min(times)
 m3 = E.P.down("m_hist", (1024,), np.int32)
 tpc = float((m3[:NTOK] + 1).sum()) / NTOK
-print(f"[time] BEST {best/NTOK*1e3:.2f} ms/cyc -> {tpc/(best/NTOK):.2f} tok/s", flush=True)
+if TLX_T1_MODE:
+  # deterministic stream: every rep emits the same count — the best-wall rep's
+  # emit count pairs with min(times)
+  print(f"[time] BEST {best*1e3/NTOK:.2f} ms/stream-tok -> {_emt_counts[times.index(best)]/best:.2f} tok/s emit-based (T=1-mixed)", flush=True)
+else:
+  print(f"[time] BEST {best/NTOK*1e3:.2f} ms/cyc -> {tpc/(best/NTOK):.2f} tok/s", flush=True)
 
 # ---------- phase breakdown ----------
 seed_mtp_slots(E)

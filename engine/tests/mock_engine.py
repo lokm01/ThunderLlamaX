@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """W1.0 mock engine daemon + harness utilities (GPU-free, pure stdlib, py3.9+).
 
 Implements the REAL serve.py wire protocol so the API server can be tested
@@ -250,10 +247,14 @@ class MockEngine:
               self.rpc_log.append((time.time(), "cancel", None))
             continue
           if m == "status" and self.ready:
-            # lock-free inline status (listener-thread answered, serve.py:492)
+            # inline status (listener-thread answered, serve.py:492); the
+            # snapshot is taken UNDER the lock (a torn fed read mid-generate
+            # made the API decide FRESH nondeterministically under load)
             try:
+              with self.lock:
+                snap = self._status_locked()
               conn.sendall((json.dumps({"id": req.get("id"), "ok": True,
-                  "result": self._status_locked()}) + "\n").encode())
+                  "result": snap}) + "\n").encode())
             except Exception: pass
             continue
           self.q.put((conn, req))
@@ -277,7 +278,9 @@ class MockEngine:
             "config_fp": self.cfg.get("config_fp"),
             "lookup_k": str(self.cfg.get("lookup_k")),
             "pf_prefill": str(self.cfg.get("pf_prefill")),
-            "cycles_since_rebuild": self.cycles_since_rebuild}
+            "cycles_since_rebuild": self.cycles_since_rebuild,
+            "model_id": "qwen3.8-27b-egpu",      # R3-42 mirror
+            "cycle_cap": max(1, min(4096, self.cfg["ctxk"] - max(0, self.pos)))}
 
   # ---------------- W2 mirrors of the serve.py RPC gates -----------------------
   def _check_admin(self, p):
@@ -313,6 +316,10 @@ class MockEngine:
         if not isinstance(t, int) or isinstance(t, bool) or not (0 <= t < NVOCAB):
           return f"prefill id {t!r} outside vocab range 0..{NVOCAB-1}", None
       if mode == "FOLLOW_UP":
+        if p.get("conversation_id") is None:
+            return ("FOLLOW_UP requires a conversation_id (anonymous requests must use "
+                    "FRESH/AUTO_CACHE — None would bind ANY None-convo slot, including "
+                    "the parked slot 0)"), None
         if max(0, self.pos) + 1 + len(ids) > self.cfg["ctxk"]:
           return (f"FOLLOW_UP delta overflows context: pos {self.pos} + 1 + "
                   f"{len(ids)} > ctxk {self.cfg['ctxk']}"), None
@@ -390,6 +397,7 @@ class MockEngine:
         self._fail_prefill_used += 1
         raise RuntimeError("mock prefill failure (scripted)")
       if mode == "FOLLOW_UP":
+        _prefix_len = len(self.fed)            # R3-41: reused resident prefix
         # W1 fix (engine side): refuse a FOLLOW_UP for a foreign conversation
         req_cid = p.get("conversation_id")
         if req_cid != self.conversation_id:
@@ -406,7 +414,8 @@ class MockEngine:
         self.cur = newcur; self.mode = "FOLLOW_UP"
         self.conversation_id = p.get("conversation_id")
         self.dirty = False
-        return {"pos": self.pos, "cur": newcur, "fed": len(ids)}
+        return {"pos": self.pos, "cur": newcur, "fed": len(ids),
+                "cached_tokens": _prefix_len}   # R3-41 mirror
       # FRESH / AUTO_CACHE
       hit = int(self.cfg["auto_cache_hit"])
       if mode == "AUTO_CACHE" and 0 < hit < len(ids):
@@ -707,8 +716,10 @@ class MockBatchEngine(MockEngine):
             "lookup_k": str(self.cfg.get("lookup_k")),
             "pf_prefill": str(self.cfg.get("pf_prefill")),
             "cycles_since_rebuild": self.cycles_since_rebuild,
+            "model_id": "qwen3.8-27b-egpu",      # R3-42 mirror
             "batch_b": 2,
             "streams": [{"slot": sl["s"], "conversation_id": sl["conversation_id"],
+                         "model_id": None,
                          "pos": sl["pos"], "cur": sl["cur"], "fed_len": len(sl["fed"]),
                          "mode": sl["mode"], "generating": sl["gen"] is not None,
                          "dirty": sl["dirty"], "used": sl["used"]} for sl in self.slots]}
@@ -781,6 +792,17 @@ class MockBatchEngine(MockEngine):
     mode = p.get("mode", "FRESH")
     ids = [int(t) for t in p.get("ids", [])]
     if not ids: raise ValueError("prefill: empty ids")
+    # R3-08 engine belt (mirror of serve._b_prefill): refuse to bind a
+    # conversation that is currently generating on another slot
+    cid = p.get("conversation_id")
+    if cid is not None:
+      for sl2 in self.slots:
+        if sl2["conversation_id"] == cid and sl2["gen"] is not None:
+          self.rpc_log.append((time.time(), "prefill", {"rejected": "conversation_busy", "cid": cid}))
+          self.rejected.append(("prefill", f"conversation busy: {cid!r} is generating on slot {sl2['s']}"))
+          self._send(conn, {"id": rid, "ok": False,
+                            "error": f"conversation busy: {cid!r} is generating on slot {sl2['s']}; wait for the stream to end"})
+          return
     sl = self._pick_slot(p)
     with self.lock:
       self.prefill_params.append(dict(p))
@@ -792,6 +814,12 @@ class MockBatchEngine(MockEngine):
       sl["conversation_id"] = p.get("conversation_id")
       sl["used"] = True; sl["dirty"] = False; sl["gen"] = None
       self.by_conn[conn] = sl["s"]
+      if mode == "FOLLOW_UP" and self.cfg.get("followup_evict_race"):
+        # R3-15 test hook: the slot was LRU-evicted between the API's decide
+        # and this prefill (the real _pick_slot error class verbatim)
+        self.cfg.pop("followup_evict_race")
+        raise ValueError(f"FOLLOW_UP conversation_id mismatch: no resident conversation "
+                         f"{p.get('conversation_id')!r} on any slot (evicted? dirty? use FRESH)")
       if mode == "FOLLOW_UP":
         cur = int(p["cur"]) if p.get("cur") is not None else sl["cur"]
         self._prog(conn, rid, 0, 2, "prefill_t1")

@@ -1,0 +1,1 @@
+{"decision": "KEEP-B", "old": "engine vs OLD f32 anchor: 347/349 EXACT, 18/20 prompts full | gaps n=2 min=6.48e-03 med=4.84e-02 max=9.02e-02 <1e-2:1", "fp16": "engine vs fp16-partial anchor: 348/349 EXACT, 19/20 prompts full | gaps n=1 min=6.58e-02 med=6.58e-02 max=6.58e-02 <1e-2:0"}

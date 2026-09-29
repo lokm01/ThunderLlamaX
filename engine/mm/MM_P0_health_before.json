@@ -1,0 +1,1 @@
+{"status":"ok","engine":{"ready":true,"busy":false,"rpc":null,"pos":92,"ctxk":100352,"mode":"FRESH","queue":0,"dirty":false,"uptime_s":7977.4,"config_fp":"e91605105e1a34c0","lookup_k":"10","pf_prefill":"1","cycles_since_rebuild":21,"batch_b":null},"queue_depth":0,"config":{"config_fp":"e91605105e1a34c0","config_fp_expected":"e91605105e1a34c0","drift_check":"on"}}

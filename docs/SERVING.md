@@ -2,15 +2,23 @@
 
 The engine is a **service**, not a benchmark: a GPU-owner daemon (the engine
 process, booted once) plus an HTTP façade that speaks the OpenAI chat
-protocol. Everything here is live on the rig and gated: the api_gates battery
-(25/25 on the W5 stack), the GPU-free mock battery (85/85), 15-minute soaks
-(zero faults), and Tier-1 canonical 60/60 x2 after serving stress. Campaign
+protocol. Everything here is live on the rig and gated: the api_gates battery,
+the GPU-free mock battery (~180 tests across serving/api/pcache/L7/P8/
+swap-FSM batteries), 15-minute soaks (zero faults, dense W5 and MoE P8S/
+P10), and Tier-1 canonical 60/60 x2 after serving stress. Campaign
 journals: [history/M1A_SERVING.md](history/M1A_SERVING.md), M1B,
-M1C_STABILITY, SERVING_PLAN, R1_PROMPTCACHE, and the five-wave review-fix
-record [history/FIX_CAMPAIGN.md](history/FIX_CAMPAIGN.md).
+M1C_STABILITY, SERVING_PLAN, R1_PROMPTCACHE, the five-wave review-fix
+record [history/FIX_CAMPAIGN.md](history/FIX_CAMPAIGN.md), the R3 hardening
++ live-window record in [history/M1C_STABILITY.md](history/M1C_STABILITY.md)
+(the R3 section), and the multi-model campaign
+[history/MM_PLAN.md](history/MM_PLAN.md) + MM_P8S/P10 results. The
+operator's knob census and drift/alarm runbook (the R3 revision) lives at
+[../engine/docs/SERVING.md](../engine/docs/SERVING.md).
 
-This page has four parts: the **API reference**, the **operational
-runbook**, **how the caches behave**, and the **known-issues ledger**.
+This page has five parts: the **API reference** (now multi-model), the
+**operational runbook** (including the model swap), **how the caches
+behave**, the **speculative modes** (deep-K, adaptive T=1, MTP), and the
+**known-issues ledger**.
 
 ## Part 1 — API reference
 
@@ -31,8 +39,52 @@ client -> api_server.py (127.0.0.1:8080, OpenAI HTTP/SSE, no GPU imports)
 | Endpoint | What it does |
 |---|---|
 | `POST /v1/chat/completions` | chat completion, stream (SSE) or non-stream; `usage` via `stream_options.include_usage` |
-| `GET /v1/models` | model list |
-| `GET /health` | liveness (503 while loading) |
+| `GET /v1/models` | model list — REGISTRY-driven, with residency status (see below) |
+| `GET /health` | liveness (503 while loading); the admin header adds engine/pcache/model detail |
+
+### Multi-model: the `model` field, 409s, and the swap
+
+The service hosts a model registry ([ARCHITECTURE.md](ARCHITECTURE.md));
+exactly ONE model is resident on the GPU at a time. The `model` field in
+`/v1/chat/completions` is load-bearing:
+
+| `model` in request | response |
+|---|---|
+| absent | the RESIDENT model serves it (back-compat) |
+| the resident model's id | served (the id is echoed in the response `model`) |
+| a known registry id that is NOT resident | **409 `model_not_resident`** with a `switch` hint (how to make it resident) — deliberately NOT auto-swapped (a 100k-context swap takes minutes and a reboot; auto-swap would thrash) |
+| unknown id | 404 `model_not_found` |
+
+`GET /v1/models` lists every registry entry with its status: `resident`
+(loaded and serving), `loadable` (registry-valid, one `enginectl switch`
+away), `unavailable` (engine host/env/model file missing). During a swap
+the API serves **503 + `Retry-After`** while `ops/state/swap_in_progress`
+exists (file-derived state — a restarted API agrees with reality).
+
+**The swap, from the operator's seat** (`enginectl switch <model-id>`):
+
+1. `enginectl` validates the target against the registry (env file exists,
+   engine host exists, model file exists) and checks the API drain state;
+2. the swap intent (`next_model`) is written ATOMICALLY (tmp+rename+fsync+
+   **dir**-fsync) BEFORE anything is stopped — a system `sync` follows
+   (the GPU-EXIT sync law: a freshly-created file's dirent can die in the
+   reboot the stop provokes unless synced first);
+3. the resident engine gets the graceful shutdown RPC (token via stdin,
+   never argv); the wrapper waits out the exit;
+4. the GPU-EXIT reboot the stop provokes **is the transport** — launchd
+   brings the wrapper back, which promotes `next_model` (it wins over
+   `current_model` and the registry default), clears a swap-authored
+   staydown, and boots the target model's engine host under the target
+   env file;
+5. `/v1/models` and `/health` show the new resident; the per-model prompt
+   cache makes the first FRESH prefill of a previously-seen context a
+   CACHE_HIT.
+
+The full swap FSM is battery-tested GPU-free
+(`engine/tests/test_swapfsm_p8.zsh`, 9/9: atomic intent writes, breaker-
+authored staydowns never cleared by a swap, invalid intents quarantined
+with the current model kept, `TLX_MODEL_ID` exported to the engine, the
+monolithic-env rollback fallback).
 
 **Streaming semantics**: one SSE chunk per engine cycle — each cycle emits
 m+1 tokens (up to K+1), so chunks arrive at the cycle rate: ~8.9 tokens /
@@ -101,6 +153,29 @@ turn starts FRESH, not FOLLOW_UP).
   runaway generator once streamed 44 s of post-abort tokens — the API
   runaway law).
 
+### The speculative modes (what serves your tokens)
+
+Three decode modes ship, selected per conversation/cycle — all Tier-1
+(output-identical to greedy T=1 by gate):
+
+- **Deep-K LOOKUP (the quote path)** — the resident dense default
+  (`LOOKUP_K=10`): n-gram drafts from the document being read, verified in
+  one batched pass. 75.81 tok/s on hit-class work @100k. On the MoE the
+  same machinery runs at K=8 (97.6-104.0 tok/s through the API).
+- **Adaptive T=1 prose mode (dense, `TLX_T1_MODE=1`, shipped ON)** — after
+  4 consecutive zero-accept/zero-hit K2 cycles (the alpha-death signal),
+  the session switches to plain T=1 cycles; a per-cycle lookup scan keeps
+  the exit trigger live, and the first 8-gram hit drops STRAIGHT into a
+  deep cycle. Prose: 14.67 -> **20.56 tok/s**; the mixed-mode output is
+  bit-identical to pure spec; quote classes never trigger it (canonical
+  Tier-1 60/60 with the mode ON, 75.35 tok/s).
+- **First-party MTP K=4 (MoE, `MM_MTP=1`, shipped default)** — the model's
+  own MTP layer drafts 4 tokens ahead of the probe (see
+  [ARCHITECTURE.md](ARCHITECTURE.md) for the chain). Prose through the
+  API: 19.1 -> **40.1 tok/s** (+110%); quote-docx2 25.4 -> 65.9 (+160%).
+  `force_mode` (`t1`/`spec`/`mtp`) exists for gates; a cancelled generate's
+  retry reuses the chain state with zero re-seed cost.
+
 ### Detokenization
 
 Qwen chat template applied bit-exactly (103/103 tokens vs the reference
@@ -154,12 +229,15 @@ boot:
   under `logs/` (survives the fault-reboots that wipe `/tmp`); the GPU lock
   is pid-liveness-checked and never auto-removed when any GPU process owns
   it.
-- **Env single-sourcing (V-27)**: the plists carry NO env dict; the wrapper
-  sources `ops/env.canonical` (0600, carries the admin token — generated
-  from the published `env.canonical.example`), logs its sha256 digest, and
-  the daemon's config fingerprint surfaces in `/health`; the API
-  drift-checks it and serves **503 `config_drift`** on mismatch. A launchd
-  relaunch can never silently boot a stale env subset.
+- **Env single-sourcing (V-27 + P8)**: the plists carry NO env dict; the
+  wrapper sources `ops/env.common` (shared secrets/ops knobs — generated
+  from the published `env.common.example`) THEN
+  `ops/env.canonical.d/<current-model>.env` (per-model numerics + paths;
+  the pre-P8 monolithic `ops/env.canonical` remains the rollback source and
+  its example still documents every knob), logs the sha256 digest, and the
+  daemon's config fingerprint surfaces in `/health`; the API drift-checks
+  it and serves **503 `config_drift`** on mismatch. A launchd relaunch can
+  never silently boot a stale env subset.
 - **Self-heal across GPU-exit reboots**: `RunAtLoad` + `KeepAlive` bring both
   services back (validated with a kill -9 cycle on the rig).
 - `enginectl` subcommands: `status` / `stop` / `restart` / `logs` /
@@ -278,7 +356,7 @@ seeds `tok_hist` on the boot/FRESH/FOLLOW_UP/CACHE_HIT/snapshot_load paths.
 Without seeding, the first FRESH generate self-matches a -1 prefix -> -1
 drings -> OOB fault (never exercised before deep-K shipped).
 
-## Known issues (the honest ledger — W5 findings, live-rig)
+## Known issues (the honest ledger — W5 + MM live findings)
 
 1. **CACHE_HIT continuations from midprefill/turnend pcache nodes are not
    bit-exact vs FRESH** (pre-existing since the R2c M128 trunk; FIX_CAMPAIGN
@@ -291,7 +369,10 @@ drings -> OOB fault (never exercised before deep-K shipped).
    the GPU-EXIT reboot law fires seconds after the engine exits, and
    RunAtLoad heals the daemon back (~5 min). A true stop needs the
    disable-then-bootout launchd sequence (open ops item). The staydown
-   marker is typically preempted by the reboot.
+   marker is typically preempted by the reboot — sharpened by P10 as the
+   STAYDOWN-DELETER: the hard-death path inside `dev.synchronize()` may
+   never write the marker at all; holding a GPU window through a shutdown
+   currently needs an external marker-keeper (root cause open).
 3. **Batch-config exactness through cache paths** (finding #8): on the
    BATCH_B=2 opt-in, solo FRESH streams are bit-exact but CACHE_HIT-derived
    batch phases fail the bit-exactness gate (finding #5's class extended to
@@ -300,7 +381,21 @@ drings -> OOB fault (never exercised before deep-K shipped).
 4. **The kernargs-slab leak** (R6 P3): every graph build allocates a
    host-mapped kernargs slab that is never released; long-running batch
    service mitigates with rotated fences + non-fatal failed fences. Durable
-   fix (ka-slab reuse) is a documented follow-up.
+   fix (ka-slab reuse) is a documented follow-up. (The MoE campaign's
+   KAPool reuse audits show rebuilds REUSING slices in that engine — the
+   leak remains a dense-gcycle follow-up.)
+5. **The MoE first-contact gate shape** (P10, adjudicated): a spec-vs-T1
+   gate that runs right after pcache ingest compares FRESH-vs-RESTORED
+   (arm A feeds + ingests, arm B restores); reruns compare
+   RESTORED-vs-RESTORED and always pass. The P8S "transient" G3 mismatch
+   was this shape plus a process-layout ULP residue on a degenerate
+   repetitive era — bit-proven NOT the restored state, NOT the cur, NOT
+   MTP-caused; bank60 (short prompts, no PF/restore) is clean twice and
+   the pcache-exactness gate is clean. Watching brief open: the bisect
+   peels the daemon boot shape (harness-with-MtpRig reproduction).
+6. **MoE long-ctx MTP alpha unmeasured** — the acceptance table's 96k
+   entries are harness-class only; the serving-grade 96k alpha battery is
+   queued.
 
 ## Not yet (M2/M3)
 

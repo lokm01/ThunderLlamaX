@@ -1,0 +1,136 @@
+MM P3+P4 — PART 2 RESULTS (2026-09-25, GLM implementation agent; resumed after the
+part-1 agent died on an API timeout — part 1 committed e3d1b43)
+Harness MM_P34_run.py (S5-S9) + MM_P34_disc.py (the flip discriminator).
+Full progress file ~/mm_p34_progress.txt (fsync'd per line); bank ~/mm_p34_bank.json.
+
+═══ ITEM 1 — THE FULL-MODEL T=1 FORWARD: GREEN (347/349, adjudicated) ═══
+  S5   h6k2048 head: 48 random rows BIT-EXACT vs h6k_rows_ref; FULL head on the
+       anchor's real final h (prompt 0): top1=11751 anchor=11751 EXACT
+       (l[11751]=17.66; runner-up class far below). det OK.
+  S6   EAGER full train (523 kernels/token, 40 layers + embed + head):
+       347/349 positions top-1 EXACT vs the fp32 anchor, 18/20 prompts full,
+       7.20 tok/s. det x2 OK.
+  S6b  GRAPH (ONE 523-node MG, wait-each, alternating pair): IDENTICAL result
+       347/349, 18.48 tok/s (state + KV + GDN state all device-resident,
+       per-token host work = 3 copyins + 1MB logits copyout + argmax).
+       det x2 OK. EAGER == GRAPH position-for-position — the engine is
+       self-consistent across execution paths.
+  THE 2 FLIPS, ADJUDICATED BY MM_P34_disc.py (per-layer h GPU-vs-anchor,
+       R4_TRACE pattern):
+    (prompt 2, pos 18): drift grows SMOOTHLY 1.7e-6 (L0) -> 6.3e-5 (L8) ->
+       6.5e-2 (L36), NO single-layer jump; top-5 SET identical, top1<->top2
+       swapped (engine gap 0.061 / anchor 0.090; logits maxdev 0.369 on scale
+       16.4 = 2.2% rel). Drift-overtaken near-tie (the "unicorns" trajectory
+       amplifies; L12 already 1.1e-2).
+    (prompt 16, pos 15): TRUE near-tie (engine gap 0.0083 / anchor 0.0065,
+       both < 1e-2); smooth growth 3.5e-6 -> 2.9e-3; same top-5 set.
+    VERDICT: accumulated-numerics class (the fp16 MoE partials + kernel-order
+    fp32 vs the anchor's pure-fp32 idealization), NOT wiring bugs. The engine
+    is deterministic and path-consistent; the anchor bank's own near-tie
+    census: 0/349 < 1e-3, 3/349 < 1e-2.
+  *** THE FP16-PARTIAL LAW (for P5): gxdn stores fp16 partials (P2 design,
+  bit-exact vs the kernel-order refs); vs a pure-fp32 anchor this injects the
+  dominant drift term (up to ~0.3 logit abs at 40 layers on amplifying
+  trajectories). If P5 wants anchor-class closeness: EITHER model the fp16
+  partial in the anchor (one np.float16 round-trip per expert partial — the
+  engine-order anchor) OR store fp32 partials in gxdn (parts traffic is tiny;
+  the fp16 was a P2 numerics-tier choice, not a bandwidth need). ***
+
+  THE SESSION'S BUG LEDGER (all in the dead agent's in-flight work, all fixed
+  before the gates ran; every one is a LAW-grade class):
+  1. S5 used `alloc` before its definition (UnboundLocalError — the crash the
+     dead agent died on).
+  2. THE PING-PONG LAW: build_seq alternated hin=hA/hB per layer while cmb
+     writes its output into hin -> L=1 would read layer-0's PRE-MoE h (stale).
+     Correct: in-place (every layer reads hA, scratches hB, cmb writes hA).
+  3. THE LUT LAW (P2 mkchain, not applied): L39's gx8e256up4 (IQ4_XS) needs
+     iq4nl; the code passed gridf (the IQ3_S grid) to every up lane.
+  4. ALL build_seq grids were 1-tuples ((P,) not P) -> global_size=((P,),1,1)
+     -> TypeError at the first eager launch. Normalized at build_seq return.
+  5. THE OBJECT-ARRAY TRAP: npz object arrays return OBJECT-dtype rows;
+     up(hf) on one uploads PyObject POINTERS (denormal fp32 ~1e-33 -> all
+     logits underflow to +-0.0 — the S5 "top1=97412" red herring the dead
+     agent was chasing). ALWAYS np.asarray(x, dtype=np.float32) from npz rows.
+
+═══ ITEM 2 — THE 20-PROMPT GREEDY BANK (the MoE Tier-1 seed) ═══
+  S9: 20 prompts x 32-token greedy continuation on the GRAPH train, det x2
+  (4 prompts full-rerun) OK -> ~/mm_p34_bank.json. Textually coherent:
+   [0] " Paris, a city renowned for its iconic landmarks such as the Eiffel
+        Tower, the Louvre Museum, and the Notre-Da[me]..."
+   [4] "name;\nSELECT name, COUNT(*) FROM orders GROUP BY name ORDER BY
+        COUNT(*) DESC;..."
+   [5] " Dr. Susan Calvin, a roboticist in the 20th century.\nThe laws are:..."
+   [18] ' the book "The C Programming Language" by Brian Kernighan and Dennis
+        Ritchie...'
+  Anchor-x8 cross-check (3 prompts x 8 CPU fp32 continuation tokens): prompts
+  0/1 EXACT 8/8; prompt 2 diverges at cont-token 6 (the same drift trajectory
+  as the pos-18 flip — expected). P5 grows this to the full 60/60 Tier-1 bank
+  + ctx ladder (the bank JSON records anchor_x8 for the divergence record).
+
+═══ ITEM 3 — PERF (kernel-only + graph; the MM_PLAN envelope update) ═══
+  MoE quartet/layer (rmsz+rt+shexp+up+dn+cmb chain, wait-each x5):
+    P=3 (K=2 shape): 1.547 ms | P=9 (K=8 shape): 1.520 ms  -> FLAT.
+    *** THE SMALL-SHAPE LATENCY LAW: at P<=9 the MoE kernels are LATENCY-
+    bound (8-72 CTAs on 82 SMs), NOT gather-BW-bound — the quartet cost is
+    shape-flat from K=2 to K=8. The 240 GB/s envelope needs bigger shapes
+    (the P1 146 GB/s @704-pair class) — P7 prefill / batch, not decode. ***
+  Per-class ms (wait-each/pipelined, P=1 decode shapes):
+    embg248 0.109 | rmsz2048g 0.083 | gv8k2048p(8192) 0.116 | gvf32ab 0.155
+    gconv36_1 0.148 | k2s36_1 0.150 | gv8k4096r 0.163 | spka256 0.147
+    spkq256 0.161 | rt8e256 0.274 | shexp8 0.433 | gx8e256up 0.482
+    gx8e256dn 0.280 | cmbz2048 0.150 | h6k2048 0.864 (483 GB/s — the only
+    BW-bound class at 7760 CTAs)
+  T=1 cycle: EAGER sum ~101 ms/token -> 9.9 tok/s; GRAPH 49-54 ms/token
+  (S6b 18.48 tok/s incl. copyout+argmax; +head ≈ 50.5 ms). ka-slab
+  1,338,880 B/graph (the leak is still per-build; 4 graphs this session).
+  K-mix trunk trains (S8, no head): D2 (P=3) 49.38 ms/cyc | D8 (P=9)
+  49.62 ms/cyc — the FULL trunk is ALSO shape-flat K=2..K=8.
+  HONEST PROJECTION vs MM_PLAN: T=1 greedy ~19-20 tok/s delivered (envelope
+  said 78-92 for K=2 @240 GB/s — we are at ~45 GB/s effective on 2.2GB/cycle
+  because decode shapes can't fill the machine; latency-bound, not BW-bound).
+  The spec-mix math: D8 at 49.6 ms/cycle x E[m|deep]~7-9 (the 27B depth law,
+  to be re-proven on THIS model in P6) -> 140-180 tok/s quote-class ceiling
+  WITH acceptance — unchanged from MM_PLAN's 140 target, but via latency-
+  flatness, not gather-BW. The per-class latency table is the P10 surface
+  (rt 0.274/shexp 0.433/up 0.482/h6k 0.864 are the fat single-stream nodes;
+  k2s/gconv/spk are already sub-0.16).
+
+═══ ITEM 4 — K-MIX GRAPH SETS WIRED ═══
+  D2 (K=2 prose default; P=3, gconv36_3/k2s36_3) and D8 (K=8 deep-on-trigger;
+  P=9, gconv36_9/k2s36_9): 521-node trunk trains each, 32-replay smoke CLEAN,
+  det-by-checksum-rerun OK (D2 49.38 / D8 49.62 ms/cyc). Per the P2 manifest
+  (MM_P2_kmix_manifest.md, now committed): 4 of the <=8 graph-variant budget
+  (D2/D8/PF/B2-reserve). Full gating = P5/P6 (draft/accept not yet wired —
+  MTP was dropped at repack; the plan's drafter is n-gram LOOKUP).
+
+═══ OPS ═══
+  - The dead agent left a runaway CPU llama-cli oracle (bad stdin -> infinite
+    "> " loop) that wrote a 212GB log and FILLED THE DISK (100%, 104Mi free).
+    Killed + deleted -> 201Gi free. LAWS: never launch llama-cli without
+    stdin closed and a hard -n cap; check df before long runs.
+  - Docker/colima got containerd corruption from the disk-full episode
+    ("failed to create temp dir: input/output error") — nvcc/cuobjdump
+    currently UNAVAILABLE. All needed cubins were already built+audited.
+    Fix when a build is next needed: the fresh-disk colima rebuild procedure.
+  - Engine daemon (com.lokm.llm-engine) stayed DISABLED through all GPU
+    windows; re-enabled + /health verified at session end.
+  - One GPU process per boot (softer variant) respected throughout; session
+    spanned 3 harness runs + 1 discriminator run, zero GPU faults, zero
+    reboots.
+
+═══ HANDOFF TO P5 (full Tier-1 bank + ctx ladder) ═══
+  1. Grow the bank: 60 prompts x 60 tokens (extend MM_P34_anchor.PROMPTS;
+     re-run anchor ~30-45 min CPU; engine bank via S9's run_cont pattern).
+     Tier-1 contract: engine det 60/60 x2 + stock-class vs llama.cpp-CUDA
+     (needs the Linux box / D7 oracle) + the anchor cross-check with the
+     fp16-partial adjudication above.
+  2. CTX LADDER: CTX=1024 -> 4k/8k/32k/96k (rope tables + KV allocs scale;
+     the anchor's ctx param; watch the 60MiB GDN state x slots at K-mix).
+  3. The h contract is proven fp32 [P][2048] end-to-end; logits fp32.
+  4. ka-slab reuse before soak-class runs (4 leaked slabs this session,
+     ~5.4MB — fine here, not at P5 scale).
+  5. The ~950-cycle dext budget: S9+S6b totaled ~1900 graph replays with
+     eager interleaves and copyouts — no fault; keep an eye on continuous
+     replay counts > ~3800 (the 27B law was 850-1025 4-graph cycles).
+  6. P6: draft/accept on D2/D8 (n-gram LOOKUP port is model-agnostic), the
+     K-mix trigger, then the aggregate campaign.

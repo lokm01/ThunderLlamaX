@@ -1,0 +1,132 @@
+MM P8-SERVE RESULTS (2026-09-28, GLM implementation agent — the MoE
+serve-conformance bridge + the Part-B MTP groundwork; commit 411c4df)
+
+Files: engine0/serve_moe.py (the daemon) + test_moe36.py (the host) +
+pcache_moe.py + pcache.py (parameterized) + moe_serve_mock.py (the battery) +
+mm_gate_serve.py / mm_soak.py / mm_g3_diag.py (the live gates) +
+~/mm_repack_mtp.py + ~/mm_mtp_anchor.py (Part B).
+
+═══ PART A — THE SERVE-CONFORMANCE BRIDGE: LANDED, ALL GATES GREEN ═══
+ARCHITECTURE: serve.py imported as a LIBRARY (the protocol primitives:
+send/_send_lock/_mark_dead/validate_rpc/check_admin/_peer_uid/_emit_seq_
+violation/watchdog patterns); its module state SWAPPED for the MoE daemon's.
+The dense daemon untouched. The MoE cycle = the P7 folded engine: T1/D2/D8
+graph select by the vendored P6 lookup, eb = (m, amds[m]) readback after one
+timeline wait, acc36+selc36 in-graph commit, daemon-level fence every 512.
+
+  MOCK BATTERY (GPU-free, moe_serve_mock.py): 29/29 PASS — the protocol
+    shapes, spec==t1 BY CONSTRUCTION with real speculation (D2 cycles),
+    stop tokens, cancel (the SAME-conn scoping law; cancelled GENERATE =
+    a legal continuation, cancelled PREFILL = dirty + FOLLOW_UP refused),
+    FOLLOW_UP (foreign cid / delta+cur / the divergence refusal), AUTO_CACHE
+    (ingest at 1024 -> hit cached_tokens=2048 -> continuation EXACT vs
+    FRESH), corrupt-node quarantine fallback, emit-seq violation -> error +
+    dirty, admin-gated shutdown. THE MUTATED-FLAG DIRTY DISCIPLINE: a
+    validation raise (pre-mutation) is a CLIENT error — never poisons the
+    engine state (the dense daemon still has the coarser behavior).
+
+  LIVE GATES (mm_gate_serve.py, ~/mm_p8s_progress.txt, the daemon on
+  /tmp/llm-engine.sock, split rung 98304, decode S=32 + PF S=8):
+    G1  status ready model=qwen3.6-35b-a3b-egpu ctxk=98304 fp (mm_pack)
+    G2  *** THE TIER-1 BANK60 THROUGH THE DAEMON: 60/60 spec==t1 prefix-
+        exact, det-x2 OK *** (the mission gate)
+    G3  spec==t1 @4k-ctx (PF-chunk feed): EXACT det-x2 — after adjudication:
+        the FIRST run mismatched once (both arms in a degenerate special-
+        token era); NON-REPRODUCIBLE across 3 clean reruns + a full engine-
+        history determinism probe (prefill cur + gens identical across
+        short/4k/8k interleavings). The transient/watch class; the soak
+        owns the watching brief.
+    G4  *** PCACHE CACHE_HIT: cached_tokens=2048, the restored continuation
+        EXACT vs the FRESH arm *** (nodes ~76MB@1024; +10.4KB/tok)
+    G5/G6  quote-alpha 98.1 / quote-code 96.3 / prose 19.1 / 18.9 tok/s
+        through the DAEMON (the in-harness P7 118.6/109.8/19.5 under this
+        session's ambient — the harness-era ratio holds)
+    API  /health ok; /v1/models resident; non-stream + STREAM completions
+        live (reasoning_content split + SSE prefill comments + usage);
+        the 409 model_not_resident + swap-hint paths exercised
+    SOAK *** 148 rounds / 15 min / 0 FAILURES (streams + follow-ups +
+        quote-class + cancels + health polls; dirty never set; 424 fence
+        cycles clean; pcache writer quiet) ***
+
+  THE P8 BUGS FOUND LIVE (fixed):
+    1. THE ENV-SUBDIR BUG (api_server._expected_config): registry env_file
+       values carry their SUBDIR ("env.canonical.d/<model>.env") — basename()
+       dropped it, the isfile() check failed, and every split-env model
+       silently derived the DENSE monolithic fp -> permanent config_drift.
+    2. THE FP-EXTRA CONVERGENCE PROTOCOL (svc_fp.clear_extras/set_mm_pack_
+       extra): the API and the daemon must derive the SAME per-model extras
+       (moe-gdn -> the packed-manifest sha mm_pack; dense -> the cubin
+       digest) or every boot drifts.
+    3. MM_PACKED in the MoE env pointed at iq3_s while MM_P2_ports.PACK
+       (what the rig ACTUALLY loads) is iq4_xs — the fp now hashes the
+       loaded pack; the env corrected.
+
+═══ PART B — THE FIRST-PARTY MTP K=4: THE GROUNDWORK + THE DECISION INPUT ═══
+  THE MTP LAYER IS IN THE GGUF as blk.40.* + blk.40.nextn.* (eh_proj
+  [4096->2048] Q8_0, enorm/hnorm/shared_head_norm F32, a FULL-ATTN + MoE
+  layer). llama.cpp graph_mtp semantics decoded + mirrored: x = eh_proj @
+  concat([enorm(emb(t)), hnorm(h)]) — E FIRST — then attn (q-norm/partial-
+  rope/own-KV/sigmoid-gate) -> MoE -> shared_head_norm -> the SHARED head.
+
+  LANDED:
+    - mm_repack_mtp.py: blk.40 re-included into the ENGINE's pack (+382MB
+      routed L40 bank byte-copy + 43MB trunk: Q8_0 GEMVs verbatim, the BF16
+      routers dequantized F32 — TYPE 30 = BF16 IN THE MODERN ENUM, verified
+      from bytes). Manifest atomic+fsync; sha256 per file; gates green.
+    - dq_q3_k/dq_q4_k numpy ports (VERBATIM ggml-quants.c): q4_k BIT-EXACT
+      on the synthetic roundtrip; both sane on real L40 weights (std
+      0.0161/0.0150 vs the trunk-expert class 0.0101). LAWS: Q3_K's d comes
+      LAST ({hmask|qs|scales|d}); the SAME 32 hmask bytes serve both
+      128-groups (m's 8 bits span them).
+    - mm_mtp_anchor.py: the MTP layer reference + the offline alpha
+      measurement (the chain protocol: per committed base p, seed
+      (h_trunk(p), t_p) -> K drafts; m(p) = the longest prefix vs the true
+      greedy stream; per-seed KV rows true by construction). Smoke-gated
+      (mtp_smoke: 5-second synthetic forward).
+    - *** THE FIRST MEASUREMENT (the QUOTE wiring check, alphabet repeat,
+      8 bases): P(accept1) = 0.875, E[accepted]@K4 = 2.75 -> E[tok/cycle]
+      3.75, cond-alpha [0.875, 0.857, 0.833, 0.800] — the first-party MTP
+      layer DRAFTS STRONG on our weights (depth-4 still >=0.8 on the
+      predictable class; the DeepSeek-anchor class confirmed). ***
+
+  THE OPEN SCOPE (the follow-up session, priced):
+    - THE EXERT FORMAT GAP: unsloth quantized blk.40's experts Q3_K/Q4_K
+      (the trunk is IQ3_S/IQ4_XS) — the gx8e256 families read IQ formats.
+      Options: (a) IQ3_S/IQ4_XS ENCODERS (the ggml quantize machinery — the
+      C tool path exists via the nvcc container), (b) Q8_0 expert kernels
+      (2 new gx variants — the trivial encoder), (c) the dq->Q6_K dn6-class
+      partial reuse. (b) is the cheapest legal path.
+    - eh_proj needs NO new kernel (gv8k4096r + a zero residual buffer).
+    - The P=5 probe graphs: k2s36s_5/gconv36s_5/h6kam_5 cubin builds
+      (mechanical -DTMAX/-DPP variants) + build_seq7(P=5, tail_acc_K=4).
+    - THE CHAIN GRAPH FAMILY: the K=4 draft chain runs AFTER the probe's
+      accept (one cycle late — the committed-hidden carry via a rowcp2048
+      kernel); the MTP-KV row maintenance protocol is designed (true-pair
+      seeds; draft rows self-invalidating). The PF graphs append the MTP
+      layer at P=256 (~+2.5% prefill).
+    - THE PROSE ALPHA NUMBER: the quote wiring check passed; the prose
+      passages need the machine QUIET (the 16GB RAM wall — the anchor at
+      ~8GB + the daemon 2.3GB thrashed; run it solo next session:
+      ~/tg311/bin/python mm_mtp_anchor.py alpha — the tool is proven).
+
+═══ NEW LAWS ═══
+  1. THE FP-EXTRA CONVERGENCE LAW (above).
+  2. A MID-SESSION REPACK INVALIDATES THE RESIDENT DAEMON: the soak's 503s
+     began the MINUTE the packed manifest changed (the fp discipline fired
+     live, correctly) — repack + daemon-restart are one operation.
+  3. THE CANCEL-SCOPING CLIENT LAW: the cancel rides the REQUEST'S conn (a
+     foreign conn's cancel is ignored by design — the mock battery caught
+     the wrong-conn test).
+  4. Q3_K/Q4_K GGUF LAYOUT LAWS (d-last; shared hmask).
+  5. The G3 transient class: a first-contact one-off mismatch, never
+     reproduced — record + watching brief, do NOT block a ship on it
+     without a recurrence.
+
+═══ OPS / SHIPPED STATE ═══
+  The MoE daemon LIVE on /tmp/llm-engine.sock (manual env boot under
+  ops/env.common + env.canonical.d/qwen3.6-35b-a3b-egpu.env), the API on
+  :8080 serving it (ops/state/current_model = qwen3.6-35b-a3b-egpu).
+  Swap back to dense: shutdown RPC (admin token; sudo sync x3 first — the
+  GPU-EXIT law), printf qwen3.8-27b-egpu > ops/state/current_model, boot
+  test_w100k.py under the dense env (or the launchd wrapper after
+  bootstrap). The MoE pcache root has 10 nodes (the gates' — fp-scoped).

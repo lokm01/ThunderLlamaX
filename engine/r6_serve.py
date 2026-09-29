@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """R6 PHASE 3 — the SERVING batch engine wrapper (engine level, no sockets).
 
 Layers:
@@ -86,12 +83,10 @@ def r6_boot(E):
   from mtp import RM, RBLK, CBLK, CTXK
   P = E.P
   # ---- extra cubins: the M5 (T=5 set) + M10 (BT=10 family) worlds ----
-  need = ["h_embed5", "k2s5", "accept5k", "acceptsel5k", "lookup5_nw32",
-          "k0n10", "k0ab10", "q5g8v10", "aq3k8v10", "aq6k8v10", "ao8nw32_10",
-          "k3aonw32_10", "op38nw32_10", "hh10", "ffn8v10r7", "down8nw32v10r7", "head8v10",
-          # pcache restore's cur-derivation fallback (nodes captured without
-          # meta cur, e.g. legacy PF-world nodes restoring into this daemon)
-          "pfk_n16"]
+  # R3-19: the list lives in svc_fp.CUBINS_NEEDED (stdlib-only) so the API
+  # process fingerprints the SAME set the daemon loads by path.
+  import svc_fp
+  need = list(svc_fp.CUBINS_NEEDED)
   for n in need:
     if n in E.pr: continue
     lib = open(f"~/tinygrad-metal/engine0/{n}.cubin", "rb").read()

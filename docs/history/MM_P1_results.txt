@@ -1,0 +1,111 @@
+MM P1 — RESULTS (2026-09-24, GLM implementation agent; commits f7a92bf + this one)
+Harnesses: MM_P1_q.py / MM_P1_q2.py / MM_P1_prod.py; repacker pack36.py; kernels MM_P1_rt8e256.cu / MM_P1_gx8e256up.cu.
+
+═══ PART 1 — THE QUEUE-REPLAY FAULT: ROOT-CAUSED AND CLOSED ═══
+(The P0 D4 open item "fresh NVComputeQueue [wait->exec(gx)->signal] wedges on the
+first wait" is RESOLVED. It was never a queue-machinery bug.)
+
+THE ANSWER — three stacked causes, all now laws:
+  1. THE NAME LAW CONFIRMED AS THE HISTORICAL WEDGE (P0 law 1): the fault was
+     only ever observed in MM_P0_d3_gather.py, whose programs were loaded as
+     TinyELF(name="MM_P0_gx8e256nw32") = FILE PREFIX != cubin symbol. The
+     per-kernel .nv.info/.text/.nv.shared sections then don't match ->
+     prog_addr = whole-ELF base + shmem/stack unparsed -> degraded QMD ->
+     SM Illegal Instruction -> the QMD never completes -> its release never
+     fires -> the host timeline wait WEDGES -> device fault. The post-fix
+     harness (d3_final) never re-ran the queue path, so the wedge stayed
+     "unexplained" in the P0 record.
+  2. THE SELF-DEADLOCK OFF-BY-ONE (found live, run-1 of MM_P1_q): capturing
+     prev as `dev.timeline_value - 1` AFTER calling next_timeline() makes the
+     graph WAIT ON ITS OWN SIGNAL VALUE (v both wait and signal) -> deadlock,
+     identical wedge signature. LAW: capture prev BEFORE reserving v (the last
+     SIGNALED value), exactly as gcycle's run_tokens does.
+  3. THE PIPELINING LAW (T4, the real platform constraint): submitting a second
+     graph train while the first is still executing FAULTS with
+     SKEDCHECK22_INVALIDATE_ACTIVE_QMD — the P7F1 law, TIMING-DEPENDENT
+     (T3's same-object depth-2 x4 survived by luck; T4's first pair faulted).
+     THE PRODUCTION LAW: WAIT EVERY graph before the next submit (gcycle
+     wait_each=True / PG_WAIT=1 semantics — which is what production decode
+     and prefill actually run). No depth-2 pipelining of graph trains.
+
+What is PROVEN CLEAN (T1/T2/T3, name-law-compliant programs):
+  - Lone-submitted [memory_barrier -> wait(prev) -> exec -> signal(cur)] trains
+    COMPLETE. The W2 "lone graphs never complete" law does NOT apply to this
+    queue class — the eager path always completes because hcq_profile's
+    timestamps consume the QMD release slots, pushing its signal to the
+    NVM-semaphore + NON_STALL_INTERRUPT path; graph trains signal via the bare
+    QMD release and complete fine too. The gcycle kicker remains harmless.
+  - QMD-release signals, var-patched waits/signals, dedicated cpu_access
+    kernargs slabs, VA pointer tables from device memory, chained
+    dependent_qmd0 execs, and even same-object resubmission after a completed
+    wait — all clean.
+
+THE DELIVERABLES:
+  - 256+256 replays [mm_eidmut -> gx] with device-mutated eids: eids EXACTLY
+    match the numpy affine sim; det x2 OK (NaN-aware compare: the ys of random
+    banks are ~22% NaN — plain np.array_equal FALSE-ALARMS on them; the proven
+    compare is (a==b)|(isnan(a)&isnan(b)); finite-frac 0.78).
+  - Router chain [hrot -> rt8e256poc -> gx704] x 256 in-graph: rt top-8 EXACT
+    vs numpy on the drifted h; det x2 OK (h/eids/ys).
+  - ENDURANCE: 1024 consecutive wait-each replays CLEAN (582 us/replay) — no
+    ~950-cycle-class fault on this path (the budget concern remains for
+    452-kernel production graphs at M1A_GEN_REBUILD_EVERY=256, unchanged).
+  - THE GRAPH-PATH GB/s NUMBER P0 couldn't measure (wait-each, incl the
+    ~0.3-0.6 ms host pacing per graph):
+      [mut->gx] 88-pair: 670 us/cycle = 59 GB/s effective (submit-bound)
+      [hrot->rt->gx] 704-pair (317 MB/cyc): 2.98 ms/cycle = 106 GB/s effective
+      production chain [hrot->rt8e256->gx8e256up] 704-pair (634 MB/cyc):
+        4.34 ms/cycle = 146 GB/s in-graph (kernel-only estimate ~156)
+      K=8 decode shape (P=9 -> 72 pairs, 67.1 MB/cyc): 683 us/cycle = 98 GB/s
+        effective (pacing-dominated at this small shape)
+    In production the pacing is PER GRAPH (one train per token across all 40
+    layers), so the kernel-rate numbers are the model-relevant ones.
+
+═══ PART 2 — THE MoE REPACKER (pack36.py): BOTH TIERS PACKED, GATES GREEN ═══
+  ~/models36/packed/qwen3.6-35b-a3b-iq4_xs/ : routed 14.174 GiB (40 banks)
+    + trunk 2.380 GiB = 16.553 GiB  (== D2's exact header table)
+  ~/models36/packed/qwen3.6-35b-a3b-iq3_s/ : 11.990 + 1.955 = 13.945 GiB (== D2)
+  Layout: bank[e] = gate_e | up_e | down_e (byte-copy from the GGUF merged 3D
+  tensors, already expert-major; 16B-aligned mat bases in every real mix).
+  IQ4_XS: 37x373.3MB single-bank, 2x450.9MB (Q6_K down; under the ~457MB
+  measured-clean single-arg boundary), 1x505.4MB SPLIT into L*gu.bank + L*dn.bank
+  (over the boundary). IQ3_S: 40 single banks <= 450.9MB.
+  GATES: sampled-expert byte roundtrip EXACT (every layer x mat x experts
+  0..3,127,128,255); dequant-from-bank-offset spot gates OK through the
+  D2-validated ports; sha256 per file; manifest.json (geometry, per-bank
+  offsets/types, RMSNormZeroCentered note, router-order contract, MTP dropped,
+  mmproj never present) + registry_fragment.json for the P8 model-registry.
+  Trunk kept GGUF-native v0 (Q8_0 attn/GDN projections incl. the attn-named
+  GDN maps, F32 router/norms/ssm maps, embed Q8_0, head Q6_K) — the P2
+  2048-hidden kernel regen owns the packed7/packed5 layouts.
+
+═══ PART 3 — PRODUCTION v0 KERNELS: rt8e256 + gx8e256up LANDED GREEN ═══
+  rt8e256 (MM_P1_rt8e256.cu, 0 spill, audit clean): gold-router contract —
+    float4-order fp32 logits (BIT-EXACT the POC order) -> softmax -> fixed-order
+    top-8 masked argmax (strict >, tie->lower id) -> renorm -> sigmoid shared
+    gate. A/B: ids BIT-EXACT vs numpy on all probed positions; gates/sg agree
+    to <=1e-5 (expf vs np.exp ULP); renorm sum dev 1.19e-07; det x2 exact.
+  gx8e256up (MM_P1_gx8e256up.cu, 0 spill, audit clean): the POC gather-GEMV
+    lane pattern, gate+up dual read from the packed slab, SWIGLU epilogue
+    (silu(g)*u), running-sum accumulation (b asc, j asc) matching the
+    dequant-ref order bit-for-bit pre-epilogue. A/B: allclose vs numpy on the
+    finite mask (expf epilogue ULP); determinism proven by S3 (the S2 det line
+    false-alarmed on NaN rows — same lesson as Part 1; S3's NaN-aware det over
+    the in-graph chain PASSED).
+  In-graph A/B (S3): [hrot -> rt8e256 -> gx8e256up] x 256 wait-each replays on
+  the 7.3GB bank with DEVICE-WRITTEN eids: ids EXACT vs the numpy router on the
+  final drifted h; det OK; 146 GB/s at the 704-pair shape.
+
+═══ HANDOFF TO P2 ═══
+  1. gx8e256dn: same CTA/pair shape; down mat [2048 rows x 512 k] (272B IQ4_XS
+     rows = 2 blocks/lane-group; port the dq_iq4_xs lane map from D2's numpy
+     port); writes moe_part fp16 partials rank-addressed for the combine.
+  2. mx8e256cmb: fixed-rank-order fp32 combine x gates + sigmoid-gated shared
+     expert add (shared trunk FFN = the existing dense GEMV classes at 2048).
+  3. Q6_K dequant class for the 3 exception layers' down mats (or requant them
+     to IQ4_XS at repack — simpler; decide in P2).
+  4. Trunk regen at hidden=2048 (the P2 plan; packed7/packed5 where families
+     exist) + (1+w) norm variants + k2s dims rescale (trivial per D5).
+  5. Spec K-mix wiring: K=2 prose / K=8 deep-on-trigger (D6 policy).
+  OPS: engine launchd service was disabled for the GPU session — RE-ENABLED at
+  session end (launchctl enable + load, /health verified).

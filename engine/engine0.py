@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """engine0 W1-a runtime: static raw NV buffers, GGUF slice loader (IQ3/Q5_K/Q8_0
 stay PACKED — dequant in kernel), cubin loader, timed launch helper.
 Raw allocator bufs (no Tensor refs needed). E4 launch pattern."""
@@ -13,7 +10,11 @@ from tinygrad.device import Device, TinyELF, BufferSpec
 from tinygrad.runtime.ops_nv import NVProgram
 
 BASE = "~/tinygrad-metal/engine0"
-GGUF = "~/tinygrad-metal/models/Qwen3.8-27B-IQ3_XXS.gguf"
+# TLX P8 B.2 (item #0): the engine's model file comes from TLX_MODEL_PATH
+# (ops/env.canonical.d/<model>.env via the wrapper) — NOT a hardcoded path. The
+# default preserves the pre-P8 dense boot byte-for-byte; serve.py asserts at
+# daemon attach that the loaded path == the fingerprinted TLX_MODEL_PATH.
+GGUF = os.environ.get("TLX_MODEL_PATH", "~/tinygrad-metal/models/Qwen3.8-27B-IQ3_XXS.gguf")
 dev = Device["NV"]
 
 QUANT = {2:(32,18),3:(32,20),6:(32,22),7:(32,24),8:(32,34),12:(256,144),13:(256,176),

@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """W2-MTP: speculative decoding (K=2) on the engine. Cycle order per graph chain:
   draft_g  (2 steps: eh_proj -> blk.64 -> slice head -> argmax, writes dring)
   probe_g  (T=3 trunk: embed[cur,p1,p2] -> 64 blocks M=3 -> head -> amds)
@@ -43,6 +40,20 @@ CBLK = 3*10240
 
 M3_CUBINS = ["h_embed3","k0n3","k0ab3","q5g8_3","k2s3","op38_3","k3ao3","hh3","ffn8_3","down8_3",
              "aq6k8_3","aq3k8_3","aattn3","ao8_3","head8_3","amx3"]
+
+# ---- L7 abort-safety: the quiescent cancel checkpoint hook -------------------
+# serve.py installs CANCEL_CHECK at daemon attach (drain-then-raise; the ONLY
+# legal raise site for prefill cancellation — an abort must never cross the
+# engine boundary with eager launches still in the ring). Engine-internal
+# loops (fill_draft) checkpoint at points where the host holds proof of
+# quiescence (right after a dev.synchronize). None (standalone benches/tests,
+# pcache tooling) = a no-op; nothing raises.
+CANCEL_CHECK = None
+def cancel_checkpoint(stage):
+    ck = CANCEL_CHECK
+    if ck is not None:
+        ck(stage)
+
 # W2D L1: bit-identical restructured GEMVs (half2 cores; fat 1024-thr CTAs where
 # the 640-CTA grids were warps-in-flight-bound). GEMVV=1 swaps them into the probe.
 GEMVV = bool(int(_os2.getenv("GEMVV", "0")))
@@ -97,6 +108,23 @@ M10_CUBINS = ["h_embed10","k0n10","k0ab10","q5g8v10","k2s10","op38nw32_10","k3ao
 M11_CUBINS = ["h_embed11","k0n11","k0ab11","q5g8v11","k2s11","op38nw32_11","k3aonw32_11","ao8nw32_11",
               "hh11","ffn8v11r7","down8nw32v11r7","aq3k8v11","aq6k8v11","head8v11","lookup11_nw32","acceptk","accept11k","acceptsel11k"]
 DEEP_TRIG = int(_os2.getenv("LOOKUP_TRIG", "1"))   # 1 = prev-cycle hit (R4); 2 = TWO consecutive hits (HyperQwen refinement; lossless filter)
+# TLX PROSE A.1 (the adaptive T=1 mode): after TLX_T1_TRIG consecutive K2 cycles
+# with ZERO accepted drafts AND ZERO 8-gram hits (the alpha-death signal — novel
+# prose, in-vivo alpha ~0.02), the session switches to the T=1 trunk graph
+# (~46ms vs ~66ms/cycle at 100k ctx = the banked T=1 ref). The lookup-only scan
+# (lu_t1_g: the SAME lookup-K kernel wired to tok_slot instead of cur_slot)
+# runs before each T=1 cycle so the exit trigger stays live: its 8-gram hit
+# exits STRAIGHT INTO a deep cycle carrying the scan's dring proposals (the
+# R7a draft-skip shape). GDN state crosses the spec<->trunk worlds via the
+# PROVEN stload_trunk/stseed_spec pair (the FOLLOW_UP path). Tier-1 safe by
+# construction: T=1 tokens are the greedy argmax of the same trunk (the T=1
+# reference IS the Tier-1 anchor), and every spec cycle verifies proposals.
+# State laws obeyed: transitions only at device-quiescent points (post-wait),
+# prev re-anchored after the eager stx copies, win_up-only (fixed handles).
+TLX_T1_MODE = int(_os2.getenv("TLX_T1_MODE", "0"))
+TLX_T1_TRIG = int(_os2.getenv("TLX_T1_TRIG", "4"))
+if TLX_T1_MODE:
+  assert LOOKUP_K >= 8, "TLX_T1_MODE requires LOOKUP_K>=8 (the lookup-only scan graph + deep draft-skip set)"
 # R3 LOOKUP: in-graph n-gram drafter, appended to the END of the draft graph.
 # Overwrites dring0/dring1 when an 8-gram FULL-window suffix match is found in
 # tok_hist (LMIN=8: alpha1=1.000 offline on a/c; l in [4,7] carries spurious matches).
@@ -395,8 +423,16 @@ class MTPEngine(TrunkEngineW1C):
         p(*a, global_size=(g, 1, 1), local_size=((1024,1,1) if "nw32" in _nm else (768,1,1) if "nw24" in _nm else (512,1,1) if "nw16" in _nm else LS))
       pr["dposadd"](P.d["fillpos"], P.d["fillpos"], global_size=(1,1,1), local_size=LS)
       if (q+1) % 2000 == 0: print(f'[fill_draft] {q+1}/{len(ids)} ({time.perf_counter()-t0:.0f}s)', flush=True)
-      if prog is not None and (q+1) % 64 == 0: prog(q+1, len(ids))
-      if (q+1) % 16 == 0: dev.synchronize()
+      if (q+1) % 16 == 0:
+        # L7 FIX 3: the cancel checkpoint moved AFTER the every-16 sync — the
+        # old order (prog at %64 BEFORE the sync) could raise with up to ~16
+        # tokens x ~35 eager launches still in the ring (the one non-quiescent
+        # abort path; every other abort point is post-wait). prog itself is
+        # beat+send only now; the quiescent checkpoint honors an armed cancel
+        # here at EVERY 16-boundary.
+        dev.synchronize()
+        if prog is not None and (q+1) % 64 == 0: prog(q+1, len(ids))
+        cancel_checkpoint("fill_draft")
     dev.synchronize()
     print(f"[fill_draft] {len(ids)} positions in {time.perf_counter()-t0:.1f}s", flush=True)
 
@@ -531,6 +567,17 @@ class MTPEngine(TrunkEngineW1C):
     if LOOKUP_K == 10:
       # R8: same draft-skip at K=10.
       self.draft_lu_g = ParityGraph([lu10], tag="mtpDL")
+    if TLX_T1_MODE:
+      # A.1: the T=1-mode scan graph — the SAME deep-K lookup kernel wired to
+      # tok_slot (the T=1 world's committed-token slot; cur_slot is frozen
+      # spec-side during T=1 episodes). Writes dring0..K-1 + l_hist[cyc_slot]
+      # exactly like a deep cycle's draft-skip scan, so an exit-on-hit cycle IS
+      # a deep cycle (the session re-seeds cur_slot from the last T=1 token
+      # before it runs). tok_hist/pos_slot are shared worlds — current in both.
+      _lut1 = (pr[f"lookup{LOOKUP_K + 1}_nw32"],
+               (d["tok_hist"], d["pos_slot"], d["tok_slot"], *[d[f"dring{i}"] for i in range(LOOKUP_K)],
+                d["l_hist"], d["cyc_slot"]), 1)
+      self.lu_t1_g = ParityGraph([_lut1], tag="mtpLT1")
     # accept
     if K3:
       a0 = (pr["accept4"], (d["amds"], d["dring0"], d["dring1"], d["dring2"], d["xA"], d["m_slot"], d["m_hist"],
@@ -1201,7 +1248,13 @@ class DecodeSession:
   R4 (LOOKUP_K=4): per-cycle graph-set selection — after each cycle the emit's
   hit flag (emit[9] = l_hist[cyc]; 9 = 8-gram hit) picks the NEXT cycle's set
   (deep on hit, K2 on miss). Readout-order law: the decision reads the
-  PREVIOUS cycle's completed emit; zero extra syncs."""
+  PREVIOUS cycle's completed emit; zero extra syncs.
+  TLX A.1 (TLX_T1_MODE=1): a THIRD mode — T=1-only cycles via the GCycleEngine
+  parity graphs (E.gcycle; set by the host/daemon). Entry: TLX_T1_TRIG
+  consecutive zero-accept+zero-hit K2 cycles. Exit: the first 8-gram hit from
+  the per-cycle lu_t1 scan (straight into the deep set) or the ctx headroom
+  cap. All transitions at device-quiescent points; spec world state restored
+  before any spec-side consumer runs (serve parks the mode at generate end)."""
   def __init__(self, E):
     self.E = E
     self.prev = None
@@ -1209,16 +1262,96 @@ class DecodeSession:
     self.hitrun = 0
     self.ndeep = 0
     self.ncyc = 0
+    # A.1: the T=1 mode state
+    self.t1mode = 0        # 1 while T=1 cycles own the engine
+    self.zerorun = 0       # consecutive zero-accept + zero-hit K2 cycles
+    self.t1cyc = 0         # T=1 cycles run in THIS episode (conv parity = t1cyc & 1)
+    self.t1pos = 0         # pos_new the T=1 stream has reached (host-tracked)
+    self.t1cycidx = 0      # cyc_slot frozen at episode entry (l_hist read index)
+    self.nt1cycles = 0     # lifetime T=1 cycles (stats)
 
   def begin(self):
     assert self.E.graphs, "build_graphs first"
     self.prev = dev.timeline_value - 1
     self.deep = 0
     self.hitrun = 0
+    # A.1: a begin() re-anchor must NEVER happen mid-episode (the spec world
+    # would read stale rec4/conv4) — serve parks the mode before every
+    # rebuild/handler that calls begin(). Belt: park from whatever state the
+    # device is in IF the episode is somehow live (quiescent by contract).
+    if self.t1mode:
+      _tok = int(self.E.P.down_at("tok_slot", 0, 1, np.int32)[0])
+      self._t1_exit(0, _tok)
+    self.t1mode = 0
+    self.zerorun = 0
+    self.t1cyc = 0
+
+  def _t1_enter(self, cur, pos):
+    """spec world -> T=1 world. Quiescent-point only (post step() wait).
+    cur = the UNFED committed token (emit tok_m), pos = its feed position."""
+    E = self.E
+    E.stload_trunk()                       # rec4/conv4 slot4 -> rec{i}/conv{i}_0 (syncs)
+    E.P.win_up("tok_slot", 0, np.array([int(cur)], dtype=np.int32))
+    dev.synchronize()
+    self.prev = dev.timeline_value - 1     # re-anchor after eager work
+    self.t1cycidx = int(E.P.down_at("cyc_slot", 0, 1, np.int32)[0])
+    self.t1mode = 1
+    self.t1cyc = 0
+    self.t1pos = int(pos)
+    self.zerorun = 0
+
+  def _t1_exit(self, hit, last_tok):
+    """T=1 world -> spec world. Quiescent-point only. On an 8-gram hit, exit
+    straight INTO the deep set (dring carries the scan's proposals — the R7a
+    draft-skip deep-cycle shape)."""
+    E = self.E
+    E.stseed_spec(self.t1cyc & 1)          # trunk live GDN -> rec4/conv4 slot4 (syncs)
+    E.P.win_up("cur_slot", 0, np.array([int(last_tok)], dtype=np.int32))
+    dev.synchronize()
+    self.prev = dev.timeline_value - 1
+    self.nt1cycles += self.t1cyc
+    self.t1mode = 0
+    self.t1cyc = 0
+    self.zerorun = 0
+    if int(hit) >= 9:
+      self.hitrun = max(DEEP_TRIG, 1)
+      self.deep = 1                        # next cycle: deep set w/ scan proposals
+    # h_seed/dhd_seed are left stale: drafts are PROPOSALS only (probe-verified,
+    # Tier-1-safe); accept refreshes both from the probe trunk hidden (xA row m)
+    # on the first spec cycle after the episode. kv_d (draft KV) stays behind
+    # the committed stream until the next FOLLOW_UP delta fill — garbage-draft
+    # cycles cost m=0, never exactness (the alpha-death controller re-enters
+    # T=1 exactly when that is the optimal policy anyway).
+
+  def _step_t1(self):
+    """One T=1 cycle: lu_t1 scan -> T=1 parity graph (device-chained argmax) ->
+    flusher (follow-up-in-flight law). 3 graph submits, all counted by the
+    global dext budget. Returns the session-contract dict (m=0, 1 token)."""
+    E = self.E
+    G = E.gcycle
+    flush_g = E.graphs[3]
+    prev = self.prev
+    vd = dev.next_timeline(); E.lu_t1_g.submit(prev, vd)
+    vt = dev.next_timeline(); G.graphs[self.t1cyc & 1].submit(vd, vt)
+    vf = dev.next_timeline(); flush_g.submit(vt, vf)
+    self.prev = vf
+    nv_wait_timeline(dev, vf, what="DecodeSession.step_t1")
+    hit = int(E.P.down_at("l_hist", self.t1cycidx * 4, 1, np.int32)[0])
+    tok = int(E.P.down_at("tok_slot", 0, 1, np.int32)[0])   # argmax = emitted + next feed
+    self.t1pos += 1
+    self.t1cyc += 1
+    self.ncyc += 1
+    r = {"pos_new": self.t1pos, "m": 0, "cycle": self.ncyc, "stop": 0, "hit": hit,
+         "tokens": [tok], "t1": 1}
+    if hit >= 9 or self.t1pos >= (CTXK - 8):
+      self._t1_exit(hit, tok)
+    return r
 
   def step(self):
     E = self.E
     if self.prev is None: self.begin()
+    if self.t1mode:
+      return self._step_t1()
     if LOOKUP_K >= 5: g = E.graphs6 if self.deep else E.graphs
     elif LOOKUP_K: g = E.graphs5 if self.deep else E.graphs
     else: g = E.graphs
@@ -1258,5 +1391,15 @@ class DecodeSession:
       else:   # R5: LOOKUP_TRIG (HyperQwen refinement) — deep needs N consecutive hits
         self.hitrun = self.hitrun + 1 if hit >= 9 else 0
         self.deep = 1 if self.hitrun >= DEEP_TRIG else 0
+    # A.1: the alpha-death tracker — enter the T=1 mode after N consecutive
+    # K2 cycles that accepted nothing and hit nothing (the hysteresis that
+    # protects the MTP-positive middle class). Needs the trunk engine + the
+    # scan graph; headroom-checked so the episode + exit always fit the ctx.
+    if TLX_T1_MODE and LOOKUP_K >= 8 and not ran_deep5 \
+       and getattr(E, "gcycle", None) is not None and getattr(E, "lu_t1_g", None) is not None:
+      if m == 0 and hit < 9: self.zerorun += 1
+      else: self.zerorun = 0
+      if self.zerorun >= TLX_T1_TRIG and (int(e[0]) + 8) < CTXK:
+        self._t1_enter(cur=int(e[2 + m]), pos=int(e[0]))
     return {"pos_new": int(e[0]), "m": m, "cycle": cyc, "stop": stop, "hit": hit,
-            "tokens": [int(t) for t in e[2:3+m]][:m+1]}
+            "tokens": [int(t) for t in e[2:3+m]][:m+1], "t1": 0}

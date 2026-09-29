@@ -180,8 +180,8 @@ With launchd installed: `engine0/ops/enginectl install` then it self-heals.
 The TLX review-fix campaign (five waves, FIX_CAMPAIGN.md) is merged on main
 and live-validated. The shipped mode is now the launchd supervisor:
 
-- **Run**: `engine0/ops/enginectl install` (plists com.tlx.llm-engine /
-  com.tlx.llm-api, UserName=%USER%, NO env dict — the wrapper sources
+- **Run**: `engine0/ops/enginectl install` (plists com.lokm.llm-engine /
+  com.lokm.llm-api, UserName=lokm, NO env dict — the wrapper sources
   `ops/env.canonical`, digest logged at every start; config_fp
   e91605105e1a34c0 surfaces in /health and the API drift-checks it).
   Manual runs of `ops/engine_daemon.sh` remain equivalent (slower boot under
@@ -209,3 +209,78 @@ and live-validated. The shipped mode is now the launchd supervisor:
   bit-exact vs FRESH on the current trunk (pre-existing since the R2c M128
   trunk; deterministic; G4 boot-node restart-resume IS exact; FOLLOW_UP is
   pcache-free and exact). Fix path = the R6 T1-boundary node class.
+
+
+## R3 LIVE-WINDOW SHIP UPDATE (2026-09-26): R3 hardening merged; soak FAILED — L7 open
+
+Merge 4308da1 (review-fixes-r3, 19 commits onto 5c18243; clean) + SIX live
+fixes from this window (commits 04c222b 01d4169 f742807 13dcf92 bbda324 0146058):
+
+- **config_fp e91605105e1a34c0 -> 6a43a3966cff5927** (R3-19 cubin-digest +
+  batch knobs). EVERY pcache node invalidated; ONE announced cold rebuild
+  (495.8s boot prefill). The trie kept ~24.4GB of stale-fp entries
+  (lookup-rejected, quota-reclaimed later). A BATCH_B=2 boot flips the fp
+  again (e81dc4f89f94ce25) — knob drift is fp-visible by construction.
+- **Boot tripwire audit on every merged boot**: exactly the three documented
+  sub-100B warns (op38nw32_3 8B, spk_g4nw32hm11_100k 8B, spk_pre11qh_100k
+  32B), zero hard trips, no other lines.
+- **/health**: unauth = {status, queue_depth} only; the engine view behind
+  x-admin-token (pos/fp/lookup_k/cycle_cap/pc/model_id); query-string tokens
+  rejected. enginectl status shows the admin detail.
+- **Numerics neutrality PROVEN**: pre-R3 references vs merged stack bit-exact
+  (content+reasoning, stream+non-stream, both spot prompts); the official
+  openai SDK parses clean; max_tokens above the cycle cap = typed 400
+  invalid_request_error/max_tokens_exceeds_engine_cycle_cap with param.
+- **B=2 re-smoke**: batch-config solo == canonical outputs; FOUR concurrent
+  streams all bit-exact vs solo (permits + conv-lock-to-stream under load).
+- **CACHE_HIT live**: 7744-tok prompt -> hit B=7168 (7 nodes, 1.36GB),
+  restore 3.5s + 576-tok tail; 28.7s -> 9.2s; usage cached_tokens correct;
+  identical content. Beats fire per node (silent watchdog resets; battery
+  asserts >=2/node).
+- **Tampered-cache re-smoke**: corrupted node -> pc_lookup hit ->
+  pc_corrupt (full forensic reason) -> refuse -> quarantine -> FRESH
+  fallback (correct answer) -> async re-ingest HEALS the window -> the next
+  request CACHE_Hits from the healed chain. The W3 lifecycle end-to-end.
+- **Wrong-uid socket refusal**: 0600 boundary + fail-closed peercred.
+
+**THE STOP SEMANTICS SAGA (L3/L4/L5 — resolved in code)**: the GPU-EXIT
+reboot lands INSIDE the shutdown sequence (between the bye reply and
+_clean_exit), ate the staydown marker twice (once written too late; once
+file-fsynced but the NEW file's DIRENT was never synced — a hard reset eats
+it: file-fsync != dir-fsync). Now: enginectl writes the marker CLIENT-SIDE
+on the bye reply with file+dir fsync; _clean_exit writes pre-flush with
+dir-fsync; the crashlog appends fsync file+dir. L4+L5 durability is
+battery-green; its live reboot-survival proof lands at the NEXT natural
+operator stop (verify logs/llm_engine_staydown exists after the box
+returns). The enginectl socket_shutdown itself was BROKEN on first live
+contact (L1: zsh pipe-vs-heredoc executed the admin TOKEN as the python
+program — the graceful stop silently degraded to SIGTERM+reboot; fixed,
+token now parsed from env.canonical inside python).
+
+**L7 (OPEN — the acceptance blocker)**: the 15-min interleaved soak reboots
+the box. 3/3 failures (7-worker full mix at ~2min and ~4min; 5-worker
+SMALL-prompt mix at ~5min — the big-prefill dext-budget theory is
+EXCLUDED). Death is SILENT: no rpc_error, no watchdog line, no device_fault
+slog, no surviving traceback (stdout block-buffering + reset), crashlog
+empty. Single-threaded repros are CLEAN (5/5 cancel-mid-generate +
+long-prefill disconnect sequences; 3/3 mid-prefill disconnect + follow-on).
+The death signature (2 of 3 soaks): repeated `"op":"prefill","stage":
+"cancelled"` (MID-TRUNK aborts) then a normal FRESH + generate begin ->
+silent death. PRIME SUSPECT: R3-13 made prefill aborts REAL — before R3 an
+abandoned prefill RAN TO COMPLETION; the engine has NEVER experienced
+mid-trunk aborts until this campaign. Some prog-callback abort points
+appear to leave the engine (graph/ka-slab/dring state) poisoned for the
+next generate. Fix path: abort only at SAFE chunk boundaries (engine-side
+audit of every ST.cancel check point), or finish the in-flight chunk before
+aborting. Until then: the daemon heals via RunAtLoad (~5min) but concurrent
+client churn with disconnects is NOT safe to serve. The W5-era soak
+(SEQUENTIAL rounds) never exercised this; sequential traffic remains clean.
+Next session: instrumented boot (unbuffered stdout to the launchd log +
+per-round slog checkpoints), a 2-stream cancel-churn reproducer, and the
+engine-side abort-safety audit.
+
+**Resting state after the window**: daemon live on merged main (this file's
+commit) via the launchd supervisor, canonical env (LOOKUP_K=10, Tier-1
+path), fp 6a43a3966cff5927, /health clean, plists installed
+(com.lokm.llm-engine/-api as SYSTEM LaunchDaemons — note `launchctl list`
+needs sudo to see them).

@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """TLX W3 battery — pcache hardening (GPU-free; needs numpy -> run on the rig
 with the tg311 python:  ~/tg311/bin/python engine0/tests/test_pcache_w3.py
 Also pytest-compatible (all test_* sync).
@@ -167,6 +164,27 @@ def _capture_chain(root_dir, boundaries, ids, m128=False):
 IDS = list(range(5000, 5000 + 8192))     # in-vocab distinct ids
 
 # ==============================================================================
+def test_r3_01_restore_beats():
+  """R3-01: restore_chain + _verify_chain_artifacts call beat() per node in
+  BOTH phases — a 100k-chain restore (~18.7GB of sha256 reads + uploads) can
+  exceed TLX_STEP_TIMEOUT_S and the watchdog killed a HEALTHY daemon
+  mid-restore (the false-positive-reboot class); the per-node beats keep the
+  watchdog fed. Old code had zero beats (no callback existed at all)."""
+  d = tempfile.mkdtemp(prefix="pcw3_beats_")
+  try:
+    pc, E = _capture_chain(d, [1024, 2048, 3072], IDS)
+    B, chain = pc.lookup(IDS[:3072], min_hit=64)
+    assert B == 3072 and len(chain) == 3
+    beats = []
+    E2 = MockE()
+    rb, cur = pcache.restore_chain(E2, chain, root=d,
+                                   beat=lambda: beats.append(time.time()))
+    assert rb == 3072
+    # >= 2 beats per node: one in the verify phase, one in the upload phase
+    assert len(beats) >= 2 * len(chain), len(beats)
+  finally:
+    shutil.rmtree(d, ignore_errors=True)
+
 def test_w3_multinode_roundtrip_and_cur():
     """The G1-class mock gate: 3-node chain capture -> lookup -> restore.
     All windows upload in chain order, GDN slot-4 state from the LAST node,
@@ -610,6 +628,135 @@ def test_w3_legacy_r1_nodes_still_restore():
         assert E3.P.win == []
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+# ==============================================================================
+# R3 W-C additions (fmt/perms/subtree-reap/save-man/window-guard/kvd-scd)
+# ==============================================================================
+def test_r3_22_manifest_fmt_refused():
+  """R3-22: a schema-bumped manifest is refused WHOLESALE at _load (cold
+  rebuild) — the old code half-loaded it and KeyError'd at restore."""
+  d = tempfile.mkdtemp(prefix="pcw3_fmt_")
+  try:
+    pc, E = _capture_chain(d, [1024], IDS)
+    hk = next(iter(pc.man["entries"]))
+    e = pc.man["entries"][hk]
+    json.dump({"entries": {hk: e}, "fmt": "r1pc9"},
+              open(os.path.join(d, "manifest.json"), "w"))
+    pc2 = PromptCache(root=d)
+    assert not pc2.man["entries"], pc2.man["entries"]
+    # node meta fmt mismatch -> NodeCorrupt at verify (quarantine + FRESH)
+    pc3, _ = _capture_chain(d, [1024], IDS)
+    hk3 = next(iter(pc3.man["entries"]))
+    mp = os.path.join(d, hk3, "meta.json")
+    m = json.load(open(mp)); m["fmt"] = "r1pc9"; json.dump(m, open(mp, "w"))
+    B, chain = pc3.lookup(IDS[:1024], min_hit=64)
+    assert chain
+    try:
+      pcache.restore_chain(MockE(), chain, root=d)
+      assert False, "bumped node fmt must refuse"
+    except NodeCorrupt as nc:
+      assert "fmt" in nc.why
+  finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+def test_r3_22_cache_dirs_and_files_private():
+  """R3-22: cache root/staging/graveyard 0700, node artifacts + manifest 0600
+  (umask 022 used to give 0755/0644 — other LOCAL users could read KV)."""
+  d = tempfile.mkdtemp(prefix="pcw3_perm_")
+  try:
+    old = os.umask(0o022)
+    try:
+      pc, _ = _capture_chain(d, [1024], IDS)
+    finally:
+      os.umask(old)
+    assert (os.stat(d).st_mode & 0o777) == 0o700, oct(os.stat(d).st_mode)
+    assert (os.stat(os.path.join(d, "staging")).st_mode & 0o777) == 0o700
+    assert (os.stat(os.path.join(d, ".graveyard")).st_mode & 0o777) == 0o700
+    hk = next(iter(pc.man["entries"]))
+    for nm in ("kvb.npy", "kvd.npy", "rec.npy", "meta.json"):
+      m = os.stat(os.path.join(d, hk, nm)).st_mode & 0o777
+      assert m == 0o600, (nm, oct(m))
+    assert (os.stat(os.path.join(d, "manifest.json")).st_mode & 0o777) == 0o600
+  finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+def test_r3_27_quarantine_reaps_descendant_subtree():
+  """R3-27: quarantining a MID-CHAIN node graves the whole descendant subtree
+  in the same op — children used to be stranded (unreachable by lookup,
+  quota never recovered, persistent in the manifest)."""
+  d = tempfile.mkdtemp(prefix="pcw3_qsub_")
+  try:
+    pc, E = _capture_chain(d, [1024, 2048, 3072, 4096], IDS)
+    assert len(pc.man["entries"]) == 4
+    hk1 = sorted(pc.man["entries"].items(), key=lambda kv: kv[1]["pos_end"])[0][0]
+    pc.quarantine(hk1)
+    assert not pc.man["entries"], pc.man["entries"]      # the WHOLE chain gone
+    import pcache as _pc
+    for name in os.listdir(d):
+      assert not _pc._HKEY_RE.match(name) or not os.path.isdir(os.path.join(d, name)), name
+    # quota recovered
+    assert pc.total_bytes() == 0
+  finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+def test_r3_28_save_man_best_effort_on_enospc():
+  """R3-28: a full cache disk (ENOSPC injected) fails ONLY the manifest save
+  (counted + logged) — never the user prefill path."""
+  d = tempfile.mkdtemp(prefix="pcw3_enospc_")
+  try:
+    pc, E = _capture_chain(d, [1024], IDS)
+    hk = next(iter(pc.man["entries"]))
+    calls = {"n": 0}
+    def boom(ctx=None):
+      calls["n"] += 1
+      raise OSError(28, "No space left on device (injected)")
+    pc._save_man = boom
+    pc.quarantine(hk)                       # must not raise
+    assert calls["n"] >= 1
+    assert pc.stats["meta_save_errors"] >= 1
+  finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+def test_r3_29_capture_window_guard():
+  """R3-29: degenerate capture windows raise at entry (they used to allocate
+  zero/negative-dim arrays and write junk nodes that only failed at restore)."""
+  d = tempfile.mkdtemp(prefix="pcw3_win_")
+  try:
+    E = MockE()
+    for A, B in ((100, 100), (200, 100), (-5, 100)):
+      try:
+        pcache.capture_node(E, A, B, "midprefill", fed_prefix=IDS)
+        assert False, f"window [{A},{B}) must raise"
+      except ValueError as e:
+        assert "window" in str(e)
+  finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+def test_r3_30_kvd_scd_required_in_phase1():
+  """R3-30: a node missing the state-critical kvd/scd artifacts is NodeCorrupt
+  at VERIFY (clean FRESH fallback), not a KeyError in the phase-2 upload."""
+  d = tempfile.mkdtemp(prefix="pcw3_kvd_")
+  try:
+    pc, E = _capture_chain(d, [1024], IDS)
+    hk = next(iter(pc.man["entries"]))
+    e = pc.man["entries"][hk]
+    e["sizes"].pop("kvd", None)
+    json.dump({"entries": {hk: e}, "fmt": pcache.FMT},
+              open(os.path.join(d, "manifest.json"), "w"))
+    pc2 = PromptCache(root=d)
+    B, chain = pc2.lookup(IDS[:1024], min_hit=64)
+    assert chain
+    E2 = MockE()
+    try:
+      pcache.restore_chain(E2, chain, root=d)
+      assert False, "missing kvd must refuse"
+    except NodeCorrupt as nc:
+      assert "kvd" in nc.why
+    assert E2.P.win == []                    # zero uploads (transactional)
+  finally:
+    shutil.rmtree(d, ignore_errors=True)
+
 
 def _all_tests():
     return [(n, f) for n, f in sorted(globals().items())

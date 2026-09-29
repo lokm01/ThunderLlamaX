@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """R1: THE DURABLE PROMPT CACHE — hash-keyed prefix trie on disk.
 
 Design (as-built; see ~/tinygrad-metal/R1_PROMPTCACHE.md):
@@ -165,14 +162,30 @@ class NodeCorrupt(Exception):
 
 class PromptCache:
     """Manifest + async writer + LRU eviction. GPU work happens in the caller
-    (the daemon thread); this class only touches disk."""
+    (the daemon thread); this class only touches disk.
+
+    TLX P8 (MoE bridge): FMT_C/ART are CLASS attributes so a subclass
+    (pcache_moe.MoePromptCache) can carry its own node format + artifact set
+    while reusing the manifest/writer/evict/lookup machinery verbatim. The
+    dense path is byte-identical (defaults = the old module constants)."""
+
+    FMT_C = FMT          # node/manifest schema tag (subclass overrides)
+    ART = _ART           # artifact names (subclass overrides)
 
     def __init__(self, root=ROOT):
         self.root = root
         self.staging = os.path.join(root, "staging")
         self.grave = os.path.join(root, ".graveyard")
-        os.makedirs(self.staging, exist_ok=True)
-        os.makedirs(self.grave, exist_ok=True)
+        # R3-22: 0700 at creation (umask 022 gave 0755 — other LOCAL users
+        # could read KV content); best-effort chmod on pre-existing dirs.
+        for _d in (root, self.staging, self.grave):
+            try:
+                os.makedirs(_d, mode=0o700, exist_ok=True)
+                os.chmod(_d, 0o700)
+            except Exception:
+                pass
+        # R3-28: pc health counters surfaced through engine status
+        self.stats = {"dropped": 0, "writer_errors": 0, "meta_save_errors": 0}
         self.lock = threading.Lock()
         self._final = threading.Lock()     # serializes staging->final renames
         self.man = {"entries": {}}
@@ -203,6 +216,13 @@ class PromptCache:
         try:
             m = json.load(open(self._mpath()))
         except Exception:
+            m = {"entries": {}}
+        # R3-22: a schema-bumped manifest must not half-load — refuse the
+        # WHOLE manifest (cold cache) unless the fmt matches exactly.
+        if m.get("fmt") != self.FMT_C:
+            print(f"[pcache] manifest fmt {m.get('fmt')!r} != {self.FMT_C!r} — refusing "
+                  f"all entries (cold rebuild; the old code half-loaded a bumped "
+                  f"schema and KeyError'd at restore)", flush=True)
             m = {"entries": {}}
         ent = {}
         changed = False
@@ -245,11 +265,23 @@ class PromptCache:
             ent = dict(self.man["entries"])
         tmp = self._mpath() + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"fmt": FMT, "entries": ent}, f)
+            json.dump({"fmt": self.FMT_C, "entries": ent}, f)
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, self._mpath())
         _fsync_dir(self.root)
+        try: os.chmod(self._mpath(), 0o600)      # R3-22
+        except Exception: pass
+
+    def _save_man_best_effort(self, ctx):
+        """R3-28: manifest persistence is BEST-EFFORT in pin/evict/quarantine —
+        a full cache disk (ENOSPC) must never fail the USER PREFILL through a
+        best-effort cache feature (counted + surfaced in status instead)."""
+        try:
+            self._save_man()
+        except Exception as e:
+            self.stats["meta_save_errors"] += 1
+            print(f"[pcache] pc_meta_save_failed ({ctx}): {e!r}", flush=True)
 
     def _clean_staging(self):
         try:
@@ -300,6 +332,7 @@ class PromptCache:
             with self.lock:
                 self._pend -= est
                 self._outstanding -= 1
+                self.stats["dropped"] += 1
             print(f"[pcache] pc_drop writer queue full (hkey={hk[:16]}, ~{est//1048576}MB) — node NOT cached", flush=True)
             return {"hkey": hk, "existed": False, "dropped": True}
         return {"hkey": hk, "existed": False}
@@ -313,23 +346,27 @@ class PromptCache:
             raise ValueError(f"bad hkey {hk[:24]!r}")
         st = tempfile.mkdtemp(prefix="n_", dir=self.staging)
         sizes, shas, shapes = {}, {}, {}
-        for nm in ("kvb", "sc", "kvd", "scd", "rec", "conv", "dhd", "hlast"):
+        for nm in self.ART:
             v = node.get(nm)
             if v is None: continue
             arr = np.ascontiguousarray(v)
             _save_npy(f"{st}/{nm}.npy", arr)
+            try: os.chmod(f"{st}/{nm}.npy", 0o600)            # R3-22
+            except Exception: pass
             sizes[nm] = os.path.getsize(f"{st}/{nm}.npy")     # ON-DISK size (npy header included)
             shas[nm] = _sha256_file(f"{st}/{nm}.npy")
             shapes[nm] = list(arr.shape)
         meta = {"pos_start": int(node["pos_start"]), "pos_end": int(node["pos_end"]),
                 "parent": node.get("parent"), "config_fp": node.get("config_fp"),
                 "cur": node.get("cur"), "has_hlast": node.get("hlast") is not None,
-                "fmt": FMT, "created": time.time(),
+                "fmt": self.FMT_C, "created": time.time(),
                 "sizes": sizes, "sha256": shas, "shapes": shapes}
         with open(f"{st}/meta.json", "w") as f:
             json.dump(meta, f)
             f.flush()
             os.fsync(f.fileno())
+        try: os.chmod(f"{st}/meta.json", 0o600)              # R3-22
+        except Exception: pass
         _fsync_dir(st)
         fin = os.path.join(self.root, hk)
         with self._final:
@@ -375,6 +412,8 @@ class PromptCache:
             try:
                 self._write_node_sync(node)
             except Exception as e:
+                with self.lock:
+                    self.stats["writer_errors"] += 1
                 print(f"[pcache] writer error {e!r}", flush=True)
                 traceback.print_exc()
             finally:
@@ -510,20 +549,36 @@ class PromptCache:
                 pinned_bytes += b
                 per_key += 1
                 added += 1
-        self._save_man()
+        self._save_man_best_effort("pin")      # R3-28: never fail the prefill
         return {"pinned": added, "until": until}
 
     def quarantine(self, hk):
-        """W3.1: remove a corrupt node (graveyard + manifest pop + save)."""
+        """W3.1: remove a corrupt node (graveyard + manifest pop + save).
+        R3-27: the DESCENDANT subtree is graveled in the SAME operation
+        (children-first) — a mid-chain quarantine used to strand descendants:
+        unreachable by lookup (the chain walk breaks at the missing parent),
+        reclaimed only tip-first under quota pressure, persistent in the
+        manifest. Hash chains cannot reparent, so the whole subtree is dead.
+        R3-28: the manifest save is best-effort."""
         with self.lock:
             e = self.man["entries"].pop(hk, None)
             self.protect.discard(hk)
-        if e is not None:
-            dst = self._graveyard(os.path.join(self.root, hk))
+            dead = []
+            kids = [k for k, v in self.man["entries"].items() if v.get("parent") == hk]
+            while kids:
+                k = kids.pop()
+                if k in dead: continue
+                dead.append(k)
+                self.man["entries"].pop(k, None)
+                self.protect.discard(k)
+                kids.extend(x for x, v in list(self.man["entries"].items())
+                            if v.get("parent") == k)
+        for k in ([hk] if e is not None else []) + dead:
+            dst = self._graveyard(os.path.join(self.root, k))
             if dst is not None:
                 shutil.rmtree(dst, ignore_errors=True)
-            try: self._save_man()
-            except Exception: pass
+        if (e is not None) or dead:
+            self._save_man_best_effort("quarantine")
 
     def total_bytes(self):
         with self.lock:
@@ -566,7 +621,7 @@ class PromptCache:
                     shutil.rmtree(dst, ignore_errors=True)
             except Exception:
                 pass
-            self._save_man()
+            self._save_man_best_effort("evict")   # R3-28
 
 
 # =====================================================================
@@ -617,6 +672,10 @@ def capture_node(E, A, B, source, fed_prefix=None, parent=None, dhd=None, hlast=
     P = E.P
     if "sc_d" not in P.d:
         raise RuntimeError("prompt cache requires KV8=1 (sc_d buffer absent)")
+    if B <= A or A < 0:
+        raise ValueError(f"invalid cache window [{A},{B}) — empty/unaligned "
+                         f"windows used to allocate zero/negative-dim arrays "
+                         f"and write junk nodes that only failed at restore")
     W = B - A
     node = {"pos_start": A, "pos_end": B, "parent": parent, "config_fp": config_fp(),
             "hkey": hkey_prefix(fed_prefix[:B])}
@@ -658,16 +717,22 @@ def capture_node(E, A, B, source, fed_prefix=None, parent=None, dhd=None, hlast=
     return node
 
 
-def _verify_chain_artifacts(root, chain, attn_n, gdn_n, RBLK, CBLK):
+def _verify_chain_artifacts(root, chain, attn_n, gdn_n, RBLK, CBLK, beat=None):
     """W3.1/W3.2 transactional validation: EVERY artifact of EVERY node is
     opened + size-checked + shape-checked (meta AND engine-derived) + sha256-
     verified (when recorded) BEFORE any win_up. Returns {hk: (meta, arrs)};
     raises NodeCorrupt on the first bad node — the caller quarantines it and
-    falls back FRESH with the engine untouched."""
+    falls back FRESH with the engine untouched.
+    R3-01: beat() fires per node — a 100k-chain verify+sha (~18.7GB of reads)
+    can exceed TLX_STEP_TIMEOUT_S and the watchdog killed a HEALTHY daemon
+    mid-restore (the false-positive-reboot class)."""
     out = {}
     prev_end = None
     legacy = [0]
     for hk, e in chain:
+        if beat is not None:
+            try: beat()
+            except Exception: pass
         d = os.path.join(root, e["dir"])
         A, B = int(e["pos_start"]), int(e["pos_end"])
         if A < 0 or B <= A:
@@ -684,6 +749,9 @@ def _verify_chain_artifacts(root, chain, attn_n, gdn_n, RBLK, CBLK):
             meta = json.load(open(f"{d}/meta.json"))
         except Exception as ex:
             raise NodeCorrupt(hk, f"meta.json unreadable: {ex!r}")
+        if meta.get("fmt") != FMT:
+            raise NodeCorrupt(hk, f"node fmt {meta.get('fmt')!r} != {FMT!r} "
+                                  f"(schema-bumped node; quarantine+FRESH)")
         sizes = e.get("sizes") or {}
         if not sizes:
             raise NodeCorrupt(hk, "no sizes recorded (hand-crafted/legacy manifest)")
@@ -711,6 +779,13 @@ def _verify_chain_artifacts(root, chain, attn_n, gdn_n, RBLK, CBLK):
                     raise NodeCorrupt(hk, f"{nm}.npy sha256 mismatch (corrupt or planted)")
             elif not shas:
                 legacy[0] += 1
+        # R3-30: kvd/scd are STATE-CRITICAL (draft KV), not optional legacy
+        # artifacts — a node without them raises NodeCorrupt here (clean
+        # FRESH fallback) instead of KeyError-ing in the phase-2 upload.
+        for nm in ("kvd", "scd"):
+            if nm not in sizes:
+                raise NodeCorrupt(hk, f"state-critical {nm} missing from sizes "
+                                      f"(pre-W3 node; refusing)")
         # R1-era nodes wrote hlast.npy WITHOUT a sizes record — pull it in when
         # meta says it exists (shape + finiteness still enforced)
         if meta.get("has_hlast") and "hlast" not in arrs:
@@ -735,7 +810,7 @@ def _verify_chain_artifacts(root, chain, attn_n, gdn_n, RBLK, CBLK):
     return out
 
 
-def restore_chain(E, chain, root=None):
+def restore_chain(E, chain, root=None, beat=None):
     """Upload a full chain into the engine: KV windows [0,B) per layer, draft
     KV [0,B), GDN slot 4 from the LAST node, dhd_seed, cur via head-argmax on
     hlast (or the stored cur). Leaves the engine at pos=B ready to generate or
@@ -743,7 +818,9 @@ def restore_chain(E, chain, root=None):
 
     W3: TRANSACTIONAL — the whole chain is validated on disk (size+shape+sha,
     adjacency, hlast finiteness) BEFORE the first win_up; a corrupt node
-    raises NodeCorrupt with the engine untouched (caller: FRESH fallback)."""
+    raises NodeCorrupt with the engine untouched (caller: FRESH fallback).
+    R3-01: beat() fires per node in BOTH phases (the watchdog sees restore
+    progress; a healthy long restore is never killed as a step timeout)."""
     from mtp import RBLK, CBLK
     from engine0 import dev
     from trunk import VOCAB
@@ -751,10 +828,13 @@ def restore_chain(E, chain, root=None):
     root = root or ROOT
     B = int(chain[-1][1]["pos_end"])
     # ---- phase 1: validate EVERYTHING (no GPU touches yet) ----
-    verified = _verify_chain_artifacts(root, chain, len(E.attn_idx), len(E.gdn_idx), RBLK, CBLK)
+    verified = _verify_chain_artifacts(root, chain, len(E.attn_idx), len(E.gdn_idx), RBLK, CBLK, beat=beat)
     # ---- phase 2: upload (all files already open+mmapped: eviction racing
     # us now cannot break the reads — POSIX keeps the mappings) ----
     for hk, e in chain:
+        if beat is not None:
+            try: beat()
+            except Exception: pass
         meta, arrs = verified[hk]
         A = int(e["pos_start"])
         kvb, sc = arrs["kvb"], arrs["sc"]

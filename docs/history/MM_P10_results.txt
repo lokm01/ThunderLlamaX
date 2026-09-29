@@ -1,0 +1,135 @@
+MM P10 RESULTS (2026-09-28/29, GLM implementation agent — THE MTP MODE IN
+SERVING + the pairwise-fusion falsification; commits 0324432 + <PB1>)
+
+Files: engine0/serve_moe.py + test_moe36.py (the MTP wire) + MM_P9_mtp.py
+(run_chain src param + reset_dirty) + mm_gate_serve.py (G8/G9/G10) +
+ops/env.canonical.d (MM_MTP=1) | MM_PB1_rtsh8.cu/.cubin + MM_PB1_gxdn8.cu/
+.cubin + MM_PB1_gate.py + the MM_FUSE2 branch in MM_P7_lib.build_seq7
+(env-gated OFF — NOT SHIPPED ON, see Part B).
+
+═══ PART A — THE MTP MODE IS THE DEFAULT SERVING PATH: ALL GATES GREEN ═══
+ARCHITECTURE (serve_moe.h_generate): the scan-oracle mode select extends to
+  n>=8 -> D8 | n>=4 -> D2 | miss + chain live -> P5+MTP | miss + stale ->
+  ONE T1 re-anchor then seed. force_mode: "t1" | "spec" | "mtp" (None =
+  env MM_MTP, default 1). THE CHAIN STATE = {"pos","cur","drafts"} host-
+  side; valid only while pos/cur match the frontier (the drafts are a pure
+  function of committed state + MTP-KV conditioning) -> a cancelled
+  generate's retry reuses the chain with ZERO re-seed cost. Lookup cycles
+  + every prefill mark it STALE. THE INITIAL SEED comes straight from the
+  prefill's last hidden — ("hA",0) after a T1 tail, ("pf",255) after a
+  PF-only feed (no T1 re-anchor needed; the harness's initial-chain path).
+  fence_all extended to gr5 + the 3 MTP runners; the MTP runners also get
+  fence_every=1024 (the trunk discipline).
+
+THE PF-ONLY CUR FIX (latent serving bug, pre-P10): a prompt with
+len % 256 == 0 runs ZERO T1 steps, so eager_head_cur() read rig.hA — a
+STALE decode-graph hidden from an earlier conversation. cur = greedy over
+an unrelated hidden: wrong continuations, INVISIBLE to spec-vs-t1 gates
+(both arms share the same wrong cur — G3's 4k class ran on garbage cur all
+along). FIX: _feed tracks the hidden source; _eager_cur() reads PFB[255]
+for PF-only feeds (the bit-exact chunk-256 hidden). G10 gates it (fresh
+cur == pcache node cur).
+
+GATES (~/mm_p10_progress.txt):
+  G1/G2/G4/G7 unchanged-green (spec bank 60/60 det-x2; pcache exact; fences)
+  G8 *** THE MISSION GATE: bank60 with MTP ON through the daemon: 60/60
+      mtp==t1 prefix-exact, det-x2 OK ***
+  G9 THE PERF (default=mtp mode, through the API surface):
+      quote-alpha 97.6 (P8S 98.1 — unchanged) | quote-code 104.0 (96.3) |
+      quote-docx2 65.9 (25.4, +160%) | prose-0 40.1 (19.1, +110%) |
+      prose-1 39.1 (19.2, +103%) | prose-9 29.9 (18.9, +58%)
+  G10 PF-ONLY CUR: fresh cur == node cur (fix live); the first run FAILed
+      on the HIT condition only — a lookup-vs-writer race (lookup
+      immediately after ingest, before the manifest commit); rerun OK.
+  SOAK *** 106 rounds / 15 min / 0 FAILURES (streams + follow-ups +
+      quote-class + cancels + health; dirty never set; 37 fences clean) ***
+  config_fp UNCHANGED (6c7ea762d7624fa1): MM_MTP is draft-source-only
+  (verification-only — trunk numerics untouched), same class as MM_SPEC;
+  the 22 pcache nodes stayed valid across the flip. pcache/namespace: NO
+  new namespace needed.
+
+═══ PART B — THE PAIRWISE FUSION: BUILT, GATED, AND HONESTLY FALSIFIED ═══
+  BUILT: rtsh8 (rt8e256 ⊕ shexp8, verbatim bodies, disjoint outputs, one
+  launch) + gxdn8 (gx8e256up[IQ3_S] ⊕ gx8e256dn[IQ4_XS] — the dn half
+  reads ONLY its own pair's 512-float act, so it passes through smem
+  instead of the global actb). Zero spill (audited). Covers all 40 trunk
+  layers (manifest: gate IQ3_S + down IQ4_XS everywhere).
+  B1 (the bit-exact gate, F1b discipline — same doc slice, 32 T1 steps,
+  unfused vs fused graph, stream + S/CS/all-40-KV compare): DIVERGED at
+  token 27 (all state diffs downstream of the flip). NOT bit-exact =>
+  NOT SHIPPED (MM_FUSE2 stays default-OFF). The suspect class: compiler
+  instruction-selection/register-allocation changes in the merged bodies
+  (the per-op arithmetic is verbatim; the flip is real, not noise).
+  B2 (warm gr1.step() × 60): 52.10 -> 50.76 ms (-1.34 ms, +2.6%) for
+  534 -> 460 kernels (-74 launches).
+
+*** THE LAW CORRECTION (B2's real deliverable): THE LAUNCH-SERIALIZATION
+PRICING DOES NOT TRANSFER TO FAT-KERNEL GRAPHS. The P9 slope (~0.094
+ms/kernel, "96% dispatch") was measured on TRUNCATED graphs where every
+kernel is tiny; in the REAL T1 graph the dispatch pipelines behind
+execution — the marginal launch cost of the fat MoE/attention kernels is
+~0.02 ms, and the cycle is KERNEL-RUNTIME-bound. The 165-kernel -> 17 ms
+-> 55-60 tok/s projection is INVALID. The fusion campaign only pays where
+it makes the KERNELS faster (fewer weight passes per layer — e.g. the
+single-CTA quartet doing one weight sweep, or cross-family fusions that
+eliminate re-reads), not by launch-count alone. ***
+
+═══ THE G3/PCACHE ADJUDICATION (finished this session) ═══
+  The P8S "transient" G3 mismatch is REPRODUCIBLE and STRUCTURAL: the
+  FIRST spec-vs-t1 comparison after nodes are ingested is FRESH-vs-RESTORE
+  (arm A feeds + ingests, arm B restores); reruns are RESTORE-vs-RESTORE
+  (identical inputs) and always pass — that's why it looked transient.
+  Isolated (harness, GPU window, /tmp/pa_state_diag.py): the restored
+  state is BIT-IDENTICAL to the fresh state (S, CS, all KV/scales, the
+  exact nodes), and restore-then-T1 in the HARNESS matches fresh-then-T1
+  — but the DAEMON's restore arm diverges at token 2 on the doc slice
+  ([2002, 27286, ...] vs [2002, 2002, ...]) in a degenerate repetitive
+  era (2002/9956/43614 cycling = the tie-flip amplifier class). The
+  discriminator is the PROCESS BOOT SHAPE (daemon = full graph set +
+  MtpRig; harness = pf+t1 only), not the restored bytes. NOT MTP-caused
+  (force=t1 arms), NOT the cur (43614 both), NOT the state (bit-proven).
+  Verdict: a process-layout-sensitive ULP residue -> tie-flip on the
+  degenerate class; bank60 (short prompts, no PF/restore) clean twice;
+  G4 pcache-exactness clean. Watching brief per the P8S doctrine — the
+  next session's bisect: harness-boot-WITH-MtpRip to reproduce the 2002
+  path, then peel the MtpRig pieces (the 100MB zero copyins / the MGUnc
+  builds / program loads) one at a time.
+
+═══ NEW LAWS / FINDINGS (P10) ═══
+  1. THE PF-ONLY CUR LAW: after a PF-only feed (len % 256 == 0) the last
+     hidden lives in PFB["hA"][255], NOT rig.hA — eager-head derivations
+     must track the feed's last op (the bit-exact chunk-256 class makes
+     the seat hidden == the T1 hidden).
+  2. THE MARGINAL-LAUNCH LAW (above): fat-kernel graphs pipeline dispatch
+     behind execution; only tiny-kernel graphs price at the full ~0.094
+     ms/launch slope.
+  3. THE FIRST-CONTACT PCACHE GATE SHAPE: a spec-vs-t1 gate that runs
+     right after ingest compares FRESH-vs-RESTORED; reruns compare
+     RESTORED-vs-RESTORED. Gate batteries must label which — "transient"
+     first-run mismatches in this shape are fresh-vs-restore divergences,
+     not noise.
+  4. THE STAYDOWN-DELETER (ops, unresolved): the daemon's hard-death path
+     (shutdown RPC → bye → death INSIDE eng.dev.synchronize(), no
+     clean_exit slog) deletes/never-writes the staydown marker and launchd
+     (KeepAlive, system-domain com.lokm.llm-engine) relaunches within
+     ~30-60s. Holding a GPU window requires an external marker-keeper
+     loop through the shutdown. Root cause open (#next).
+  5. THE MTP-KV DIRTY TRACKING: reset_dirty() zeroes only [0, max-row-
+     ever-written) — a quote-class FRESH reset costs ~50KB instead of the
+     100MB full-CTX reset.
+
+═══ OPEN / NEXT ═══
+  - THE T=1 KERNEL-COMPRESSION campaign (the corrected Part B): fewer
+    weight passes per layer, not fewer launches. First candidate: the
+    single-CTA quartet (one sweep of the 8 experts' slabs) IF its runtime
+    beats 3 pipelined launches; price it with the B2 harness first.
+  - The B1 divergence: if the pairwise fusion is wanted, bisect the flip
+    (rtsh8-only arm vs gxdn8-only arm) — one is exact, one isn't.
+  - The G3/restore tie-flip bisect (above).
+  - The staydown-deleter root cause (the ops mystery).
+  - THE LONG-CTX MTP alpha (96k) — still unmeasured.
+
+OPS: daemon live via launchd (system domain), MTP on, fp 6c7ea762d762,
+pcache 22 nodes, API healthy. Part C (row-batched attention): NOT STARTED
+(this session's budget went to the G3 adjudication + the fusion
+falsification); the design + exactness argument remain in MM_P9_results.

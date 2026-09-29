@@ -1,0 +1,157 @@
+MM P7 RESULTS (2026-09-25 night, GLM implementation agent)
+Harness MM_P7_lib.py (Rig7/build_seq7/SpecEngine7/PrefillFeed/spkq_h_split_ref)
++ MM_P7_run.py (stages H/S/F/L/D) + MM_P7_final.py (corrected F-gates) +
+diags 5-9. Kernels: MM_P7_acc36.cu, MM_P7_spkq256s.cu (+CTXS 4096/16384/
+65536/98304 rungs), MM_P7_spkc256.cu; new builds gconv36_256/k2s36_256/
+spka256m_98304/h6kam_1 (all zero-spill, 48 regs on the split kernel).
+
+═══ PART 1 — THE 140 CROSS (host fold): LANDED, THE CYCLE IS NOW GRAPH-BOUND ═══
+  THE ROOT COST: every _copyin/_copyout on this stack does a FULL
+  dev.synchronize() (hcq.py) — the P6 spec cycle paid ~6 of them (~14ms).
+  THE FOLD (all three mission items):
+    (a) IN-GRAPH COMMIT: acc36 (on-device greedy accept m = longest prefix
+        amds==drafts, K a runtime scalar) chained as the probe-graph tail
+        before selc36 — identical math to the host loop by construction.
+    (b) BATCHED/DEFERRED COPY-INS: idsb/POSB/AMDB/EB allocated as ONE
+        cpu-mapped control class, host writes via cpu_view() DIRECTLY —
+        ZERO GPU commands (the cmdq hw_page pattern). feed9 = 0.85us/cycle.
+    (c) THE READBACK FOLD: the EMIT BLOCK eb[2] = (m, amds[m]) — 8 bytes,
+        read via cpu_view after the timeline wait (the emitted stream =
+        drafts[:m]+[amds[m]], drafts already host-known). eb reads 0.15us.
+  MEASURED HOST RESIDUE: ~0.2ms/cycle (was ~14ms). THE FOLD IS COMPLETE.
+  GATES: H0a view-fed == anchor top1; H0b acc36+EB coherence 120/120;
+    H2 spec==T1 20/20 EXACT; H2b THE 60-PROMPT BATTERY 60/60 EXACT det-x2 OK
+    (the mission's gate, on the FOLDED engine).
+  PERF (honest): quote-alpha 119.6 tok/s (sample 2: 121.6; E[m|hit]=8.0,
+    6 full-accept D8 cycles), quote-code 109.7-113.1, prose 19.4 — vs
+    P6's 118.6/109.8/19.5. THE CYCLE: D8 graph 70-77ms, ~100% GRAPH TIME
+    (diag8 a1/a2: the acc+selc tail costs only 1.1ms; VRAM-vs-sysmem ctl
+    A/B: IDENTICAL 76.3 vs 76.4ms — the sysmem control costs nothing;
+    H3b: graph 75.0ms, wait 75.0ms — the wait IS the graph).
+  *** THE 140-CROSS VERDICT: host-side DONE, NOT CLEARED — the binder is
+  the D8 GRAPH itself (trunk ~50ms at P=9 + slots + am-head + ~1.1 commit),
+  tonight's ambient machine state ~10-15% degraded vs the P6 fresh-boot
+  session (T1 prose 51.6ms vs P6's 54.1 while D8 reads +18 vs the era's
+  52+14=66 wall — the a1/a2/b1/b2/diag9 evidence set). Cycle <=55ms at
+  E[m]=8 needs KERNEL-side wins (the M6+/wider-kernel class), not host
+  work. The mechanical projection in the P6 handoff ("~14ms host = the
+  gap") was HALF right: the fold landed but the graph carries the rest.***
+
+═══ PART 2 — SPLIT-KV LONG-CTX: BOTH RUNGS GREEN (the 96k ship config unlocked) ═══
+  KERNELS: spkq256s (grid (16*T, S); WARP-PER-POSITION — lane l covers dims
+    l*8..l*8+7, j-asc partials, 5-xor tree, ZERO __syncthreads in the hot
+    loop; per-warp ONLINE max-rescale; partial (m, z, out[256]) per
+    (seat*16+head, split, warp)) + spkc256 (combine: strict-max m*, w_i =
+    expf(m_i-m*), i-asc Z/acc, y=(acc/Z)*sigmoid(gate)).
+  THE SPLIT-ORDER ANCHOR: spkq_h_split_ref mirrors the kernel EXACTLY
+    (including the warp/lane dot partition — NOT the serial kernel's
+    thread-per-d layout). S1: kernel vs anchor maxdev 7.45e-08, det-x2
+    BIT-EXACT. S2 (fixed grids): split vs serial @L=900 maxdev 4.77e-07
+    (the reassociation class — split-vs-serial is a NUMERICS-CLASS choice,
+    not a bug: S-mismatch states differ ~7e-2 maxdev; SAME-S is bit-exact).
+  THE O(L) EVIDENCE (S3, fixed): 1 layer @L=16384 P=1: serial 13.1ms |
+    split S=4 2.9 | S=8 4.9 | S=16 3.3 | S=32 3.5 — 4.0x @S=16 (the serial
+    kernel was ALSO silently no-op'd in the first S3 run — the 1-tuple
+    grid bug; see laws).
+  THE LADDER (doc100k corpus; PF-chunk feed + T1-split decode S=32):
+    rung 65536: feed N=64440 (251 chunks) 461s = 140 tok/s PF | first64
+      63/64 (the known pos-21 adjudicated flip) | cont32 det-x2 OK |
+      REBASE16 16/16 EXACT vs the split anchor | GDN |S|=1.507e2 |
+      T1-split decode 58.2ms/cyc = 17.2 tok/s @64k
+    rung 98304: feed N=97700 (381 chunks) 800s = 122 tok/s PF | first64
+      63/64 | cont32 det-x2 OK | REBASE16 16/16 EXACT | GDN |S|=1.502e2 |
+      T1-split decode 57.8ms/cyc = 17.3 tok/s @96k
+  vs P5's 16k feed (1808 cycles/2231s) with the 64k rung SKIPPED at a ~5h
+  projection: the split + prefill combination feeds 64k in 7.7 MINUTES
+  (~40x) and 96k in 13.3 min. THE 96K-DEFAULT SHIP CONFIG IS UNBLOCKED.
+  NOTE: rebase16 validates the DECODE path from a snapshot; feed-side
+  exactness is covered by F1b (below) + the first64 gates.
+
+═══ PART 3 — PREFILL: LANDED AT CHUNK-256 (bit-exact class), 181-203 tok/s ═══
+  THE DESIGN: the chunk graph = the SAME per-seat kernels at P=256
+  (gconv36_256/k2s36_256 T-chains + every other family P-flat) — chunked
+  feed is BIT-EXACT vs the per-token T1 train BY CONSTRUCTION.
+  F1b (the contract gate, same-S arms): doc768 via 3 chunks vs 768 T1
+    steps (both split S=8): STATE ARRAYS ALL BIT-EXACT (S, CS, all 40 KV
+    arrays) | top1 match | cont16 IDENTICAL.
+  F2b: doc2048 PF + 8-tok continuation vs the S=8 split anchor: 0/8
+    (reproduced twice with corrected snapshot order + same-S) — AN OPEN
+    FINDING: the S=8 anchor-vs-engine corner at L~2049 disagrees from the
+    first token, while the S=32 path is 16/16-EXACT at 64k/96k (L64/L96)
+    and F1b proves the S=8 ENGINE bit-exact vs per-token. The bisect for
+    P8: per-token-S8 first-token vs anchor-S8 at L=2048 (isolates
+    anchor-S8 vs engine-S8). The S=32 decode config is the proven one.
+  THE LADDER (PF split S=8, chunk 256, tail per-token):
+    N=2048: 202.6-203.7 tok/s | N=8192: 191.9 | N=16384: 180.9 (decays
+    with L — the O(L*M) attention term; the trunk per-chunk ~0.9-1.3s).
+  HONEST READING vs the plan's 850-1400 (ported machinery): the per-seat
+  GEMV families re-read weights per seat (trunk ~300GB/chunk class) and
+  the MoE pair-walk re-reads expert slabs per pair — the M-GEMM/IMMA
+  grouped-GEMM families + the counting sort (L2 reuse) are the 850+ path
+  (P8-class kernel campaign, exactly as the plan priced: "3,300 needs
+  chunk>=256 + perf campaign"). The STRUCTURE (chunk-256 graphs, gates,
+  anchors, feeds) is now done and green.
+
+═══ NEW LAWS (P7) ═══
+  1. *** THE SILENT-NO-LAUNCH LAW ***: MG._build does (grid+(1,))[:3] for
+     tuple grids — a 1-TUPLE grid becomes a malformed 2-tuple global_size
+     and the graph NEVER EXECUTES, SILENTLY (top1=0 = the output buffer
+     never written; a later graph's output reads as stale-correct and
+     masks it). L56's _grid normalizes 1-tuples to scalars — any seq
+     builder MUST do the same. This bit EVERY P7 graph on first contact
+     (the mock-vs-rig meta-law again: the harness-side builders were
+     never exercised at scale).
+  2. THE FULL-SYNC COPY LAW: allocator _copyin/_copyout each do a FULL
+     dev.synchronize() — the P6 ~14ms host path was 6 of these. The
+     cpu_view() fold (cpu_access=TRUE + **uncached=TRUE** sysmem buffers,
+     monkeypatched through NVAllocator._alloc which DROPS the flag) is
+     bidirectionally coherent (120/120 + the graph paths) and FREE
+     (VRAM-vs-syssem A/B identical). cpu_access WITHOUT uncached maps
+     VRAM GPU_CACHEABLE_YES — the stale-read race class (do not use for
+     per-cycle control).
+  3. THE GPU-EXIT LAW EXTENDED: the GRACEFUL socket shutdown (bye:true)
+     ALSO reboots the machine (2/2 tonight, 6/6 lifetime) — the disable-
+     first + sudo-sync dance is MANDATORY (an unsynced launchctl disable
+     is LOST to the reboot — bit us once).
+  4. SPLIT-S NUMERICS CLASS: split attention at S != S' differs from
+     itself (~7e-2 state maxdev over 256 tokens) — same-S is bit-exact.
+     Anchors and engines MUST pin the same S per phase (F1's original
+     "state DIFF" was the S=32-vs-S=8 arm mismatch, not a chain bug).
+  5. THE WARP-PER-POSITION PATTERN: replacing the 2-__syncthreads-per-
+     position score loop with warp-per-position (lane l owns dims l*8..+7)
+     removed the spkq O(L) wall — 4x at L=16k P=1, more at P=1/64k decode.
+  6. THE 16GB RAM WALL at the 96k anchor: the CPU split-anchor at R=98304
+     + snapshots + the GPU harness process hit 16.2G RSS + 4.5G swap —
+     the ladder survived but thrashed (~1h for L96). The fix path: free
+     KV0 after first-64, stream the rebase, or shrink the expert LRU.
+  7. TEST-DESIGN LAWS (three gate bugs found by re-examination, all in the
+     HARNESS not the engine): the acc36 draft alignment (ids[1:]), the F2
+     snapshot-after-continuation, the H0a wrong-anchor-reference (bank
+     prompt-0 vs doc[0]). The engine was right each time.
+
+═══ OPS ═══
+  - Daemon stop under launchd: disable + sudo sync FIRST (verify with
+    print-disabled), then graceful RPC, then wait out the GPU-EXIT reboot.
+    Relaunch after the window: enable + load; the API never stopped.
+  - One machine reboot (17:35) during the stop; the run session itself
+    (post-fix) ran 4h+ with ZERO GPU faults (18 ka-pool slabs / 9 graph
+    pairs / 10 fences — no leak class; the audit recorded).
+
+═══ HANDOFF TO P8 (serving multi-model) ═══
+  1. ITEM #0 + the registry/swap/pcache/API wave per MM_PLAN — PLUS the
+     P7 deltas the daemon needs: the FOLDED cycle machinery (acc36/selc36
+     in-graph + the cpu_view control/emit — coherent via uncached sysmem;
+     the NVAllocator._alloc uncached passthrough patch must ship), the
+     split-KV attention for ctx >= 16384 (spkq256s/spkc256 + the S pinned
+     per phase), and the PF-chunk feed for prefill-serving.
+  2. THE 140-CROSS RESIDUAL = the D8 graph time (~70ms tonight): the
+     kernel-side campaign — M-batched trunk GEMMs at P=9 (the per-seat
+     GEMV re-reads), the MoE pair L2 story, the slot-write elimination
+     (commit-free per-step states). Cycle <=55 at E[m]=8 => 145+.
+  3. THE PREFILL 850+ PATH: the counting-sort + gxm128e256 M-GEMM/IMMA
+     families per the plan (the chunk-256 graph/anchor/gate structure is
+     done and green — the kernels are the remaining work).
+  4. The 96k anchor RAM wall (law 6) — the serving config needs a leaner
+     CPU anchor (or anchor-free gates via engine-internal consistency).
+  5. THE BANK: mm_p7_progress.txt (all gates), mm_p7_perf.json, the
+     diag5-9 evidence set (grid law, coherence A/B, tail cost, S-class).
