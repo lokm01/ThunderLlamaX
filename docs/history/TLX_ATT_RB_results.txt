@@ -1,0 +1,108 @@
+TLX ATT_RB RESULTS (2026-09-30, GLM kernel agent — THE ROW-BATCHED ATTENTION
+WIN-MATH VERDICT: HEADROOM ALREADY SHIPPED; NO BUILD. Mission rule "don't
+build if the design's headroom assumption has evaporated" invoked with
+measurements. Commits on 90db568.)
+
+Files: engine0/tlx_attrb_rowbench.py (standalone row-scaling bench, the
+test_hm.py pattern) + engine0/tlx_attrb_bisect.py (the T=3 probe3 class
+bisect, the p10r2_bisect.py pattern) + ~/run_attrb_bisect.sh (the canonical
+env wrapper) + logs ~/tlx_attrb_bisect.log.
+
+═══ THE QUESTION ═══
+MM_P9_results Part 3 prices "row-batched attention" for the decode probe:
+the spkq256s KV re-read per seat (the MoE harness kernel's grid (T*16, S) =
+one block per (t,h), KV re-read T x per head-pair) -> all-T-rows-one-KV-pass
+would amortize the dominant memory traffic. The mission mapped that design
+onto the DENSE engine's T=3 probe (K=2 EAGLE, the shipped default; attn was
+22.58ms/cycle banked on the T=5 probe5 bisect).
+
+═══ THE ANSWER: THE DENSE KERNEL HAS BEEN ROW-BATCHED SINCE W3 ═══
+The shipped probe attention set (canonical env: SKV=1 SKV_K=g4nw32 SKV_S=256
+KV8=1 QH=1 HM=1) = spk_pre3qh_100k + spk_g4nw32hm3_100k + spk_c3g_100k:
+
+1. SOURCE (spk_g4hm.cu, verbatim the W3 design law in spk_c4.cu's header:
+   "K1S: grid (4 kv-groups x S splits). GQA-shared: ONE KV read serves all
+   6 q-heads x ROWS rows"): spk_g4nw32hm3 launches ONE CTA per (KV-group,
+   split) — grid 4*256 = 1024 — and each CTA stages every K/V tile to smem
+   ONCE, then computes ALL RMAX = 6*ROWS = 18 rows (6 q-heads of the group x
+   T=3) against it: QK mma [18 rows x 32 keys], per-row online softmax,
+   PV mma [18 rows x 256 dims]. The KV read count is 1x per (group, split)
+   — INDEPENDENT of T. The HMMA rewrite (W2G) kept this structure verbatim
+   ("grid 4*S unchanged"); the QH/PVH scalar ancestors had it too. The
+   preamble (spk_preqh.cu -DKPRE) loops t=0..ROWS-1 in-block and only
+   appends the T new K/V rows; the combine (spk_c3g/K2S) reads partials,
+   never KV. There is NO per-row KV re-read anywhere in the probe3 path.
+
+2. EMPIRICAL (tlx_attrb_rowbench.py — hm1/hm3/hm5 = the T=1/T=3/T=5 cubins,
+   same grid, same fixture, synced min-of-12):
+     @pos 97810: 0.685 | 1.019 | 1.170 ms  = 1 : 1.49 : 1.71  (T-scaling)
+     @pos  8192: 0.157 | 0.216 | 0.237 ms  = 1 : 1.37 : 1.51
+     @pos  2048: 0.122 | 0.206 | 0.219 ms  = 1 : 1.69 : 1.80
+   A per-seat design (the MM_P9 premise) scales ~1 : 3 : 5 — hm3 would be
+   2.06ms @97810. It is 1.02ms. The KV amortization across rows AND heads
+   is LIVE in the shipped cubins. The T-scaling that remains is pure row
+   work (mma + softmax + the row-scaled partial writes 6.3/19.0/31.7MB).
+
+3. THE ALREADY-BANKED WIN: per-seat counterfactual at T=3 = 3 x hm1 x 16
+   layers = ~32.9ms/cycle vs the actual ~14.5ms — the shipped design
+   already saves ~18ms/cycle (~26% of the 69ms prose cycle). Every banked
+   number (prose 22.93 tok/s, quote 74.85) includes this win. This is the
+   MTP_SEQ_ATTN_BATCH lineage carried into the hand-kernel design from day
+   one (W3), through QH/PVH, to the HMMA build.
+
+═══ THE T=3 BISECT (the banked decomposition, tlx_attrb_bisect.py) ═══
+Boot = the canonical battery env (the p10r2 pattern; snap100k + prose
+anchor at pos=97931 cur=20592, the same anchor as the banked runs).
+Probe3 (484 kernels) variants, back-to-back graph replays n=8:
+     full     61.26 ms   (the probe graph; phase-bench bank: 62.33)
+     no_attn  41.62 ms -> ATTENTION FAMILY (spk+aq+ao8) = 19.65 ms
+     no_spk   44.92 ms -> spk trio (pre3+a3+c3)         = 16.35 ms
+     no_k1    46.76 ms -> K1 (spk_g4nw32hm3 alone)      = 14.51 ms
+     no_ffn   38.63 ms -> ffn                            = 22.64 ms
+   (banked T=5 probe5: attn 22.58, ffn 28.78 — the T=3/T=5 attn delta
+    3.1ms matches the standalone hm3->hm5 row-work delta 0.15ms x 16 = 2.4
+    + the pre/combine/proj row scaling.)
+   In-graph K1 = 14.51/16 = 0.907 ms/layer (standalone 1.019 — the ~11%
+   graph-pipelining delta, consistent class).
+
+═══ WHY NO BUILD (the mission rule invoked) ═══
+- A row-batched rebuild of spk_g4nw32hm3 would re-ship the existing design:
+  the KV reads are already 1x per (group, split); there is nothing left to
+  amortize. Win = ~0% of the cycle -> STOP, bank, don't farm variants.
+- THE REMAINING ATTENTION HEADROOM IS PHASE-BOUND, NOT TRAFFIC-BOUND:
+  K1 moves 3.41GB/cycle (16 layers x 213MB KV+scales) in 14.51ms = ~235
+  GB/s effective vs the 880 GB/s dext data path (~27% of streaming). The
+  binding constraint is the 4-__syncthreads tile loop under 1-CTA/SM (the
+  P18 wide-attention law; per-tile ~8.5us vs the ~1.4us pure-stream floor).
+  The routes past it — persistent CTAs with cross-split pipelining,
+  dynamic-smem >48KB double-buffering, or a fused FLA shape — are
+  architecture-class rewrites, out of the row-batched scope by mission
+  rule (and priced in P10_ENDTOEND's honest-400 statement).
+- The 2k point: K1 @2048 = 0.206ms/layer (24 active CTAs of 1024; the
+  launch + the pos-independent 19MB partial writes dominate) -> the whole
+  probe3 attention @2k is ~3-4ms of a ~46ms-class cycle — no headroom
+  question at short ctx.
+- The K=4 (T=5) world: hm5 is the same design at ROWS=5 (1.170ms/layer
+  standalone); a future TLX_EAGLE_K=4 flip inherits the same already-
+  batched structure. Nothing to build there either.
+
+═══ NEW OPS FINDINGS (this session's side-quest, bank for the ledger) ═══
+1. *** THE STALE-SWAP MARKER-EATER ***: holding the engine down via the
+   staydown marker FAILS if ops/state/next_model is armed (a leftover from
+   an earlier enginectl switch): the wrapper's swap-promotion path runs
+   BEFORE the staydown check and does `rm -f $STAYDOWN` when _was_swap=1 —
+   it ATE a valid, fsynced, reset-surviving marker live (llm-engine-
+   launchd.log line 48392: 8 refusals, then "P8 swap: promoted
+   next_model='qwen3.6-35b-a3b-egpu'" -> boot). HOLD-DOWN PROTOCOL: verify
+   ops/state/next_model is ABSENT before writing the marker.
+2. THE GPU-EXIT HARD RESET EATS NON-SYNCED NEW FILES (re-confirmed, the P8
+   law): two scp'd bench scripts vanished across the reset cycle. Any file
+   that must survive = write + fsync + dir-fsync + `sync; sync; sleep 3;
+   sync` BEFORE provoking the stop.
+3. The launchctl disable state ALSO fell to the reset once (disabled.plist
+   reverted) — the marker + sync x3 is the reliable mechanism; disable is
+   belt-and-suspenders only.
+
+OPS: the rig was restored after the window (clear-breaker + enable + start;
+MoE resident, /health ok). No kernel changes; no env changes; nothing
+shipped. The two bench scripts are committed for future re-measurement.

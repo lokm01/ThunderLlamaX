@@ -12,12 +12,15 @@ attaching an NVIDIA RTX 3090 eGPU over Thunderbolt 4. macOS supports no eGPU
 on Apple Silicon and ships no NVIDIA driver, so this project brings its own:
 an open DriverKit driver that talks raw PCIe to the GPU (no CUDA runtime, no
 CUDA driver, no NVIDIA userspace), a hand-written kernel engine, and an
-OpenAI-compatible API on top. The result: **two models served from one
+OpenAI-compatible API on top. The result: **three models served from one
 service** — Qwen3.8-27B dense at **75.81 tokens per second** decode
 (bit-exact against greedy decoding, 100k-token context, 569/510/342 tok/s
-prefill; **43.7 tok/s** on novel prose via its own EAGLE draft layer) and
+prefill; **43.7 tok/s** on novel prose via its own EAGLE draft layer),
 Qwen3.6-35B-A3B MoE at **97.6-104 tok/s** quote-class /
-**40.1 tok/s** prose-class — with a durable prompt cache that restores a
+**40.1 tok/s** prose-class, and an abliterated (uncensored) weight-variant
+of the dense checkpoint served as a first-class registry model — the same
+pipeline turns any Qwen3.8-architecture checkpoint into a swappable model —
+with a durable prompt cache that restores a
 100k context in ~6.5 seconds, speculative decoding that drafts from the
 document being read AND from the model's own MTP layer, and a model
 registry that swaps residents through a crash-safe lifecycle. Local
@@ -37,7 +40,7 @@ dext, `pcache`.
 | Capability | Detail |
 |---|---|
 | OpenAI-compatible API | `/v1/chat/completions` (stream + non-stream + usage), `/v1/models` (with per-model residency), `/health` on 127.0.0.1:8080 |
-| Models | **Qwen3.8-27B** dense hybrid (48 gated-delta-net + 16 full-attention blocks, IQ3_XXS) · **Qwen3.6-35B-A3B** MoE (30 GDN + 10 attn blocks, 256 routed experts top-8 + shared, ~3B active, UD-IQ4_XS) |
+| Models | **Qwen3.8-27B** dense hybrid (48 gated-delta-net + 16 full-attention blocks, IQ3_XXS) · **Qwen3.6-35B-A3B** MoE (30 GDN + 10 attn blocks, 256 routed experts top-8 + shared, ~3B active, UD-IQ4_XS) · **Qwen3.8-27B-OBLITERATED** (an abliterated weight-only variant of the dense checkpoint — any same-architecture GGUF becomes a first-class model via the offline pack pipeline, [docs/DEPLOY_OBLITERATED.md](docs/DEPLOY_OBLITERATED.md)) |
 | Context | 100,352-token KV (dense) / 98,304 (MoE); gates run at a 97,810-token prompt |
 | Decode speed, quote-class @100k | **75.81 tok/s** dense (K=10 LOOKUP) · **97.6-104.0 tok/s** MoE (K=8 LOOKUP) — bit-exact in both |
 | Decode speed, prose-class | **43.7 tok/s** dense (the checkpoint's own EAGLE draft layer behind a full-vocab draft head, GSM8K median through the API) · **40.1 tok/s** MoE (first-party MTP K=4) |
@@ -380,8 +383,12 @@ all of them through `/v1/models` (with residency status). One model is
 resident at a time (one 24 GB card, one engine); `enginectl switch <id>`
 swaps residents through a crash-safe lifecycle, each model keeps its own
 prompt cache, and requests naming a non-resident model get a clean 409 with
-a switch hint instead of a wrong-model answer. Two ship today: the
-Qwen3.8-27B dense engine and the Qwen3.6-35B-A3B MoE engine.
+a switch hint instead of a wrong-model answer. Three ship today: the
+Qwen3.8-27B dense engine, the Qwen3.6-35B-A3B MoE engine, and an
+abliterated weight-variant of the dense model — deployed through the same
+recipe any Qwen3.8-architecture checkpoint can take (requantize to the
+engine's exact tensor-type map, pack offline, register;
+[docs/DEPLOY_OBLITERATED.md](docs/DEPLOY_OBLITERATED.md)).
 
 **And the batch number?** The B=2 batched-decode mode (R6) is opt-in and
 honest about what it buys: 81.33 tok/s aggregate in the engine harness
@@ -423,14 +430,17 @@ contract trivially. The sampling kernel is roadmap (M2).
 OpenAI API + prompt cache under the launchd supervisor, with the environment
 split per model (`env.common` + `env.canonical.d/<model>.env`, generated
 from the published examples) and the kernel set asserted against rung
-manifests at every boot. **Two models serve from the one registry**: the
+manifests at every boot. **Three models serve from the one registry**: the
 dense Qwen3.8-27B (K=10 decode finished at 75.81; the full-vocab EAGLE
 draft head doubled novel-prose to 43.7 tok/s through the API; the K=4
 chain is built, Tier-1-gated, and honestly falsified at -25% until a
-deeper drafter exists) and the MoE Qwen3.6-35B-A3B (K=8 quote at 97.6-104 tok/s;
+deeper drafter exists), the MoE Qwen3.6-35B-A3B (K=8 quote at 97.6-104 tok/s;
 first-party MTP K=4 prose at 40.1 — the multi-model campaign MM P0-P10,
 including its honestly-falsified fusion, is
-[docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) + the MM_P* journals).
+[docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) + the MM_P* journals),
+and the abliterated dense variant (a third registry entry proving the
+weight-only path: any Qwen3.8-architecture checkpoint packs offline and
+swaps in at runtime — [docs/DEPLOY_OBLITERATED.md](docs/DEPLOY_OBLITERATED.md)).
 The serving layer carries two full review campaigns (the W1-W5 fix waves +
 the 51-finding R3 hardening) and the L7 abort-safety protocol; the GPU-free
 battery is ~180 tests across serving/api/pcache/L7/P8/swap-FSM. Prefill
@@ -482,7 +492,8 @@ tools/       standalone probes: dext bandwidth bench, graph-budget probe,
              bootstraps, sync-cost microbench
 lineage/     the pre-engine tinygrad-stack MTP work (historical; needs the fork)
 docs/        GETTING_STARTED · ARCHITECTURE · SERVING · PERFORMANCE ·
-             DEXT_LAWS (the laws of this platform)
+             DEXT_LAWS (the laws of this platform) · DEPLOY_OBLITERATED
+             (the third-model worked example)
 docs/history/ the lab notebooks — every campaign journal, indexed
 baselines/   greedy baseline token files for the exactness gates
 patches/     tinygrad-fork.patch — the fork deltas the engine requires

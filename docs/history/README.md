@@ -28,6 +28,7 @@ campaign. Expect rig-era shorthand, env-knob names, commit hashes, and
 | The B axis | R6_BATCH | B=2 batched decode, per-stream Tier-1, 81.33 harness aggregate + the honest Phase-3 serving tables |
 | The audit | FIX_CAMPAIGN | 10 model reviews -> 60-finding ledger -> five fix waves -> live W5 validation (75.81) |
 | Multi-model + MoE | MM_PLAN + MM_P0..MM_P10_results | the Qwen3.6-35B-A3B port (four new kernel classes), the R3/L7 hardening era, multi-model serving, the first-party MTP K=4 chain, the honest fusion falsification |
+| The third model + the drafter program opens | DEPLOY_OBLITERATED (in docs/) + TLX_ATT_RB_results + TLX_P0_LEVER_RANKING | the abliterated dense variant as a first-class registry model (offline pack pipeline), the row-batched attention verdict (headroom already shipped), Phase 0's calibrated simulator + lever ranking |
 | Condensed ladders | CAMPAIGN.md, PREFILL.md, PERFLOG.md | the campaign summaries (kept here, not in docs/) |
 | Earlier lineage | MTP_PLAN, MTP_V3_NOTES, K4BEAM, SCAN_FUSION, CTASM_INVESTIGATION, p1c/p1d/p1e_findings | the tinygrad-stack era before the engine (`lineage/` in the repo root) |
 
@@ -47,6 +48,8 @@ campaign. Expect rig-era shorthand, env-knob names, commit hashes, and
 - **MM_P9_results.txt** — the MTP K=4 chain (spec==T1 60/60), the KAPool slab-coherence + narrow-load + Q3_K hmask laws, the launch-serialization measurement
 - **MM_P10_results.txt** — MTP wired into serving (prose 19.1 -> 40.1 through the API), the PF-only cur fix, the pairwise fusion honestly falsified + the marginal-launch law correction, the G3 first-contact adjudication
 - **MM_P9E_results.txt** — the first output-QUALITY battery (GSM8K 93/95%, PPL baselines, needle) + the F1 first-token-loss fix and the F2/F3 exhaustion findings (closed next by the P10 kernargs pool; eval/ in the repo root carries the harnesses)
+- **TLX_ATT_RB_results.txt** — the row-batched attention verdict: the dense probe kernels have been row-batched (one KV pass serves all T rows and all 6 q-heads of a group) since W3 — the priced "win" was already banked in every shipped number; mission-rule NO BUILD, with the T=3 bisect decomposition + the row-scaling bench
+- **TLX_P0_LEVER_RANKING.md** — drafter Phase 0's verdict: the G0 sim calibration (chain_sim vs engine traces), the G1 battery (exposure bias is the biggest measured lever: true-conditioning recovers deep conditionals to 0.62-0.72), the pilot's negative transfer lesson (short-ctx cloud training REGRESSES 100k prose), and the committed Phase-1 scope (train-first, corrected data mix, Stage-B engine-trace adaptation before any ship decision). The program plan itself lives outside the repo (driver-seat workspace, `~/.zcode/workspace/default/TLX_DRAFTER_PLAN.md`); its instruments are `engine/chain_sim.py` + `engine/ttt/`, and the third-model deploy record is [../DEPLOY_OBLITERATED.md](../DEPLOY_OBLITERATED.md)
 - **R8_DECODE.md** — K=9/K=10 ships (75.56 tok/s; 75.81 re-validated through the W5 fixed stack), the bimodal match law, prose-class honest numbers
 - **R6_BATCH.md** — the B=2 batch campaign: rungs, laws (compact-partial slice, R6 VRAM, BT>RM, graph-class budget, kernargs-slab), Phase-3 serving integration + honest tables
 - **FIX_CAMPAIGN.md** — the five-wave review-fix record + the W5 live validation + the open-findings ledger (#1-9)

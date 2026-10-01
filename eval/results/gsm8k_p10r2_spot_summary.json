@@ -1,0 +1,22 @@
+{
+ "tag": "p10r2_spot",
+ "model": "qwen3.8-27b-egpu",
+ "n": 10,
+ "shots": 4,
+ "max_tokens": 512,
+ "thinking": false,
+ "accuracy": 1.0,
+ "n_correct": 10,
+ "n_completed": 10,
+ "n_prev_done": 0,
+ "extract_failures": 0,
+ "latency_mean_s": 6.22,
+ "latency_median_s": 6.51,
+ "ttft_median_s": 2.68,
+ "gen_time_median_s": 3.34,
+ "completion_tokens_median": 142,
+ "prompt_tokens_median": 639,
+ "decode_tps_median": 44.11,
+ "decode_tps_mean": 43.72,
+ "wall_s": 62.3
+}

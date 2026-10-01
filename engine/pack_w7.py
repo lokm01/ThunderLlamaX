@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """P7-B: offline weight repacker — the k-chunk-major W layout (packed7/).
 
 PURE BYTE PERMUTATION of every IQ3_XXS-packed weight tensor into the
@@ -31,8 +28,8 @@ import os, sys, glob
 import numpy as np
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-PACKED = f"{BASE}/packed"
-OUT = f"{BASE}/packed7"
+PACKED = os.getenv("TLX_PACKED", f"{BASE}/packed")  # P11-oblit: per-model packs
+OUT = os.getenv("TLX_PACKED7", f"{BASE}/packed7")  # P11-oblit: per-model packs
 KCH = 128
 NCL = KCH // 32          # 4 lane-chunks per (row, quarter) per chunk
 

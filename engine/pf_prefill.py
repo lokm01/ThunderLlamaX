@@ -33,6 +33,10 @@ from tinygrad.device import TinyELF
 from tinygrad.runtime.ops_nv import NVProgram
 
 BASE = "~/tinygrad-metal/engine0"
+# TLX P11-oblit: per-model pack dirs (env-overridable; defaults = the
+# shared dense dirs, so unset-env boots are byte-identical)
+P7DIR = os.getenv("TLX_PACKED7", f"{BASE}/packed7")
+P5DIR = os.getenv("TLX_PACKED5", f"{BASE}/packed5")
 LS = (256, 1, 1)
 MERGE = os.getenv("PF_MERGE") == "1"
 DFILL = os.getenv("PF_DFILL", "1") == "1"
@@ -211,7 +215,7 @@ def ensure(E):
   # unchanged (same decode words, same k-order). ----
   W7 = {}
   if G3M:
-    P7D = f"{BASE}/packed7"
+    P7D = P7DIR
     budget = (PERSIST_MB if PERSIST else float(os.getenv("PF_G3M_MB", "4300"))) * 1e6
     cands = []
     for i in range(64):
@@ -261,7 +265,7 @@ def ensure(E):
   if P5:
     nk5 = 0
     for i in E.gdn_idx:
-      p5f = f"{BASE}/packed5/qkv{i}.npy"
+      p5f = f"{P5DIR}/qkv{i}.npy"
       assert os.path.exists(p5f), f"PF_P5: missing {p5f} (run pack_w5.py)"
       W5[i] = P.up(f"p5_qkv_{i}", np.load(p5f, mmap_mode="r")); nk5 += 1
       if nk5 % 8 == 7:
@@ -694,7 +698,7 @@ def ensure_sc(E):
   # gemm3 packed weights
   E._pfsc_r7 = {}
   if G3SC:
-    P7D = f"{BASE}/packed7"
+    P7D = P7DIR
     _wset = sorted({t for c in G3C for t in _G3W[c]})
     ups = [(t, i) for i in range(G3SCN) for t in _wset
            if os.path.exists(f"{P7D}/{t}{i}.npy")]

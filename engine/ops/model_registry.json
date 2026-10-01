@@ -24,7 +24,19 @@
       "max_output_tokens": 32768,
       "pcache_root": "~/prompt_cache/qwen3.6-35b-a3b-egpu",
       "pcache_quota_gb": 26,
-      "notes": "The MM-campaign MoE harness (P7 state: 118-121 tok/s quote-class in-harness). The serving bridge (test_moe36.py) is the P8 integration item; until it lands the registry entry is loadable-but-not-bootable — enginectl switch validates engine_host exists before arming."
+      "notes": "The MM-campaign MoE harness (P7 state: 118-121 tok/s quote-class in-harness). The serving bridge (test_moe36.py) is the P8 integration item; until it lands the registry entry is loadable-but-not-bootable \u2014 enginectl switch validates engine_host exists before arming."
+    },
+    "qwen3.8-27b-obliterated-egpu": {
+      "display_name": "Qwen3.8-27B-OBLITERATED dense (IQ3_XXS mixed, V3 abliteration)",
+      "arch": "dense-gdn",
+      "engine_host": "test_w100k.py",
+      "model_path": "~/tinygrad-metal/models/Qwen3.8-27B-OBLITERATED-IQ3_XXS.gguf",
+      "env_file": "env.canonical.d/qwen3.8-27b-obliterated-egpu.env",
+      "ctxk": 100352,
+      "max_output_tokens": 32768,
+      "pcache_root": "~/prompt_cache/qwen3.8-27b-obliterated-egpu",
+      "pcache_quota_gb": 15,
+      "notes": "Weight-only abliterated variant of qwen3.8-27b-egpu (OBLITERATUS V3, Apache-2.0). Same arch/tokenizer/quant map as the dense base; per-model pack dirs via TLX_PACKED7/TLX_PACKED5/TLX_DRAFT_PACK (P11-oblit). Quant source: their Q8_0 GGUF requantized with an imatrix from their Q2_K on M3 Metal; 96 ssm_alpha/beta tensors dequantized from Q8_0."
     }
   }
 }

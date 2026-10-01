@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """P8: offline Q5_K -> packed5 repacker (the gdnqg qkv seg true-16B layout).
 
 PURE INTEGER PERMUTATION of the 48 GDN blocks' Q5_K attn_qkv tensors
@@ -28,7 +25,7 @@ Usage: ~/tg311/bin/python -u pack_w5.py [--check-only]
 import os, sys, struct
 import numpy as np
 
-GGUF = "~/tinygrad-metal/models/Qwen3.8-27B-IQ3_XXS.gguf"
+GGUF = os.getenv("TLX_MODEL_PATH", "~/tinygrad-metal/models/Qwen3.8-27B-IQ3_XXS.gguf")  # P11-oblit: per-model GGUF
 _TYPR = {0:(1,"c"),1:(1,"b"),2:(2,"H"),3:(2,"h"),4:(4,"I"),5:(4,"i"),6:(4,"f"),7:(1,"?"),10:(8,"Q"),11:(8,"q"),12:(8,"d")}
 QUANT = {2:(32,18),3:(32,20),6:(32,22),7:(32,24),8:(32,34),12:(256,144),13:(256,176),
          14:(256,210),18:(256,98),21:(256,110),22:(256,82),23:(256,136),39:(32,17),41:(128,18)}
@@ -70,7 +67,7 @@ def read_raw(info, data_start):
     f.seek(data_start+off); return f.read(tnbytes(ne, t))
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-OUT = f"{BASE}/packed5"
+OUT = os.getenv("TLX_PACKED5", f"{BASE}/packed5")  # P11-oblit: per-model packs
 KCH = 128
 KDIM = 5120
 NCH = KDIM // KCH          # 40

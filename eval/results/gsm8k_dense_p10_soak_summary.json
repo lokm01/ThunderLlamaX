@@ -1,0 +1,22 @@
+{
+ "tag": "dense_p10_soak",
+ "model": "qwen3.8-27b-egpu",
+ "n": 300,
+ "shots": 4,
+ "max_tokens": 320,
+ "thinking": false,
+ "accuracy": 0.94,
+ "n_correct": 282,
+ "n_completed": 300,
+ "n_prev_done": 0,
+ "extract_failures": 0,
+ "latency_mean_s": 8.55,
+ "latency_median_s": 7.88,
+ "ttft_median_s": 2.11,
+ "gen_time_median_s": 5.69,
+ "completion_tokens_median": 132,
+ "prompt_tokens_median": 635,
+ "decode_tps_median": 23.22,
+ "decode_tps_mean": 23.29,
+ "wall_s": 2564.5
+}

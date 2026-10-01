@@ -116,7 +116,7 @@ the Mac — harmless but wasted).
 The service is multi-model: a registry
 (`engine/ops/model_registry.json`) declares the models, and the wrapper
 boots whichever model `ops/state/current_model` names (or the registry
-default). Two models ship today:
+default). Three models ship today:
 
 ### Model A — Qwen3.8-27B (dense)
 
@@ -150,6 +150,47 @@ default). Two models ship today:
   Q3_K/Q4_K quants). Manifest, per-file sha256 and alignment gates are
   built in.
 - Context: 96k default (98,304 KV) on the same 24 GB card.
+
+### Model C — any Qwen3.8-architecture checkpoint (the third-model recipe)
+
+The dense engine is not wired to one checkpoint: ANY same-architecture
+Qwen3.8-27B-class GGUF (a finetune, an abliteration, your own merge)
+becomes a first-class registry model through a weight-only pipeline. The
+worked example is the deployed abliterated variant
+([DEPLOY_OBLITERATED.md](DEPLOY_OBLITERATED.md)):
+
+1. **Requantize to the engine's exact tensor-type map.** The engine
+   hard-codes one mixed-quant map (456 F32 / 288 IQ3_XXS / 49 Q5_K /
+   24 Q8_0 / 17 IQ3_S / 16 Q4_K / 8 Q6_K / 8 Q4_0 for the dense model);
+   reverse-engineer it tensor-for-tensor from the reference GGUF's
+   `general.rope_type`/tensor-type histogram (a plain GGUF metadata scan)
+   and quantize your checkpoint to that identical histogram. Mind the
+   ggml enum trap: type 21 is IQ3_S in current llama.cpp, not IQ1_M.
+2. **Pack offline — no GPU window needed**: `ops/pack_runner.py` stubs
+   `Device["NV"]` before importing the engine, so all four packers
+   (`pack_w1c`/`pack_w7`/`pack_w5`/`q4pack`) run as pure file I/O while
+   another model stays RESIDENT on the GPU:
+
+   ```sh
+   cd engine/ops && env TLX_MODEL_PATH=<gguf> \
+     TLX_PACKED=<d>/packed TLX_PACKED7=<d>/packed7 \
+     TLX_PACKED5=<d>/packed5 TLX_DRAFT_PACK=<d>/draft_pack \
+     ~/tg311/bin/python -u pack_runner.py w1c w7 w5 q4
+   ```
+
+3. **Point the model's env at its own packs**: the packer and engine paths
+   are env-overridable (`TLX_PACKED` / `TLX_PACKED7` / `TLX_PACKED5` /
+   `TLX_DRAFT_PACK` / `TLX_MODEL_PATH`); a per-model
+   `env.canonical.d/<model>.env` that sets them keeps every variant's
+   packs isolated (unset envs fall back to the shared dense dirs,
+   byte-identical to the pre-override boots).
+4. **Register + switch**: add the `model_registry.json` entry (engine
+   host `test_w100k.py`, own pcache root/quota), then
+   `enginectl switch <model-id>` — the same crash-safe swap lifecycle as
+   the other models. Behavior caveats specific to the abliterated
+   example: it thinks by default (budget `max_tokens` for reasoning) and
+   the author measured -2.1pp MMLU (details in
+   [DEPLOY_OBLITERATED.md](DEPLOY_OBLITERATED.md)).
 
 ## 5. Build the kernels
 
@@ -338,6 +379,7 @@ example — generate the file for the full rig-fidelity run.)
 | `NV_SMEM_CFG_AUTO=1 NV_SMEM_CFG_AUTO_NAMES=pfg,pfa32c` | dynamic smem carveout for the big prefill kernels |
 | `NV_SPILL_EXEMPT_NAMES=pf,p8` | fork tripwire scoping — the Tier-2 prefill families run 104-592 B stack FRAMES by design (warn-only for these names; the hard >100 B spill law stays for the decode/canon set) |
 | `TLX_ADMIN_TOKEN` / `TLX_MODEL_PATH` | ops: the privileged-RPC token + the model path feeding the config fingerprint (live in env.canonical/env.common, not the repo) |
+| `TLX_PACKED` / `TLX_PACKED7` / `TLX_PACKED5` / `TLX_DRAFT_PACK` | per-model weight-pack dirs (packers AND runtime both read them; unset = the shared dense dirs, boots byte-identical). `TLX_DRAFT_PACK` is hashed into the config fingerprint, so a draft-pack swap invalidates pcache correctly |
 | `TLX_T1_MODE=1` | dense: the adaptive T=1 prose mode (4 zero-accept K2 cycles -> T=1 cycles; first 8-gram hit exits to deep). Output-invariant by gate; entry suppressed under `TLX_DHEAD_FULL` |
 | `TLX_DHEAD_FULL=1` | dense: the FULL-VOCAB EAGLE draft head — the blk.64 nextn chain proposes over the resident trunk head plane (prose 23.0 -> 43.7 tok/s through the API; zero new VRAM; draft-source-only, not an fp knob; kill-switch = remove the line) |
 | `TLX_EAGLE_K` | dense: the EAGLE chain depth — 2 (default, bit-exact to the rung-1 ship) or 4 (the Tier-1-proven K=4 graph set; honestly falsified at -25% prose on the 1-layer drafter — armed for a future deeper drafter). Registered in the config fingerprint |

@@ -22,7 +22,10 @@ from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 
 BASE = "~/tinygrad-metal/engine0"
-DPACK = f"{BASE}/draft_pack"
+# TLX P0-S2: the draft pack dir is env-swappable (Phase 2's weight-swap A/B
+# path: TLX_DRAFT_PACK=<dir>); svc_fp.set_draft_pack_extra hashes it into
+# config_fp so a swap invalidates pcache (the kvd/dhd persistence gap).
+DPACK = os.getenv("TLX_DRAFT_PACK") or f"{BASE}/draft_pack"
 LS = (256, 1, 1)
 import os as _os2
 TLX_MANIFEST = bool(int(_os2.getenv("TLX_MANIFEST", "1")))   # W4.4 kill-switch

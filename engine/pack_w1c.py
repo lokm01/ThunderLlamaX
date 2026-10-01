@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """W1-c offline repacker. Two aligned layouts (nvcc merges adjacent u16 pairs into
 u32 loads -> any per-lane multi-byte run must sit on ITS-NATURAL alignment or the
 dext faults with SM Multiple Warp Errors; discovered via PTX diff of down8):
@@ -15,7 +12,7 @@ import numpy as np
 sys.path.insert(0, "~/tinygrad-metal/engine0")
 from engine0 import parse_gguf, read_raw
 
-OUT = "~/tinygrad-metal/engine0/packed"
+OUT = os.getenv("TLX_PACKED", "~/tinygrad-metal/engine0/packed")  # P11-oblit: per-model packs
 os.makedirs(OUT, exist_ok=True)
 
 def pack_iq3(info, ds):

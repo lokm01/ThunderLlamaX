@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 """W2-MTP: repack the draft block (blk.64, all Q4_0) into the aligned two-region
 layout q4v.cu expects, and gather the 40960-row Q5_K head slice.
 Outputs engine0/draft_pack/*.npy (run once, offline — the offline-repack law)."""
@@ -10,7 +7,7 @@ os.environ.setdefault("DEV", "NV")
 sys.path.insert(0, "~/tinygrad-metal/engine0")
 from engine0 import parse_gguf, read_raw
 
-OUT = "~/tinygrad-metal/engine0/draft_pack"
+OUT = os.getenv("TLX_DRAFT_PACK", "~/tinygrad-metal/engine0/draft_pack")  # P11-oblit: per-model packs (mtp.py DPACK reads the same env)
 os.makedirs(OUT, exist_ok=True)
 
 def pack_q4(infos, ds, name):

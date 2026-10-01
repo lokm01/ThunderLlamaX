@@ -971,3 +971,73 @@ client-side staydown markers, stop-order, dir-fsync), MM_P9E_results.txt +
 eval/P9_EVAL_RESULTS.md (KA1-KA5 + the P9 findings F1-F7),
 PERFORMANCE.md P10-dense section + eval/results/gsm8k_p10_* (PD1-PD5),
 the R8_PROSE_DUMP instrument in engine/test_w100k.py (PD6-PD8).
+
+## Z. Third-model-deploy + drafter-program Phase-0 laws (P11-oblit + P0)
+
+Journals: docs/DEPLOY_OBLITERATED.md (the worked deploy),
+history/TLX_P0_LEVER_RANKING.md + TLX_ATT_RB_results.txt. These are
+checkpoint/format truths (the D-family lineage) plus the pack-isolation
+laws the weight-variant deploy exposed.
+
+**Z1. THE NORM LAW (HF vs GGUF, law-grade).** The HF qwen3_5 checkpoint
+stores ALL RMSNorm weights ZERO-CENTERED (Gemma-style): functional =
+stored + 1.0. The GGUF and this engine use the functional form. Proven
+element-wise: GGUF trunk+draft norms == HF stored + 1.0 EXACTLY (all 7
+norm tensors, bit-exact). Any HF->engine weight path must add the +1 (and
+any engine->HF path must subtract it), or norms silently run ~1.0x off.
+Corollary earned the hard way: the rig GGUF **is** the first-party
+checkpoint — an earlier "different lineage" reading was a fetcher bug
+(see Z2).
+
+**Z2. THE SAFETENSORS OFFSET LAW.** `data_offsets` in a safetensors
+header are DATA-SECTION-relative (add `8 + header_len` for the absolute
+file offset), not absolute file offsets. Range-fetching tensors at the
+raw offset returns SHIFTED GARBAGE that still looks statistically sane —
+which is exactly what made the misfetch read as "different lineage"
+above. Always rebase by the header size before seeking.
+
+**Z3. THE GGML ENUM-TRAP (type 21).** ggml tensor-type ids are a
+HISTORICAL ENUM, not a stable ABI: current llama.cpp's type 21 is IQ3_S
+(110 B/256w block), NOT IQ1_M. Requantizing "to the same map" by id
+without checking the current enum wrote the wrong type on the first
+obliterated pass — verify by block SIZE from the tensor layout, not by
+the numeric id alone.
+
+**Z4. THE MMAP RE-SLICING IS-IDENTITY BREAK.** `np.load(mmap_mode).T`
+-style re-slicing of a memmap breaks `is`-identity bookkeeping: two
+tensors that should alias the same bytes end up with DIFFERENT views, and
+a scale-table lookup keyed on the array object silently returns the WRONG
+tensor's scales (observed: K dequantized with V's scales — cos 0.78 vs
+the expected 1.0, the class the microdiff ladder isolated). In
+differential harnesses, bind scales to tensors BY CONSTRUCTION (one view,
+one key), never by object identity after slicing.
+
+**Z5. THE HARDCODED-PACK-DIR STALE-SWAP LAW.** When the runtime hardcodes
+shared weight-pack dirs, a weight-only variant swapped via its own GGUF
+will boot its trunk on the new weights but serve STALE shared planes
+(prefill packs, draft packs) from the base model — silently, with no
+fault, at full speed. Pack dirs must be per-model overridable
+(`TLX_PACKED`/`TLX_PACKED7`/`TLX_PACKED5`/`TLX_DRAFT_PACK`), defaults
+byte-identical when unset. And because draft-pack state persists INSIDE
+pcache nodes (kvd/dhd), a draft-pack swap must also change the config
+fingerprint (`svc_fp.set_draft_pack_extra` hashing the dir) or a cache
+restore resurrects the old drafter across boots.
+
+**Z6. THE OFFLINE PACK_RUNNER PATTERN.** `engine0.py` grabs the dext at
+IMPORT (`dev = Device["NV"]`), which couples "pack a new model's weights"
+to "own the GPU". The pack_runner replaces tinygrad's Device map with a
+lazy stub BEFORE the import: packers run as pure file I/O while another
+model is RESIDENT (no GPU window needed for a new model's packs; any real
+dev access fails loud). Same pattern applies to any future tool that only
+wants parse_gguf/read_raw from the engine module.
+
+**Z7. THE SIM-CALIBRATION CONTRACT (chain_sim).** An offline simulator is
+only a pack-selection instrument if its RESIDUAL is small relative to the
+decisions it arbitrates: calibrate against a captured engine trace FIRST
+(G0: m-dist shape + the ship metric within band), then require
+pack-to-pack deltas >= 2-4x that residual before trusting a sim verdict.
+Two instrument bugs the microdiff ladder caught on the way: the re-slicing
+identity break (Z4) and a class-B target off-by-one (proposal_i compares
+vs target(t+i), not target(t+i+1) — a one-token-lookahead definition
+error that inflates acceptance and fits no symptom until the diff harness
+runs).

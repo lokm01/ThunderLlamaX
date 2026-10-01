@@ -7,13 +7,15 @@ the driver layer is ThunderSilicon, the prompt cache is LongMemory — the real
 component names are `engine0` (published as `engine/`), the dext, `pcache`.
 
 The engine (`engine/`, originally `engine0/`) is a from-scratch decode loop
-that now serves **two models**: the original **Qwen3.8-27B** hybrid (48
+that now serves **three models**: the original **Qwen3.8-27B** hybrid (48
 gated-delta-net blocks + 16 full-attention blocks + IQ3_S embedding + Q5_K
-output head + one MTP draft block) and, since the multi-model campaign, the
+output head + one MTP draft block), since the multi-model campaign the
 **Qwen3.6-35B-A3B MoE** (30 GDN + 10 full-attention blocks at hidden 2048;
 every layer routes top-8 of 256 experts plus one shared expert — ~35.1B
 parameters total, ~3B active; its own `blk.40` MTP layer is the shipped
-first-party drafter). Both bypass tinygrad's scheduler entirely: static raw
+first-party drafter), and an abliterated weight-variant of the dense
+checkpoint (same architecture, weight-only swap through the registry —
+[DEPLOY_OBLITERATED.md](DEPLOY_OBLITERATED.md)). All three bypass tinygrad's scheduler entirely: static raw
 buffers, ~330 (dense) + ~60 (MoE) hand-CUDA kernel sources compiled to
 per-kernel cubins, and a graph-replay submit path. tinygrad is used only as
 the *driver runtime* (NVProgram/TinyELF/NVComputeQueue from the fork — see
@@ -630,3 +632,40 @@ numbers in [PERFORMANCE.md](PERFORMANCE.md). The shape of it:
   the chunks as a recorded-trunk-hiddens replay — the draft's own
   attention/o-proj/FFN are dead code during fill (alpha after prefill
   2.67 -> 2.68).
+
+## The drafter-quality program instruments (chain_sim + ttt/; in flight)
+
+*Plain language: the next performance axis is the DRAFTER itself — the
+1-layer EAGLE draft block saturates at ~2 accepted tokens, so K=4 measured
+-25% prose and ships off. Raising that means retraining the checkpoint's
+own draft layer (blk.64) and scoring candidate packs OFFLINE against real
+engine traces before anything touches the GPU. Two pieces of permanent
+infrastructure landed for that program — nothing from it has shipped into
+the serving defaults yet.*
+
+- **`engine/chain_sim.py` — the ENGINE-CALIBRATED offline acceptance
+  simulator.** The engine dumps a full cycle trace (`TLX_TRACE_DUMP` in
+  `test_w100k.py`: the anchor state before each draft cycle, the engine's
+  own proposals, probe argmax rows, the decode-start int8 KV + GDN state,
+  emb/head planes); chain_sim then replays the EXACT cycle sequence in
+  numpy — the real draft kernels' math (fp16 round-trips, the Q4_0
+  two-region pack dequant, the 40960-row slice argmax) against a
+  swappable draft pack. A candidate pack is scored (E[m] at K=2/K=4,
+  per-position conditionals) without a GPU boot. Calibration (G0) holds:
+  sim m-dist [30,14,7,0,0] vs engine [29,14,7,0,1], 83.8% per-proposal
+  agreement, E[m]|k2 0.549 vs engine 0.588 — pack-to-pack deltas are 2-4x
+  the residual, which is the resolution the pack-selection gate needs.
+- **`engine/ttt/` — the EAGLE-3 trainer pipeline (external, rented GPU).**
+  The checkpoint's own blk.64 draft layer (424.6M params) is retrained in
+  plain PyTorch on a rented H100 with the EAGLE-3 recipe (training-time-
+  test multi-step unroll + token-only CE over a frozen trunk), then packed
+  back into the engine's Q4_0 two-region draft-pack layout
+  (`pack_trained.py`, RTN or GPTQ-calibrated) and swapped in via
+  `TLX_DRAFT_PACK=<dir>` — a pure weight swap, zero new serving CUDA.
+  `validate_port.py`/`engine_ref.py` prove the port (step-1 relerr 7.9e-7
+  vs the engine chain math; pack norms bit-exact vs the first-party
+  checkpoint).
+- The Phase-0 verdict and the ranked levers (exposure bias via TTT
+  training is the big one; data distribution/ctx second; precision a
+  distant third) are in [history/TLX_P0_LEVER_RANKING.md](history/TLX_P0_LEVER_RANKING.md);
+  the program plan lives with the driver-seat workspace, not this repo.

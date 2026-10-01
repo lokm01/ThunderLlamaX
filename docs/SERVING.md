@@ -96,6 +96,39 @@ to the state dir's owner (the launchd daemon user) — mixed sudo/non-sudo
 invocation is safe. A repair sweep (wired into `models` and `switch`)
 heals any pre-fix root-owned leftovers.
 
+**Three models in the registry today**: `qwen3.8-27b-egpu` (dense),
+`qwen3.6-35b-a3b-egpu` (MoE), and `qwen3.8-27b-obliterated-egpu` (the
+abliterated dense variant — same architecture, weight-only swap; deployed
+per [DEPLOY_OBLITERATED.md](DEPLOY_OBLITERATED.md)). Switch to it like any
+other model: `enginectl switch qwen3.8-27b-obliterated-egpu`.
+
+**The stale-pack-dir fix that made weight-variants safe (P11)**: the
+packers and the runtime used to hardcode the SHARED dense pack dirs
+(`packed7`/`packed5`/`draft_pack`). A weight-only variant booted from its
+own GGUF but its per-model env had no way to redirect the packs — a swap
+would have silently served the BASE model's prefill/draft weight planes
+against the variant's KV/trunk state. Every pack path is now
+env-overridable (`TLX_PACKED`/`TLX_PACKED7`/`TLX_PACKED5`/
+`TLX_DRAFT_PACK`/`TLX_MODEL_PATH`); the defaults are unchanged, so an
+unset env boots byte-identically (the dense config_fp is untouched), and
+the obliterated env points at its own pack dirs. `TLX_DRAFT_PACK` is
+additionally hashed into the config fingerprint
+(`svc_fp.set_draft_pack_extra`) — the draft packs persist inside pcache
+nodes (kvd/dhd), so a draft-pack swap without a fingerprint change would
+have restored STALE draft state across boots. Tier-1 re-gated green after
+both changes; expect one cold pcache rebuild per model on the first boot
+after the fingerprint change.
+
+**Caveats when serving the abliterated variant** (honest notes, from the
+deploy gates): (a) it THINKS by default — a small `max_tokens` cap can be
+eaten entirely by reasoning before any content is emitted, so budget
+`max_tokens` accordingly; (b) the checkpoint author recommends
+repetition_penalty 1.15 for long generations — this engine serves pure
+greedy (no penalty), so watch for repetition loops on very long
+generations; (c) the author measures -2.1pp MMLU from the refusal-removal
+surgery, and our quant chain adds a Q8_0-source requantization on top
+(full A/B behavior battery in [DEPLOY_OBLITERATED.md](DEPLOY_OBLITERATED.md)).
+
 **Streaming semantics**: one SSE chunk per engine cycle — each cycle emits
 m+1 tokens (up to K+1), so chunks arrive at the cycle rate: ~8.9 tokens /
 118 ms on the K=10 hit-class config (~7.5/105 ms at the published K=8

@@ -21,6 +21,7 @@ SYNC_EVERY = int(os.getenv("SYNC_EVERY", "1"))
 DO_T1 = os.getenv("DO_T1", "1") == "1"
 TLX_T1_MODE = int(os.getenv("TLX_T1_MODE", "0"))   # A.1: the adaptive T=1 mode (see mtp.py)
 TLX_RANK_HIST = os.getenv("TLX_RANK_HIST", "0") == "1"   # A.2: the MTP rank histogram (prose harness)
+TLX_TRACE_DUMP = os.getenv("TLX_TRACE_DUMP", "")   # TLX P0-S1: the chain_sim class-A trace capture (r8 anchor)
 
 meta = json.load(open(f"{SNAP}/meta.json"))
 P0 = int(meta["P"]); assert CTXK == int(meta["CTXK"])
@@ -706,6 +707,72 @@ if os.getenv("R5_QUOTE", "0") == "1":
           prev_dist = None   # deep/T1 cycles break the query chain — drop the pair
         emt += r["tokens"]
       pend = r["pos_new"]
+    elif TLX_TRACE_DUMP:
+      # TLX DRAFTER Phase 0 (S1): the chain_sim class-A trace. Per cycle: the
+      # anchor state (pos/cur/h_seed captured BEFORE the draft graph runs --
+      # the exact chain inputs; h_seed post-accept from the PREVIOUS cycle,
+      # zeros on cycle 1 = the post-follow_up reality), the engine's own
+      # proposals (dring0..3), the probe argmax rows (amds), m/tokens. Rep 0
+      # additionally dumps the decode-start kv_d/sc_d int8 state (rows
+      # 0..pos-1 = the boot fill_draft + the follow_up delta fill) and the
+      # global assets (emb/head raw planes, grid512, stab). The sim replays
+      # THIS cycle sequence exactly.
+      import trace_dump_lib as tdl
+      from mtp import CTXK as _CK
+      recs = []
+      hseeds = []
+      hds, qrs, krs, vrs = [], [], [], []
+      if rep == 0:
+        os.makedirs(TLX_TRACE_DUMP, exist_ok=True)
+        if not os.path.exists(f"{TLX_TRACE_DUMP}/manifest.json") or            not os.path.exists(f"{TLX_TRACE_DUMP}/emb_raw.npy"):
+            tdl.dump_globals(TLX_TRACE_DUMP, E)
+        if os.getenv("TLX_TRACE_DUMP_KVD", "1") == "1":
+            tdl.dump_kvd(TLX_TRACE_DUMP, E, "decode_start", _CK)
+        np.save(f"{TLX_TRACE_DUMP}/prompt_ids.npy", np.array(ids, dtype=np.int32))
+        np.save(f"{TLX_TRACE_DUMP}/delta_ids.npy", np.array(delta, dtype=np.int32))
+      emt = []
+      r = None
+      for _ in range(NTOK):
+        pre = tdl.dump_state_scalars(E)
+        pre_hs = tdl.dump_h_seed(E)
+        ran_prose_entry = int(getattr(sess, "prose", 0))
+        deep_at_entry = int(getattr(sess, "deep", 0))
+        t1_at_entry = int(getattr(sess, "t1mode", 0))
+        r = sess.step()
+        rec = tdl.dump_cycle_record(E, r, ran_prose_entry, pre)
+        rec["deep_at_entry"] = deep_at_entry
+        rec["t1_at_entry"] = t1_at_entry
+        rec["h_idx"] = len(hseeds)
+        hseeds.append(pre_hs)
+        if os.getenv("TLX_TRACE_DUMP_HD", "0") == "1":
+            hd_np = np.stack([E.P.down_at(f"hd_d{i}", 0, 5120, np.float32) for i in range(4)])
+            hds.append(hd_np)
+            # post-step scratch of the LAST chain step (graph-timeline values)
+            qr = E.P.down_at("qrow_d", 0, 12288, np.float16).copy()
+            kr = E.P.down_at("krow_d", 0, 1024, np.float16).copy()
+            vr = E.P.down_at("vrow_d", 0, 1024, np.float16).copy()
+            qrs.append(qr); krs.append(kr); vrs.append(vr)
+        recs.append(rec)
+        emt += r["tokens"]
+      pend = r["pos_new"]
+      if rep == 0:
+        np.save(f"{TLX_TRACE_DUMP}/cycles_h_seed.npy", np.stack(hseeds))
+        if hds:
+          np.save(f"{TLX_TRACE_DUMP}/cycles_hd.npy", np.stack(hds))
+          np.save(f"{TLX_TRACE_DUMP}/cycles_qrow.npy", np.stack(qrs))
+          np.save(f"{TLX_TRACE_DUMP}/cycles_krow.npy", np.stack(krs))
+          np.save(f"{TLX_TRACE_DUMP}/cycles_vrow.npy", np.stack(vrs))
+        import json as _json
+        _json.dump(recs, open(f"{TLX_TRACE_DUMP}/cycles.json", "w"), indent=1)
+        tdl.finish_trace(TLX_TRACE_DUMP, dict(
+            kind="r8_prose_decode", ntok=NTOK,
+            lookup_k=int(os.getenv("LOOKUP_K", "0") or 0),
+            eagle_k=int(os.getenv("TLX_EAGLE_K", "0") or 0),
+            prose_trig=int(os.getenv("TLX_EAGLE_PROSE_TRIG", "4")),
+            pf_w4a8=int(os.getenv("PF_W4A8", "0") or 0),
+            t1_mode=int(os.getenv("TLX_T1_MODE", "0") or 0),
+            snap=SNAP))
+        print(f"[trace_dump] class-A r8_prose trace -> {TLX_TRACE_DUMP} ({len(recs)} cycles)", flush=True)
     else:
       emt, pend = decode_n(NTOK)
     dt = time.perf_counter() - t0

@@ -15,12 +15,32 @@ dives: [history/CAMPAIGN.md](history/CAMPAIGN.md) (the condensed ladder),
 its per-phase journals MM_P0..MM_P10 sit next to it),
 [history/PERFLOG.md](history/PERFLOG.md) (the running log).
 
-The two models:
+The two benchmarked models:
 
 | Model | architecture | quant | context |
 |---|---|---|---|
 | **Qwen3.8-27B** (dense) | 48 gated-delta-net + 16 full-attention blocks | IQ3_XXS body (12.6 GB GGUF) | 100,352 |
 | **Qwen3.6-35B-A3B** (MoE) | 30 GDN + 10 full-attention blocks, 256 routed experts top-8 + 1 shared per layer (~35.1B total / ~3B active) | UD-IQ4_XS experts (13.9 GiB packed) | 98,304 |
+
+A third registry model — an abliterated weight-variant of the dense
+checkpoint — runs the same numbers as the dense model (same kernels,
+weight-only swap; measured within noise of it: prose wall 34.5 vs 33.3
+tok/s, prefill @100k fill 452 vs 440-447 s — see
+[DEPLOY_OBLITERATED.md](DEPLOY_OBLITERATED.md)). It is a
+serving-capability demonstration, not a new performance class.
+
+**In flight — the drafter-quality program (NOT shipped; no numbers from it
+count yet).** The next prose lever is retraining the checkpoint's own
+1-layer draft block (the shipped one saturates at ~2 accepted tokens; the
+K=4 chain built on it measured -25% and ships off). The program's
+instruments are in the repo: `engine/chain_sim.py` (the
+engine-calibrated offline acceptance simulator — candidate draft packs
+score against real traces without a GPU boot) and `engine/ttt/` (the
+external EAGLE-3 trainer + pack writer). Phase-0 measurements and the
+lever ranking (exposure bias > data distribution > precision) are
+recorded in [history/TLX_P0_LEVER_RANKING.md](history/TLX_P0_LEVER_RANKING.md) —
+read them as lab results, not shipped performance. Nothing from this
+program has changed a serving default yet.
 
 Reference rig: RTX 3090 24 GB (sm_86) in a TB4 enclosure on a MacBook Air
 M2, driven through the DriverKit dext. Decode context = the model's full KV
