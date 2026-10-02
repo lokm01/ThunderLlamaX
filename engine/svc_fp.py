@@ -53,6 +53,10 @@ _ENV_KEYS = (
     # boundaries). Cache-invalidation event: ONE cold MoE pcache rebuild on
     # the first boot after this ships (slogged).
     "MM_PFG", "MM_PFM", "MM_PF64",
+    # MM SESSION C: the out/o mma M-GEMM (NUMERICS MOVE -- F~1.5e-4 bank,
+    # the dense-M32 precedent class). config_fp key -> pcache namespace
+    # flip: ONE cold MoE pcache rebuild on first boot (slogged).
+    "MM_PFT",
 )
 
 # R3-19: the cubin set the batch scheduler loads BY PATH (r6_serve.r6_boot).

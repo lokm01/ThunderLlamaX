@@ -299,11 +299,11 @@ grouped-experts v1 (0.86x, killed — the class is latency-bound on the
 dequant+dot chain, not DRAM-bound). The campaign story is in
 [PERFORMANCE.md](PERFORMANCE.md).
 
-**The MoE prefill graph (Session A+B)** — the chunked-prefill counterpart,
-behind three kill-switch env knobs (`MM_PFG` grouped experts, `MM_PFM`
-seat-loop trunk, `MM_PF64` the 64-seat tail; all default-on, all
-config_fp-keyed, any knob off restores the stock sequence
-byte-identically):
+**The MoE prefill graph (Sessions A+B+C)** — the chunked-prefill counterpart,
+behind four kill-switch env knobs (`MM_PFG` grouped experts, `MM_PFM`
+seat-loop trunk, `MM_PF64` the 64-seat tail, `MM_PFT` the trunk mma pair;
+all default-on, all config_fp-keyed, any knob off restores the stock
+sequence byte-identically):
 
 - **`mmsort8.cu`** — the deterministic counting sort that turns the
   router's per-token expert ids into bin tables for the grouped GEMMs:
@@ -332,6 +332,29 @@ byte-identically):
   stay stock — the k=4096 pair already streams ~750 GB/s): one weight
   read serves the whole chunk's seats from a smem-staged loop instead of
   re-walking per seat.
+- **`pgmq8m32.cu` — the trunk mma M-GEMM (Session C, `MM_PFT`)** — the
+  dense engine's M=32 mma template (the `pf_gemm3m` design: two
+  `m16n8k16` fragments share every staged W tile) ported to the MoE Q8_0
+  weights for the `out`/`o` k=4096 residual pair. Per 128-wide k-chunk
+  each lane owns exactly ONE 34-byte Q8_0 block (lane>>2 = tile row,
+  lane&3 = the 32-wide sub-block); activations stage fp32->fp16 into
+  smem, weights dequant `d*(float)q`->fp16, the inner loop is
+  `mma.sync.aligned.m16n8k16.f32.f16.f16.f32`, and the epilogue writes
+  `hres + acc` in fp32 — the same residual contract as the stock
+  `gv8k4096r`. Grid is the 1D FOLDED MxN form `((P/32) * (2048/64))`
+  (the M-GRID FOLD law); 26 KB static smem puts `pgmq8` in the
+  carveout-AUTO set (64 KB = 2 CTAs/SM). This is the campaign's one
+  Tier-2 numerics move (F ~1.5e-4 class — better than the dense M32
+  precedent's 9.4e-4), gated by the per-seat cross-entropy instrument;
+  decode graphs never run it. The template generalizes to the k=2048
+  trunk classes (the queued Session-D port).
+- **`gxm_dnf.cu` — the routed-down act-restaging fold (Session C, rides
+  `MM_PFG`)** — `gxm_dn` restaged its 16 KB activation block per
+  (row-block, b); the fold stages the FULL 512-wide activation ONCE per
+  item into `xsm2[TS][512]` (32 KB smem -> the 100 KB AUTO carveout =
+  3 CTAs/SM) and the row-block loop becomes pure dequant+FMA with zero
+  interior `__syncthreads`. Per-(pair,row) operation order kept verbatim
+  — bit-exact vs `gxm_dn` by construction (measured 1.32-1.36x).
 - **`shgu32`/`shdn32`** — the shared expert M-batched (its weights are
   read once per chunk instead of once per seat), writing a [seats][512]
   act slab the stock combine consumes unchanged.
@@ -341,11 +364,12 @@ byte-identically):
   the per-token tail by the chunk construction; the feed-hidden anchor
   tracks the final chunk's seat (255 or 63). This is the TTFT lever
   (GSM8K-class TTFT ~15.5 s -> ~5.5 s).
-- **The carveout-AUTO dependency** — the new kernels carry 16.4 KB smem,
-  and the dext's default 32 KB smem config yields 1 CTA/SM;
-  `NV_SMEM_CFG_AUTO_NAMES` includes `gxm`/`gvs32`/`shgu`/`shdn` so the
-  boot picks the 64 KB config (3 CTAs/SM) — without it the grouped GEMMs
-  run at a third of their measured speed. Session A's dynamic-smem probe
+- **The carveout-AUTO dependency** — the new kernels carry 16.4-32.8 KB
+  smem, and the dext's default 32 KB smem config yields 1 CTA/SM;
+  `NV_SMEM_CFG_AUTO_NAMES` includes `gxm`/`gvs32`/`shgu`/`shdn`/`pgmq8`
+  so the boot picks the 64-100 KB configs (2-3 CTAs/SM) — without it the
+  grouped GEMMs and the mma M-GEMM run at a third to a half of their
+  measured speed. Session A's dynamic-smem probe
   (QMD-patch route) additionally passed 64 KB and 96 KB dynamic — the
   banked structural branch for deeper weight staging.
 
@@ -353,8 +377,15 @@ The Session A instruments that measured all of this first (the G0
 truncated-graph bisect, the L1 POC ladder, the in-graph router-capture
 probes) live in `engine/mm/` (`mm_pf_bisect.py`, `mm_l1_poc.py`,
 `mm_probes.py`, `mm_session_a.py`); the Session B gates and wiring are
-`mm_g2_l2.py`/`mm_f1b_b.py`/`mm_dbg_b.py`/`mm_wire_b.py` +
-[MM_P7_lib.py](../engine/mm/MM_P7_lib.py) (`build_seq7`).
+`mm_g2_l2.py`/`mm_f1b_b.py`/`mm_dbg_b.py`/`mm_wire_b.py`; Session C's are
+`mm_l1b_poc.py` (the mma POC + the fold gates), `mm_f1b_c.py` (the
+Tier-2 F bank), `mm_pplc.py` (the cross-entropy quality instrument),
+`mm_g3c*.py`/`mm_tieprobe.py` (the G3 adjudication + the transient
+tieprobe), `mm_daemon_c.py`/`mm_coldbank.*`/`mm_soak_c.py` (the daemon
+battery, cold-boot bank, soak), `mm_pf_bisect_c.py` (the post-C residual
+family bisect) and `mm_wire_c.py` + [MM_P7_lib.py](../engine/mm/MM_P7_lib.py)
+(`build_seq7` — `MM_PFT` swaps `gv8k4096r` -> `pgmq8m32` for the out/o
+pair in the PF sequence).
 
 ## Kernel inventory (engine/*.cu, the load-bearing families)
 

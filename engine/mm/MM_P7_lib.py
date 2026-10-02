@@ -197,6 +197,28 @@ class Rig7(L56.Rig):
         dev.synchronize()
         print(f"[rig7] session-B: {_nb}/12 programs + grouped/seat-loop scratch", flush=True)
 
+        # ---- SESSION C (MoE prefill residual attack): the L1b mma M-GEMM
+        # (pgmq8m32 -- POC 7.4-8.2x, Tier-2 numerics F~1.5e-4, gate MM_PFT)
+        # + the routed-dn act fold (gxm_dnf -- BIT-EXACT 1.32-1.36x, rides
+        # MM_PFG; rollback = remove the cubin). Cubins PREBUILT
+        # (engine0/mm/mm_build_c.zsh -- nvcc needs the colima container).
+        C_LSZ = {"pgmq8m32": (256, 1, 1), "gxm_dnf": (256, 1, 1)}
+        C_VALS = {"pgmq8m32": 1}
+        _nc = 0
+        for _sym, _lsz in C_LSZ.items():
+            _cb = f"{BASE}/MM_C_{_sym}.cubin"
+            if not os.path.exists(_cb):
+                continue
+            _lib = open(_cb, "rb").read()
+            _sig = tuple(self.INT_SIG for _ in range(C_VALS.get(_sym, 0)))
+            self.K[_sym] = NVProgram(dev, TinyELF(lib=_lib, name=_sym,
+                                                  target=dev.renderer.target,
+                                                  signature=_sig))
+            L56.LSZ[_sym] = _lsz; _nc += 1
+        self.LSZ7 = dict(L56.LSZ)
+        dev.synchronize()
+        print(f"[rig7] session-C: {_nc}/2 programs (mma M-GEMM + dn fold)", flush=True)
+
     # ---------- feed helpers (zero-GPU-command) ----------
     def feed(self, tid, pos):
         self.ids_view[0] = int(tid)
@@ -227,10 +249,12 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
     # gvs/gvsab seat staging assumes seats % 32 == 0).
     PFG = pf and os.getenv("MM_PFG", "0") == "1" and P in (256, 64)
     PFM = pf and os.getenv("MM_PFM", "0") == "1" and P in (256, 64)
-    if PFG or PFM:
+    PFT = pf and os.getenv("MM_PFT", "0") == "1" and P in (256, 64)
+    if PFG or PFM or PFT:
         _need = ["mmsort8", "gxm_up", "gxm_up4", "gxm_dn", "gxm_dn6",
                  "gvs32k2048", "shgu32", "shdn32"] + (
-                ["gconv36_64", "k2s36_64"] if tg == "gconv36_64" else [])
+                ["gconv36_64", "k2s36_64"] if tg == "gconv36_64" else []) + (
+                ["pgmq8m32"] if PFT else [])
         _miss = [s for s in _need if s not in rig.K]
         if _miss:
             raise RuntimeError(f"MM_PFG/MM_PFM=1 but session-B programs missing: {_miss} "
@@ -257,9 +281,15 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
             else:
                 seq.append((tg, (w["cw"], B["qkvb"], rig.CSV[gi], B["qkvsb"]), (32,), ()))
                 seq.append((tk, (B["qkvsb"], B["abb"], w["al"], w["dt"], w["sn"], B["zb"], rig.SV[gi], B["gyb"]), (32,), ()))
-            # out/o stay STOCK: the k=4096 pair already streams at ~750
-            # GB/s in isolation (G2: the seat-loop port is 0.96x).
-            seq.append(("gv8k4096r", (w["out"], B["gyb"], hin, hmid), (64,), (2048,)))
+            # SESSION C (L1b): the out k=4096 pair -> the pgmq8m32 mma
+            # M-GEMM when MM_PFT=1 (POC 7.4-8.2x isolated; the stock runs
+            # ~212 GB/s IN-GRAPH = the latency floor the tile amortization
+            # beats). Tier-2 numerics: F ~1.5e-4 vs the stock (fp16
+            # operands + mma order) -- the F-bank re-baseline gates the ship.
+            if PFT:
+                seq.append(("pgmq8m32", (w["out"], B["gyb"], hin, hmid), (P // 32) * 32, (P,)))
+            else:
+                seq.append(("gv8k4096r", (w["out"], B["gyb"], hin, hmid), (64,), (2048,)))
         else:
             ai = ATTN_LAYERS.index(L)
             ptbl = rig.SPTB[ai]
@@ -283,7 +313,10 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
                 spkn = "spkq256" if spk is None else f"spkq256m_{spk[1:] if spk.startswith('m') else spk}"
                 pt = ptbl if spk is None else rig.SPTB[(ai, "m")]
                 seq.append((spkn, (B["qgb"], B["ayb"], pt), (16*P,), ()))
-            seq.append(("gv8k4096r", (w["o"], B["ayb"], hin, hmid), (64,), (2048,)))
+            if PFT:
+                seq.append(("pgmq8m32", (w["o"], B["ayb"], hin, hmid), (P // 32) * 32, (P,)))
+            else:
+                seq.append(("gv8k4096r", (w["o"], B["ayb"], hin, hmid), (64,), (2048,)))
         seq.append(("rmsz2048g", (hmid, w["pn"], B["hnb"]), (P,), ()))
         upk = "gx8e256up4" if rig.man["routed"][L]["types"]["gate"] == "IQ4_XS" else "gx8e256up"
         dnk = "gx8e256dn6" if rig.man["routed"][L]["types"]["down"] == "Q6_K" else "gx8e256dn"
@@ -318,7 +351,11 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
                 gex = (rig.iq4nl,) if gup == "gxm_up4" else (rig.gridf,)
                 seq.append((gup, (rig.PTB_UP[L], rig.ITEMSB, rig.NITB, rig.EOFFB,
                                   rig.PLISTB, B["hnb"]) + gex + (B["actb"],), 1024, ()))
-                gdn = "gxm_dn6" if dnk == "gx8e256dn6" else "gxm_dn"
+                # SESSION C: the dn act-restaging fold (BIT-EXACT, 1.32-1.36x
+                # POC) preferred when its cubin is loaded; no env key (same
+                # outputs bit-for-bit -> pcache nodes stay valid).
+                gdn = "gxm_dn6" if dnk == "gx8e256dn6" else (
+                    "gxm_dnf" if "gxm_dnf" in rig.K else "gxm_dn")
                 dex = () if gdn == "gxm_dn6" else (rig.iq4nl,)
                 seq.append((gdn, (rig.PTB_DN[L], rig.ITEMSB, rig.NITB, rig.EOFFB,
                                   rig.PLISTB, B["actb"]) + dex + (B["partsb"],), 1024, ()))

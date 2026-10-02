@@ -1,0 +1,353 @@
+{
+ "meta": {
+  "ctxk": 98304,
+  "pf_s": 8,
+  "pf": 256,
+  "reps": 8,
+  "kernel_counts": {
+   "embg248": 1,
+   "rmsz2048g": 80,
+   "gvs32k2048": 90,
+   "gvf32ab": 30,
+   "gconv36_256": 30,
+   "k2s36_256": 30,
+   "pgmq8m32": 40,
+   "rt8e256": 40,
+   "mmsort8": 40,
+   "shgu32": 40,
+   "shdn32": 40,
+   "gxm_up": 39,
+   "gxm_dnf": 37,
+   "cmbz2048": 40,
+   "spka256m_98304": 10,
+   "spkq256s_98304": 10,
+   "spkc256": 10,
+   "gxm_dn6": 3,
+   "gxm_up4": 1
+  },
+  "rows": {}
+ },
+ "rows": {
+  "2048": {
+   "full": {
+    "min_ms": 517.73,
+    "mean_ms": 522.729,
+    "first_ms": 517.327
+   },
+   "no_trunk_g": {
+    "min_ms": 329.345,
+    "mean_ms": 330.93,
+    "first_ms": 330.97
+   },
+   "no_routed": {
+    "min_ms": 324.18,
+    "mean_ms": 325.79,
+    "first_ms": 325.77
+   },
+   "no_shared_router": {
+    "min_ms": 456.581,
+    "mean_ms": 457.003,
+    "first_ms": 456.22
+   },
+   "no_attn": {
+    "min_ms": 484.677,
+    "mean_ms": 485.424,
+    "first_ms": 484.741
+   },
+   "no_scan": {
+    "min_ms": 474.694,
+    "mean_ms": 475.543,
+    "first_ms": 475.056
+   },
+   "no_gconv_only": {
+    "min_ms": 520.34,
+    "mean_ms": 521.542,
+    "first_ms": 524.178
+   },
+   "no_k2s_only": {
+    "min_ms": 481.534,
+    "mean_ms": 482.651,
+    "first_ms": 481.634
+   },
+   "families": {
+    "trunk_g": 188.385,
+    "routed": 193.55,
+    "shared_router": 61.149,
+    "attn": 33.053,
+    "scan": 43.036,
+    "gconv_only": -2.61,
+    "k2s_only": 36.196,
+    "residual_norms_embed": -1.443
+   },
+   "family_pct": {
+    "trunk_g": 36.4,
+    "routed": 37.4,
+    "shared_router": 11.8,
+    "attn": 6.4,
+    "scan": 8.3,
+    "gconv_only": -0.5,
+    "k2s_only": 7.0,
+    "residual_norms_embed": -0.3
+   },
+   "chunk_tok_s": 494.5
+  },
+  "8192": {
+   "full": {
+    "min_ms": 621.403,
+    "mean_ms": 623.896,
+    "first_ms": 624.242
+   },
+   "no_trunk_g": {
+    "min_ms": 429.776,
+    "mean_ms": 433.262,
+    "first_ms": 433.266
+   },
+   "no_routed": {
+    "min_ms": 424.572,
+    "mean_ms": 430.449,
+    "first_ms": 433.127
+   },
+   "no_shared_router": {
+    "min_ms": 569.881,
+    "mean_ms": 572.213,
+    "first_ms": 569.903
+   },
+   "no_attn": {
+    "min_ms": 492.045,
+    "mean_ms": 492.796,
+    "first_ms": 493.403
+   },
+   "no_scan": {
+    "min_ms": 584.332,
+    "mean_ms": 585.507,
+    "first_ms": 587.039
+   },
+   "no_gconv_only": {
+    "min_ms": 630.555,
+    "mean_ms": 631.926,
+    "first_ms": 632.593
+   },
+   "no_k2s_only": {
+    "min_ms": 589.412,
+    "mean_ms": 590.624,
+    "first_ms": 590.484
+   },
+   "families": {
+    "trunk_g": 191.627,
+    "routed": 196.831,
+    "shared_router": 51.522,
+    "attn": 129.358,
+    "scan": 37.071,
+    "gconv_only": -9.152,
+    "k2s_only": 31.991,
+    "residual_norms_embed": 14.994
+   },
+   "family_pct": {
+    "trunk_g": 30.8,
+    "routed": 31.7,
+    "shared_router": 8.3,
+    "attn": 20.8,
+    "scan": 6.0,
+    "gconv_only": -1.5,
+    "k2s_only": 5.1,
+    "residual_norms_embed": 2.4
+   },
+   "chunk_tok_s": 412.0
+  },
+  "16384": {
+   "full": {
+    "min_ms": 752.636,
+    "mean_ms": 754.828,
+    "first_ms": 759.4
+   },
+   "no_trunk_g": {
+    "min_ms": 556.835,
+    "mean_ms": 559.917,
+    "first_ms": 559.417
+   },
+   "no_routed": {
+    "min_ms": 558.95,
+    "mean_ms": 562.999,
+    "first_ms": 562.831
+   },
+   "no_shared_router": {
+    "min_ms": 697.316,
+    "mean_ms": 699.718,
+    "first_ms": 698.607
+   },
+   "no_attn": {
+    "min_ms": 493.186,
+    "mean_ms": 494.871,
+    "first_ms": 497.984
+   },
+   "no_scan": {
+    "min_ms": 715.369,
+    "mean_ms": 716.855,
+    "first_ms": 714.121
+   },
+   "no_gconv_only": {
+    "min_ms": 758.417,
+    "mean_ms": 762.118,
+    "first_ms": 765.871
+   },
+   "no_k2s_only": {
+    "min_ms": 719.7,
+    "mean_ms": 721.543,
+    "first_ms": 722.233
+   },
+   "families": {
+    "trunk_g": 195.801,
+    "routed": 193.686,
+    "shared_router": 55.32,
+    "attn": 259.45,
+    "scan": 37.267,
+    "gconv_only": -5.781,
+    "k2s_only": 32.936,
+    "residual_norms_embed": 11.112
+   },
+   "family_pct": {
+    "trunk_g": 26.0,
+    "routed": 25.7,
+    "shared_router": 7.4,
+    "attn": 34.5,
+    "scan": 5.0,
+    "gconv_only": -0.8,
+    "k2s_only": 4.4,
+    "residual_norms_embed": 1.5
+   },
+   "chunk_tok_s": 340.1
+  },
+  "49152": {
+   "full": {
+    "min_ms": 1271.373,
+    "mean_ms": 1274.751,
+    "first_ms": 1275.979
+   },
+   "no_trunk_g": {
+    "min_ms": 1074.072,
+    "mean_ms": 1077.165,
+    "first_ms": 1076.183
+   },
+   "no_routed": {
+    "min_ms": 1072.352,
+    "mean_ms": 1075.113,
+    "first_ms": 1077.641
+   },
+   "no_shared_router": {
+    "min_ms": 1219.88,
+    "mean_ms": 1222.903,
+    "first_ms": 1223.315
+   },
+   "no_attn": {
+    "min_ms": 494.773,
+    "mean_ms": 495.592,
+    "first_ms": 500.55
+   },
+   "no_scan": {
+    "min_ms": 1234.54,
+    "mean_ms": 1235.471,
+    "first_ms": 1230.448
+   },
+   "no_gconv_only": {
+    "min_ms": 1279.417,
+    "mean_ms": 1280.882,
+    "first_ms": 1284.347
+   },
+   "no_k2s_only": {
+    "min_ms": 1238.445,
+    "mean_ms": 1239.893,
+    "first_ms": 1238.269
+   },
+   "families": {
+    "trunk_g": 197.301,
+    "routed": 199.021,
+    "shared_router": 51.493,
+    "attn": 776.6,
+    "scan": 36.833,
+    "gconv_only": -8.044,
+    "k2s_only": 32.928,
+    "residual_norms_embed": 10.125
+   },
+   "family_pct": {
+    "trunk_g": 15.5,
+    "routed": 15.7,
+    "shared_router": 4.1,
+    "attn": 61.1,
+    "scan": 2.9,
+    "gconv_only": -0.6,
+    "k2s_only": 2.6,
+    "residual_norms_embed": 0.8
+   },
+   "chunk_tok_s": 201.4
+  },
+  "98304": {
+   "full": {
+    "min_ms": 2058.518,
+    "mean_ms": 2060.653,
+    "first_ms": 2066.183
+   },
+   "no_trunk_g": {
+    "min_ms": 1862.833,
+    "mean_ms": 1864.027,
+    "first_ms": 1863.983
+   },
+   "no_routed": {
+    "min_ms": 1858.447,
+    "mean_ms": 1861.509,
+    "first_ms": 1858.189
+   },
+   "no_shared_router": {
+    "min_ms": 1997.608,
+    "mean_ms": 1999.117,
+    "first_ms": 1997.207
+   },
+   "no_attn": {
+    "min_ms": 496.968,
+    "mean_ms": 497.946,
+    "first_ms": 501.317
+   },
+   "no_scan": {
+    "min_ms": 2009.24,
+    "mean_ms": 2014.076,
+    "first_ms": 2014.333
+   },
+   "no_gconv_only": {
+    "min_ms": 2059.647,
+    "mean_ms": 2061.388,
+    "first_ms": 2061.29
+   },
+   "no_k2s_only": {
+    "min_ms": 2017.487,
+    "mean_ms": 2020.053,
+    "first_ms": 2021.944
+   },
+   "families": {
+    "trunk_g": 195.685,
+    "routed": 200.071,
+    "shared_router": 60.91,
+    "attn": 1561.55,
+    "scan": 49.278,
+    "gconv_only": -1.129,
+    "k2s_only": 41.031,
+    "residual_norms_embed": -8.976
+   },
+   "family_pct": {
+    "trunk_g": 9.5,
+    "routed": 9.7,
+    "shared_router": 3.0,
+    "attn": 75.9,
+    "scan": 2.4,
+    "gconv_only": -0.1,
+    "k2s_only": 2.0,
+    "residual_norms_embed": -0.4
+   },
+   "chunk_tok_s": 124.4
+  }
+ },
+ "attn_growth": {
+  "ms_per_1k_ctx_per_chunk": 15.878,
+  "intercept_ms": -0.82
+ },
+ "gate_trunk_2k_pct": 36.4,
+ "gate_verdict": "L1 KILL/RE-RANK (trunk_g < 50% @2k)"
+}

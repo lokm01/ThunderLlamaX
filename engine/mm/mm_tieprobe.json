@@ -1,0 +1,25 @@
+{
+ "r0_repro_1": {
+  "first_diff_t1_spec": null,
+  "first_diff_t1_mtp": null
+ },
+ "r0_repro_2": {
+  "first_diff_t1_spec": null,
+  "first_diff_t1_mtp": null
+ },
+ "slice10k": {
+  "first_diff_t1_spec": 6,
+  "first_diff_t1_mtp": 3,
+  "class": "degenerate 2002/43614/27286 loop PHASE SHIFT (t1 [.. 43614, 2002 ..] vs spec [.. 2002, 43614 ..])"
+ },
+ "slice30k": {
+  "first_diff_t1_spec": null,
+  "first_diff_t1_mtp": 0
+ },
+ "slice60k": {
+  "first_diff_t1_spec": 2,
+  "first_diff_t1_mtp": 0,
+  "class": "same loop phase-shift family"
+ },
+ "verdict": "rare (2/5 arms, this doc only), non-reproducible, degenerate-quote-loop near-tie phase flips between the am-head and verify argmax paths; PRE-EXISTING class (the g3c3 cc token-0 transient hit the OLD numerics daemon at 13:1x, pre-MM_PFT)"
+}

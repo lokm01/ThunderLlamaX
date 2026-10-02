@@ -1160,3 +1160,56 @@ is refused by ptxas, but the QMD-patch DYNAMIC-smem route PASSES at BOTH
 deeper bins, the future mma/L1b class) is real and measured, not
 hypothetical. The DRAM read path re-confirmed at 820.6 GB/s through the
 dext.
+
+## PC. MoE-prefill Session C laws (the 384 -> 494.8 @2k campaign)
+
+Journals: the pinned rig commits c6e4292 (G3 adjudication + harness
+fixes) -> 04d9579 (the L1b mma M-GEMM + the dn fold) -> b1f902c (the
+daemon phase) -> 784ee94 (evidence); the kernels, instruments and gate
+records live in `engine/mm/` (`MM_C_pgmq8m32.cu`, `MM_C_gxm_dnf.cu`,
+`mm_l1b_poc.py`/`mm_l1b_poc_c.json`, `mm_f1b_c.*`, `mm_pplc.*`,
+`mm_g3c*.py`, `mm_tieprobe.*`, `mm_daemon_c.*`, `mm_coldbank.*`,
+`mm_soak_c.*`, `mm_pf_bisect_c.py`/`mm_pf_attr_c.json`, `mm_wire_c.py`).
+
+**PC1. THE API-RESTART-ON-ENV_KEYS LAW.** Adding a key to
+`svc_fp._ENV_KEYS` changes the config_fp the ENGINE boots with — but the
+API service imports its own copy of the key set at process start. Restart
+the API service too when `_ENV_KEYS` changes, or the stale imported set
+computes a stale fingerprint and the service refuses its own healthy
+engine with a false `config_drift` 503. (Generalizes: any component that
+imports the fingerprint definition must restart together with the
+engine on fingerprint-schema changes.)
+
+**PC2. THE PROBE DOUBLE-APPEND LAW.** A stream-compare harness that
+collects generated tokens from BOTH the per-cycle events AND the done
+event silently doubles every stream — and comparing doubled streams
+manufactures a phantom first-mismatch exactly at the real-length
+boundary, which reads as a genuine divergence at a suspiciously round
+position. Session B's unresolved G3 "divergence at 4k" was exactly this.
+Discipline: the RPC reader must DRAIN event/progress lines (a
+line-draining reader, not a request/response match that leaves events in
+the buffer), and the stream assembler must de-duplicate the done payload
+against the accumulated cycle events — the fixed harness asserts the
+doubling (`assert toks[:n] == toks[n:]`) before halving, so the bug class
+cannot silently return.
+
+**PC3. THE ISOLATED-POC-VS-IN-GRAPH-CONTENTION LAW (PB1's pricing
+corollary).** Diagnose bandwidth/latency walls on ISOLATED (lone-graph)
+benches — but PRICE levers on in-graph numbers. The `pgmq8m32` mma M-GEMM
+POC'd at 8.18x/7.40x isolated and delivered ~2x on the pair in-graph
+(+29% end-to-end): mma tiles compete with the chunk's other families for
+the same SMs/L2 in a way a lone graph cannot show. A session that targets
+the isolated number (~700 tok/s) and ships the in-graph one (494.8) has
+not failed — it has measured the contention tax; the battery, never the
+POC, gates the ship.
+
+**PC4. THE ROUTER-BOUNDARY-DRIFT-IS-QUALITY-NEUTRAL CE GATE.** Any
+reordering-class numerics change near the router flips near-tie expert
+draws (Session C: 6.7% of router slots, distributed from layer 0) —
+bit-fidelity gates cannot adjudicate whether that matters. The standing
+instrument: run the SAME chunk through stock and new prefill paths and
+compare PER-SEAT NEXT-TOKEN CROSS-ENTROPY of the true target under both
+heads — delta within one SEM of the per-arm SEM, with top-1 agreement as
+the co-metric (252/256 here), adjudicates the drift quality-neutral.
+Numerics-class changes now ship under this gate in addition to the
+F-metric bank, determinism, and the spec==T1 battery.

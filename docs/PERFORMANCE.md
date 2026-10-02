@@ -277,10 +277,14 @@ still >= 0.74 on quote/prose-0). The chain goes stale on lookup cycles
 cycle on the first miss after a hit streak. Long-ctx (96k) MTP alpha is
 measured only at the harness level so far — an honest open item.
 
-**Prefill (MoE)**: after the Session A+B campaign (below), chunked prefill
-runs **384.3 tok/s @2k · 331.5 @8k · 284.2 @16k** (ladder 201.4 / 187.4 /
-172.0 — **+91% @2k**), and a full 96k context feeds at 117.0 tok/s (was
-92.3). Context-ladder exactness: the engine state after 4,000/16,288 doc
+**Prefill (MoE)**: after the Session A+B+C campaign (below), chunked prefill
+runs **494.8 tok/s @2k · 409.7 @8k · 339.8 @16k** (pre-campaign stock
+203.9 / 187.9 / 171.7 — **2.43x cumulative @2k**), and a full 96k context
+feeds at 125.4 tok/s (was 92.4). GSM8K-class TTFT on a 1,216-token fresh
+generation: **3.18 s** (x2). Sessions A+B were bit-exact; Session C's
+trunk mma M-GEMM is a Tier-2 numerics move — the first to ship under the
+new per-seat cross-entropy quality gate (below). Context-ladder exactness:
+the engine state after 4,000/16,288 doc
 tokens continues greedy-identically to the fp16 anchor (rebase16 16/16 EXACT
 at every rung — the LONG-HORIZON law; GDN norms bounded).
 
@@ -372,6 +376,120 @@ at 96k, growing 15.8 ms per 1k context — the L4 branch). Banked for that
 future: Session A's dynamic-shared-memory probe **PASSED at 64 KB and
 96 KB** via the QMD-patch route (static >48 KB is refused by ptxas) — the
 structural branch (staged weights + deeper bins) is alive and measured.
+
+### MoE prefill: the Session C campaign (384 -> 494.8 tok/s @2k — the residual attack, Tier-2)
+
+Session C attacked that residual list directly. Two kernels shipped, one
+was honestly skipped, and one mystery from Session B was adjudicated as a
+harness bug:
+
+| rung | 2k | 8k | 16k | 96k feed |
+|---|---|---|---|---|
+| Session B (bit-exact class) | 384.3 | 331.5 | 284.2 | 117.0 |
+| **+ MM_PFT trunk mma + gxm_dnf fold (Session C)** | **494.8** | **409.7** | **339.8** | **125.4** |
+
+(**+29% @2k this session; 2.43x cumulative** over the 203.9 pre-campaign
+stock. TTFT on a 1,216-token fresh generation: **3.18 s** x2 — was ~5.5 s
+after Session B, ~15.5 s before the campaign.)
+
+- **`pgmq8m32` — the trunk mma M-GEMM (the L1b lever, `MM_PFT=1`).** The
+  Session-B verdict on the `out`/`o` k=4096 pair was "already at ~750
+  GB/s in isolation, nothing to win" — but in-graph the pair runs at the
+  ~212 GB/s contention floor (PB1's corollary working in reverse: the
+  isolated number was the kernel's ceiling, not the graph's). The fix is
+  the dense engine's M=32 mma design (two `m16n8k16` fragments sharing
+  every staged W tile — the `pf_gemm3m` template) ported to the MoE Q8_0
+  weights: per 128-wide k-chunk each lane owns exactly one 34-byte Q8_0
+  block, activations staged fp32->fp16, weights dequantized
+  `d*(float)q`->fp16, `mma.sync.f32.f16.f16.f32`, epilogue
+  `hres + acc` (the stock residual contract). **Isolated POC: 8.18x
+  (`out`) / 7.40x (`o`)** vs the in-graph stock pair — the session's
+  honest lesson, because in-graph the lever delivered **~2x on the pair,
+  +29% end-to-end** (mma-tile contention with the rest of the chunk; see
+  PC3 in [DEXT_LAWS.md](DEXT_LAWS.md)).
+- **`gxm_dnf` — the routed-down act-restaging fold (bit-exact).** Session
+  B's `gxm_dn` restaged the 16 KB activation block per (row-block, b) —
+  128 stages per item per CTA from L2. The fold stages the FULL 512-wide
+  activation ONCE per item into `xsm2[TS][512]` (32 KB smem -> the 100 KB
+  AUTO carveout = 3 CTAs/SM) and the row-block loop becomes pure
+  dequant+FMA with zero interior syncs. Per-(pair,row) math verbatim —
+  **BIT-EXACT by construction**, 1.36x (uniform routing) / 1.32x
+  (skewed). Rides `MM_PFG`; no new config key.
+- **The honest skip: routed-up fp16 mma.** The same mma trick on the
+  routed up-projections would have cost 27x the error class of the banked
+  F metric for roughly -30 ms — skipped, and the mma port of the
+  register-decode up kernels queued instead (the honest lever).
+
+**The Tier-2 battery (the mma pair is a numerics move — the first MoE
+prefill change that is not bit-exact):**
+
+- **The F-metric bank**: isolated relerr vs fp64 — `out` F = 1.48e-4,
+  `o` F = 1.41e-4 (the stock pair itself sits at ~1.1e-7; the dense
+  engine's M32 class banks 9.4e-4, so this is the better-than-precedent
+  class). Full-chunk F1b through the new path: hidden-state F = 0.070,
+  seat-255 logits F = 0.115, determinism x2, **0 top-1 flips on the
+  9 sampled seats**.
+- **THE NEW QUALITY INSTRUMENT — per-seat next-token cross-entropy.** The
+  router boundary moves under any reordering-class numerics change:
+  **5,453 of 81,920 router slots (6.7%) flip** their expert draws
+  (distributed from layer 0 — near-tie boundaries, not a broken layer).
+  The question a bit-fidelity gate cannot answer is whether that drift
+  matters. The instrument (`mm_pplc.py`): run the SAME 256-token prose
+  chunk through the stock and the Session-C prefill paths, then score
+  each seat's true next token under both heads — **mean CE 0.9014 (stock)
+  vs 0.9018 (new), delta +0.046%, within one standard error of the mean**
+  (SEM ~0.100 both arms), **top-1 agreement 252/256** (251/256 excluding
+  the last seat). The router-boundary drift is quality-neutral. This CE
+  compare is now the standing gate for numerics-class changes — the
+  project measures them by next-token cross-entropy, not just
+  bit-fidelity.
+- **spec == T1 through the daemon**: the 60-prompt bank re-gated x2
+  through the live MM_PFT daemon — 60/60 exact warm; the ONE cold-boot
+  first-gens mismatch **did not reproduce** (warm x2 + cold-boot
+  exact-shape x1) and was adjudicated with the tieprobe as a **rare,
+  non-reproducible, degenerate quote-loop near-tie PHASE-FLIP** between
+  the am-head and verify-argmax paths — a PRE-EXISTING class (the same
+  transient shape hit the OLD numerics daemon, pre-MM_PFT). Documented
+  watch-item, not a regression.
+- **pcache CACHE_HIT under the new config_fp namespace** (MM_PFT is a
+  config_fp key): 7,168 cached tokens restored, second arm 4.61 s.
+- **Decode classes untouched** (the mma pair is prefill-only): quote 42.5,
+  prose 46.9 tok/s through the daemon; **104-round / 900 s mixed soak,
+  zero faults**.
+- **The G3-after-G2 mystery, adjudicated.** Session B closed on an
+  unresolved FRESH-t1-vs-FRESH-spec divergence at 4k. Session C proved it
+  was a **probe-harness double-append bug**: the `gen` RPC collected
+  tokens from BOTH the per-cycle events AND the done event, so every
+  stream was doubled — and comparing doubled streams manufactures a
+  phantom first-mismatch exactly at the real-length boundary. With the
+  harness fixed (line-draining RPC reader + de-duplication discipline),
+  t1-vs-spec **matched at 1k/2k/3k/3328/3584/3840/4096 + alt-4k** across
+  60/200/600-token windows. The residual after the fix is the
+  non-reproducible phase-flip class above.
+
+**Target vs actual, honestly**: the session priced ~700 tok/s @2k from
+the isolated POC and delivered 494.8 — the 8.18x isolated compressed to
+~2x in-graph (tile contention), and the battery, not the target, gated
+the ship. The measured 2k ceiling with the queued levers is ~700-900.
+
+**Residual attack list (post-C, from the fresh family bisect at five
+context lengths):**
+
+| family | share of the 2k chunk | share of the 96k chunk |
+|---|---|---|
+| routed experts (grouped) | 37.4% | 9.7% |
+| trunk GEMV/GEMM | 36.4% | 9.5% |
+| shared expert + router | 11.8% | 3.0% |
+| GDN scan | 8.3% | 2.4% |
+| attention | 6.4% | **75.9%** |
+
+The Session-D queue, in order: (1) the **L4 wide-attention** — 76% of the
+96k chunk, growing 15.9 ms per 1k context (the dense engine's P18
+wide-attention playbook applies); (2) **k=2048 trunk mma ports** — the
+`pgmq8m32` template generalizes to the seat-loop classes that now carry
+the trunk share; (3) the **routed-up mma port** (the register-decode
+design, not the fp16 shortcut that was skipped). At 2k the remaining
+weight-class split (routed 37.4 / trunk 36.4) prices the ~700-900 ceiling.
 
 
 

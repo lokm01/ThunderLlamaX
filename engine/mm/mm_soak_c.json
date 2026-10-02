@@ -1,0 +1,21 @@
+{
+ "classes": {
+  "quote_4k": {
+   "tok_s": 42.5,
+   "ntok": 583
+  },
+  "prose_2k": {
+   "tok_s": 46.7,
+   "ntok": 584
+  },
+  "long_16k": {
+   "tok_s": 41.0,
+   "ntok": 588
+  }
+ },
+ "soak": {
+  "rounds": 104,
+  "secs": 900.3,
+  "fault": true
+ }
+}

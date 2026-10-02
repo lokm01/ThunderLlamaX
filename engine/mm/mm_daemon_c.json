@@ -1,0 +1,38 @@
+{
+ "bank60_r0": {
+  "match": false,
+  "compared": 70,
+  "n_t1": 70,
+  "n_spec": 1784,
+  "t1_tok_s": 18.0,
+  "spec_tok_s": 47.3,
+  "note": "COLD first gens post-boot; NON-REPRO warm x2 and cold-boot exact-shape x1"
+ },
+ "bank60_r1": {
+  "match": true,
+  "compared": 190,
+  "n_t1": 600,
+  "n_spec": 1784,
+  "t1_tok_s": 34.8,
+  "spec_tok_s": 17.7
+ },
+ "pcache": {
+  "first_mode": "CACHE_HIT",
+  "second_mode": "CACHE_HIT",
+  "cached_tokens": 7168,
+  "second_s": 4.61,
+  "note": "new-fp nodes ingested by the FRESH bank60 arms; restore exact-class covered by soak rounds i in (1,4)"
+ },
+ "class_quote_4k": {
+  "tok_s": 42.5,
+  "ntok": 580
+ },
+ "class_prose_2k": {
+  "tok_s": 46.9,
+  "ntok": 584
+ },
+ "ttft_1216_fresh": [
+  3.18,
+  3.18
+ ]
+}

@@ -1,0 +1,14 @@
+{
+ "cold_bank60": {
+  "first_diff": null,
+  "n": 70,
+  "n_t1": 70,
+  "n_spec": 1180,
+  "t1_tok_s": 17.8,
+  "spec_tok_s": 47.3
+ },
+ "warm_bank60": {
+  "first_diff": null,
+  "n": 70
+ }
+}
