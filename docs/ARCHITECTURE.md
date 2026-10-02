@@ -299,9 +299,10 @@ grouped-experts v1 (0.86x, killed — the class is latency-bound on the
 dequant+dot chain, not DRAM-bound). The campaign story is in
 [PERFORMANCE.md](PERFORMANCE.md).
 
-**The MoE prefill graph (Sessions A+B+C)** — the chunked-prefill counterpart,
-behind four kill-switch env knobs (`MM_PFG` grouped experts, `MM_PFM`
-seat-loop trunk, `MM_PF64` the 64-seat tail, `MM_PFT` the trunk mma pair;
+**The MoE prefill graph (Sessions A+B+C+D)** — the chunked-prefill counterpart,
+behind six kill-switch env knobs (`MM_PFG` grouped experts, `MM_PFM`
+seat-loop trunk, `MM_PF64` the 64-seat tail, `MM_PFT` the trunk mma pair,
+`MM_PFW` the wide dyn-smem attention, `MM_PFK` the k=2048 trunk mma ports;
 all default-on, all config_fp-keyed, any knob off restores the stock
 sequence byte-identically):
 
@@ -348,6 +349,34 @@ sequence byte-identically):
   precedent's 9.4e-4), gated by the per-seat cross-entropy instrument;
   decode graphs never run it. The template generalizes to the k=2048
   trunk classes (the queued Session-D port).
+- **`pgmq8k2.cu` — the k=2048 trunk mma ports (Session D, `MM_PFK`)** —
+  the Session-C mma template instantiated at KDIM=2048 for the seat-loop
+  classes the trunk actually carries: `qkv`/`z` (GDN layers) and `q`/`k`/
+  `v` (attention layers). Same design as `pgmq8m32` (two `m16n8k16`
+  fragments per staged W tile, per-lane 34-byte Q8_0 block ownership,
+  fp16-staged operands) with a plain `y = acc` epilogue (these
+  projections carry no residual) and ROWS compile-time per class
+  (`pgmq8k2_r8192`/`_r4096`/`_r512`, the 1D folded MxN grid). Tier-2
+  (relerr 2.79-2.99e-4, the `pgmq8m32` class), CE-gated; POC 3.73-5.15x
+  isolated, decode graphs never run it.
+- **`spkqw.cu` — the row-grouped wide PF attention (Session D,
+  `MM_PFW`; symbol `spkqw4_98304`)** — the long-context attention
+  rewrite. Instead of one CTA per (seat, head, split) — every CTA
+  streaming its split slice as byte loads — each CTA covers a ROW GROUP
+  (RW=4: 32 rows = 4 seats x 8 q-heads of one kv-group; grid (P/4, 2S)),
+  the causal boundary stays warp-uniform, and K/V tiles are staged to
+  **dynamic shared memory** (33,792 B — the qq-staging/KV-tile UNION, QQ
+  dead once in registers) once per tile and consumed by all warps: the KV
+  stream drops once-per-seat -> once-per-4-seats and each position pays
+  ONE 8-byte LDS per tensor + ONE shared dequant (identical fp op order
+  to stock) reused across the warp's rows. Per (row, split) ONE online
+  softmax chain writes its single real partial in the **NP=S layout**, so
+  the `spkc256` combine reads exactly S real slots per row (4x less
+  partial traffic). Decode graphs keep the stock split kernel. Tier-2 by
+  reassociation within pinned split boundaries (relerr 1.998e-07 vs
+  stock), CE-gated; 2.01x on the attention pair @96k. The dynamic-smem
+  sizing rides the QMD patch (`qmd.write(shared_memory_size=...)`), not
+  the static carveout — the exec-snapshots-QMD-at-record-time law.
 - **`gxm_dnf.cu` — the routed-down act-restaging fold (Session C, rides
   `MM_PFG`)** — `gxm_dn` restaged its 16 KB activation block per
   (row-block, b); the fold stages the FULL 512-wide activation ONCE per
@@ -370,8 +399,10 @@ sequence byte-identically):
   so the boot picks the 64-100 KB configs (2-3 CTAs/SM) — without it the
   grouped GEMMs and the mma M-GEMM run at a third to a half of their
   measured speed. Session A's dynamic-smem probe
-  (QMD-patch route) additionally passed 64 KB and 96 KB dynamic — the
-  banked structural branch for deeper weight staging.
+  (QMD-patch route) additionally passed 64 KB and 96 KB dynamic — banked
+  then, SHIPPED in Session D: `spkqw4` stages its K/V tiles in 33,792 B
+  of dynamic smem through the QMD patch (min/target carveout set at
+  program-load time), and it stays live inside captured graphs.
 
 The Session A instruments that measured all of this first (the G0
 truncated-graph bisect, the L1 POC ladder, the in-graph router-capture
@@ -385,7 +416,12 @@ tieprobe), `mm_daemon_c.py`/`mm_coldbank.*`/`mm_soak_c.py` (the daemon
 battery, cold-boot bank, soak), `mm_pf_bisect_c.py` (the post-C residual
 family bisect) and `mm_wire_c.py` + [MM_P7_lib.py](../engine/mm/MM_P7_lib.py)
 (`build_seq7` — `MM_PFT` swaps `gv8k4096r` -> `pgmq8m32` for the out/o
-pair in the PF sequence).
+pair in the PF sequence). Session D's are `mm_l4_poc.py` (the
+row-grouped attention POC + the kernel-order anchor `spkqw_ref`),
+`mm_p2_poc_d.py` (the k=2048 mma POC, per class), `mm_bat_d.py` (the
+ship battery — CE/F/ladder in one, both the PFW-only and combined arms),
+`mm_wire_d.py`/`mm_wire_d2.py` (the two wiring patches) and
+`mm_build_d.zsh` (the cubin build + zero-spill audit).
 
 ## Kernel inventory (engine/*.cu, the load-bearing families)
 

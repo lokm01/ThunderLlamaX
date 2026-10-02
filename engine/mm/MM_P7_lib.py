@@ -219,6 +219,32 @@ class Rig7(L56.Rig):
         dev.synchronize()
         print(f"[rig7] session-C: {_nc}/2 programs (mma M-GEMM + dn fold)", flush=True)
 
+        # ---- SESSION D (L4): the row-grouped wide PF attention (spkqw4 --
+        # POC 2.01x @96k, 1.81x @16k; Tier-2 reassociation class, gated
+        # MM_PFW). Cubin PREBUILT (engine0/mm/mm_build_d.zsh). The QMD
+        # dyn-smem patch (Session-A law) MUST land before any graph build.
+        D_LSZ = {"spkqw4_98304": (256, 1, 1),
+                 "pgmq8k2_r8192": (256, 1, 1), "pgmq8k2_r4096": (256, 1, 1),
+                 "pgmq8k2_r512": (256, 1, 1)}
+        _nd = 0
+        for _sym, _lsz in D_LSZ.items():
+            _cb = f"{BASE}/MM_D_{_sym}.cubin"
+            if not os.path.exists(_cb):
+                continue
+            _lib = open(_cb, "rb").read()
+            _prg = NVProgram(dev, TinyELF(lib=_lib, name=_sym,
+                                          target=dev.renderer.target,
+                                          signature=(self.INT_SIG,)))
+            _dyn = max(4 * 8 * 256 * 4, 64 * 528)     # the qq/tile union
+            _prg.qmd.write(shared_memory_size=((_prg.shmem_usage + 127) // 128 * 128) + _dyn,
+                           min_sm_config_shared_mem_size=100 * 1024 // 4096 + 1,
+                           target_sm_config_shared_mem_size=100 * 1024 // 4096 + 1)
+            self.K[_sym] = _prg
+            L56.LSZ[_sym] = _lsz; _nd += 1
+        self.LSZ7 = dict(L56.LSZ)
+        dev.synchronize()
+        print(f"[rig7] session-D: {_nd}/1 wide-PF-attn programs", flush=True)
+
     # ---------- feed helpers (zero-GPU-command) ----------
     def feed(self, tid, pos):
         self.ids_view[0] = int(tid)
@@ -250,6 +276,9 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
     PFG = pf and os.getenv("MM_PFG", "0") == "1" and P in (256, 64)
     PFM = pf and os.getenv("MM_PFM", "0") == "1" and P in (256, 64)
     PFT = pf and os.getenv("MM_PFT", "0") == "1" and P in (256, 64)
+    # SESSION D (port 2): the k=2048 trunk mma ports (qkv/z/q/k/v)
+    PFK = (pf and os.getenv("MM_PFK", "0") == "1" and P in (256, 64)
+           and "pgmq8k2_r8192" in rig.K)
     if PFG or PFM or PFT:
         _need = ["mmsort8", "gxm_up", "gxm_up4", "gxm_dn", "gxm_dn6",
                  "gvs32k2048", "shgu32", "shdn32"] + (
@@ -268,8 +297,16 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
             gi = GDN_LAYERS.index(L)
             if PFM:
                 # G2-measured: qkv/z win (1.54x/1.36x); ab is 0.92x -> stock.
-                seq.append(("gvs32k2048", (w["qkv"], B["hnb"], B["qkvb"]), 8192 // 8, (8192, P)))
-                seq.append(("gvs32k2048", (w["z"], B["hnb"], B["zb"]), 4096 // 8, (4096, P)))
+                # SESSION D (port 2): the k=2048 mma M-GEMMs (POC 4.6x/5.2x
+                # isolated, F ~2.8e-4) when MM_PFK=1 + cubins present.
+                if PFK:
+                    seq.append(("pgmq8k2_r8192", (w["qkv"], B["hnb"], B["qkvb"]),
+                                (P // 32) * 128, (P,)))
+                    seq.append(("pgmq8k2_r4096", (w["z"], B["hnb"], B["zb"]),
+                                (P // 32) * 64, (P,)))
+                else:
+                    seq.append(("gvs32k2048", (w["qkv"], B["hnb"], B["qkvb"]), 8192 // 8, (8192, P)))
+                    seq.append(("gvs32k2048", (w["z"], B["hnb"], B["zb"]), 4096 // 8, (4096, P)))
                 seq.append(("gvf32ab", (w["wa"], w["wb"], B["hnb"], B["abb"]), (P,), ()))
             else:
                 seq.append(("gv8k2048p", (w["qkv"], B["hnb"], B["qkvb"]), (256,), (8192,)))
@@ -294,17 +331,38 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
             ai = ATTN_LAYERS.index(L)
             ptbl = rig.SPTB[ai]
             if PFM:
-                seq.append(("gvs32k2048", (w["q"], B["hnb"], B["qgb"]), 8192 // 8, (8192, P)))
-                seq.append(("gvs32k2048", (w["k"], B["hnb"], B["kqb"]), 512 // 8, (512, P)))
-                seq.append(("gvs32k2048", (w["v"], B["hnb"], B["vqb"]), 512 // 8, (512, P)))
+                if PFK:
+                    seq.append(("pgmq8k2_r8192", (w["q"], B["hnb"], B["qgb"]),
+                                (P // 32) * 128, (P,)))
+                    seq.append(("pgmq8k2_r512", (w["k"], B["hnb"], B["kqb"]),
+                                (P // 32) * 8, (P,)))
+                    seq.append(("pgmq8k2_r512", (w["v"], B["hnb"], B["vqb"]),
+                                (P // 32) * 8, (P,)))
+                else:
+                    seq.append(("gvs32k2048", (w["q"], B["hnb"], B["qgb"]), 8192 // 8, (8192, P)))
+                    seq.append(("gvs32k2048", (w["k"], B["hnb"], B["kqb"]), 512 // 8, (512, P)))
+                    seq.append(("gvs32k2048", (w["v"], B["hnb"], B["vqb"]), 512 // 8, (512, P)))
             else:
                 seq.append(("gv8k2048p", (w["q"], B["hnb"], B["qgb"]), (256,), (8192,)))
                 seq.append(("gv8k2048p", (w["k"], B["hnb"], B["kqb"]), (16,), (512,)))
                 seq.append(("gv8k2048p", (w["v"], B["hnb"], B["vqb"]), (16,), (512,)))
-            if spk is not None and spk.startswith("s"):
+            scr = rig.SCR_PF if pf else rig.SCR_DEC
+            # SESSION D (L4): the row-grouped wide PF attention -- PF graphs
+            # only (decode keeps the stock split kernel). Partials land in
+            # the NP=S layout -> spkc256 merges exactly the S real slots.
+            # Tier-2 numerics (reassociation within splits, S pinned);
+            # kill-switch MM_PFW=0 restores the stock pair byte-for-byte.
+            PFW = (pf and os.getenv("MM_PFW", "0") == "1" and P in (256, 64)
+                   and spk is not None and spk.startswith("s")
+                   and f"spkqw4_{spk[1:]}" in rig.K)
+            if PFW:
                 R = spk[1:]
                 seq.append((f"spka256m_{R}", (B["kqb"], B["vqb"], rig.SPTB[(ai, "m")]), (2*P,), ()))
-                scr = rig.SCR_PF if pf else rig.SCR_DEC
+                seq.append((f"spkqw4_{R}", (B["qgb"], scr, ptbl), (P // 4, 2 * S), (S,)))
+                seq.append(("spkc256", (B["qgb"], B["ayb"], scr), (16*P,), (S,)))
+            elif spk is not None and spk.startswith("s"):
+                R = spk[1:]
+                seq.append((f"spka256m_{R}", (B["kqb"], B["vqb"], rig.SPTB[(ai, "m")]), (2*P,), ()))
                 seq.append((f"spkq256s_{R}", (B["qgb"], scr, ptbl), (16*P, S), (S,)))
                 seq.append(("spkc256", (B["qgb"], B["ayb"], scr), (16*P,), (8*S,)))
             else:

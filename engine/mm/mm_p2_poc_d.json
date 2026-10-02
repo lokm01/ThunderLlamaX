@@ -1,0 +1,49 @@
+{
+ "classes": {
+  "qkv": {
+   "rows": 8192,
+   "stock_ms": 2.855,
+   "mma_ms": 0.623,
+   "x": 4.58,
+   "relerr": 0.00027917871577499243,
+   "det_x2": true,
+   "sentinel": 0
+  },
+  "z": {
+   "rows": 4096,
+   "stock_ms": 1.574,
+   "mma_ms": 0.306,
+   "x": 5.15,
+   "relerr": 0.0002873899024219236,
+   "det_x2": true,
+   "sentinel": 0
+  },
+  "q": {
+   "rows": 8192,
+   "stock_ms": 2.815,
+   "mma_ms": 0.592,
+   "x": 4.75,
+   "relerr": 0.0002920963133362268,
+   "det_x2": true,
+   "sentinel": 0
+  },
+  "k": {
+   "rows": 512,
+   "stock_ms": 0.351,
+   "mma_ms": 0.083,
+   "x": 4.23,
+   "relerr": 0.0002992492652460033,
+   "det_x2": true,
+   "sentinel": 0
+  },
+  "v": {
+   "rows": 512,
+   "stock_ms": 0.338,
+   "mma_ms": 0.091,
+   "x": 3.73,
+   "relerr": 0.00029216940515737277,
+   "det_x2": true,
+   "sentinel": 0
+  }
+ }
+}

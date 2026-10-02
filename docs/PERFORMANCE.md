@@ -491,6 +491,109 @@ the trunk share; (3) the **routed-up mma port** (the register-decode
 design, not the fp16 shortcut that was skipped). At 2k the remaining
 weight-class split (routed 37.4 / trunk 36.4) prices the ~700-900 ceiling.
 
+### MoE prefill: the Session D campaign (494.8 -> 708.9 tok/s @2k — long context + the final ports)
+
+Session D executed that queue. The wide-attention kernel and the k=2048
+mma ports shipped; the routed-up port was honestly not attempted
+(time-boxed — see below):
+
+| rung | 2k | 8k | 16k | 49k | 96k feed |
+|---|---|---|---|---|---|
+| Session C | 495.4 | 411.8 | 341.3 | 202.2 | 125.4 |
+| **+ MM_PFW wide attention (Session D)** | 516.6 | 469.8 | 419.7 | 295.2 | 203.4 |
+| **+ MM_PFW + MM_PFK mma ports (Session D, shipped)** | **708.9** | **623.6** | **544.4** | **348.2** | **227.6** |
+
+(**+43% @2k this session; 3.48x cumulative** over the 203.9 pre-campaign
+stock; the 96k full feed +82% over Session C. TTFT on a 1,216-token fresh
+generation: **2.27 s cold** (2.27/2.31 s x2) / **0.74 s** with the prefix
+cached — was ~3.2 s after Session C, ~15.5 s before the campaign.)
+
+- **`spkqw4` — the row-grouped wide PF attention (the 96k lever,
+  `MM_PFW=1`).** The stock `spkq256s` put one CTA per (seat, head, split)
+  — every CTA streamed its whole split slice from L2 as byte loads, which
+  is why attention was 76% of the 96k chunk. The rewrite ROW-GROUPS the
+  work: grid (P/4, 2S), each CTA covers 32 rows (4 seats x 8 q-heads of a
+  kv-group), warp w owns 4 rows, and the causal boundary stays
+  warp-uniform. K/V tiles are staged to **33,792 B of DYNAMIC shared
+  memory** once per tile (cooperative uint4) and consumed by all warps —
+  the KV stream drops from once-per-seat to once-per-4-seats, and per
+  position each row pays ONE 8-byte LDS per tensor plus ONE shared dequant
+  (identical fp op order to stock), reused across the warp's rows. Each
+  (row, split) runs ONE online-softmax chain and writes its single real
+  partial into an **NP=S layout** — `spkc256` then merges exactly the S
+  real slots per row instead of 8S (4x less partial traffic). POC
+  (`mm_l4_poc.py`): **2.01x on the attention pair @96k** (151.5 -> 75.4
+  ms/layer-pair), 2.03x @49k, 1.97x @8k, 1.82x @2k; the RW=8 ILP variant
+  ties at long context and loses at 2k — **RW=4 shipped**. Numerics: vs
+  stock per-layer relerr **1.998e-07**, 216,165/1,048,576 words
+  bit-identical, det x2, sentinel 0 — Tier-2 by reassociation WITHIN
+  splits only (split boundaries pinned). The dyn-smem-in-graph unlock is
+  Session A's QMD patch, now proven in production graphs (the
+  exec-snapshots-QMD-at-record-time law, [DEXT_LAWS.md](DEXT_LAWS.md) PE1).
+- **`pgmq8k2` — the k=2048 trunk mma ports (`MM_PFK=1`).** The Session-C
+  `pgmq8m32` template (two `m16n8k16` fragments sharing every staged W
+  tile) at KDIM=2048 for the seat-loop classes `qkv`/`z` (GDN) and
+  `q`/`k`/`v` (attention) — ROWS compile-time per class (8192/4096/512),
+  1D folded MxN grid. Isolated POC (`mm_p2_poc_d.py`):
+  **4.58x/5.15x/4.75x/4.23x/3.73x** (qkv/z/q/k/v), relerr
+  2.79-2.99e-4 — the same Tier-2 class as Session C's F ~1.5e-4 bank. In
+  graph the 2k chunk went 495 -> 361 ms (PC3's contention tax again: the
+  isolated 4.6-5.2x compressed to ~1.37x on the trunk share).
+- **The honest miss: the routed-up mma port.** NOT attempted this session
+  — time-boxed. The grouped `gxm_up*` kernels consume item descriptors
+  `(e|rs|m0)`, and an mma port needs a gathered-row-list design (the M
+  dimension is per-expert ragged), priced at ~half a day. Post-D it is
+  **54% of the 2k residual — the top post-D item**; the ~900 @2k ceiling
+  needs it first.
+
+**The Tier-2 battery (both moves are numerics changes):**
+
+- **The CE gate, both arms and combined.** PFW alone: dCE **+0.202%**
+  (SEM ~0.101 both arms), top-1 agreement **253/256**. Combined
+  PFW+PFK: dCE **−0.369% — improved**, within SEM, top-1 **248/256**
+  (247/256 excluding the last seat). The compounding note
+  ([DEXT_LAWS.md](DEXT_LAWS.md) PE4): two individually-marginal Tier-2
+  drifts STACK — each was within SEM alone, and the combined top-1 moved
+  further (253 -> 248); dCE-within-SEM must always ship with the top-1
+  co-metric, and stacked numerics moves need a fresh combined gate, not
+  the union of the individual gates.
+- **The F bank**: hA relerr after one chunk 0.0387 (PFW) / 0.0727
+  (combined) — the expected reassociation-class drift; determinism x2.
+- **spec == T1 through the daemon**: the 60-prompt bank x2 — **match on
+  both arms** (r0 t1->spec n=70, r1 spec->t1 n=186).
+- **pcache CACHE_HIT under the new namespace** (MM_PFW/MM_PFK are
+  config_fp keys): 8,192/8,192 cached tokens, second arm 1.54 s.
+- **Decode classes untouched** (both moves are prefill-only): quote 45.8 /
+  prose 43.2 tok/s through the daemon; MTP-mode 42.6-44.6 tok/s across
+  classes through the soak.
+- **Kill-switches restore stock verbatim**: the battery's stock arms
+  (every MM_* knob off) reproduced the Session-C ladder within noise
+  (2k: 495.4 vs 494.8) — the knobs are byte-identical restores, and both
+  are config_fp keys (one cold pcache rebuild on the first boot after the
+  flip, announced in the env file).
+- **121-round / 909 s soak, zero engine faults** — every round "ok"; the
+  harness's summary fault flag read inverted (True with all rounds green),
+  adjudicated a reporting artifact.
+
+**Post-D residual (the honest accounting, from the fresh 2k-chunk
+profile):**
+
+| family | share of the 2k chunk (361 ms) | share of the 96k chunk |
+|---|---|---|
+| routed experts (the un-ported up+down) | **54%** | dominant with trunk |
+| shared expert + router | 17% | — |
+| GDN scan | 12% | — |
+| trunk remains | 12% | — |
+| attention | 5% | **19%** (was 76%) |
+
+The long-ctx wall moved: attention went from 76% to 19% of the 96k chunk,
+and the binding constraint at 2k is now the **routed-expert up-projection
+mma port** — the honest miss above. The measured ~900 @2k ceiling needs
+that port first; beyond it, the 2k residual is shared-router + scan +
+trunk-remains, each a smaller family than the routed share was.
+
+
+
 
 
 **The fusion that didn't ship (P10-B, honestly falsified):** the pairwise

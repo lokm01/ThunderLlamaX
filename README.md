@@ -17,9 +17,9 @@ service** — Qwen3.8-27B dense at **75.81 tokens per second** decode
 (bit-exact against greedy decoding, 100k-token context, 569/510/342 tok/s
 prefill; **43.7 tok/s** on novel prose via its own EAGLE draft layer),
 Qwen3.6-35B-A3B MoE at **97.6-104 tok/s** quote-class /
-**40.1 tok/s** prose-class with a **494.8 tok/s @2k** prefill (2.43x
-cumulative; the one Tier-2 move is cross-entropy-gated) and a **~3.2 s**
-GSM8K-class TTFT,
+**40.1 tok/s** prose-class with a **708.9 tok/s @2k** prefill (3.48x
+cumulative; the Tier-2 moves are cross-entropy-gated) and a **~2.3 s**
+GSM8K-class TTFT (0.74 s with the prefix cached),
 and an abliterated (uncensored) weight-variant
 of the dense checkpoint served as a first-class registry model — the same
 pipeline turns any Qwen3.8-architecture checkpoint into a swappable model —
@@ -48,7 +48,7 @@ dext, `pcache`.
 | Decode speed, quote-class @100k | **75.81 tok/s** dense (K=10 LOOKUP) · **97.6-104.0 tok/s** MoE (K=8 LOOKUP) — bit-exact in both |
 | Decode speed, prose-class | **43.7 tok/s** dense (the checkpoint's own EAGLE draft layer behind a full-vocab draft head, GSM8K median through the API) · **40.1 tok/s** MoE (first-party MTP K=4) |
 | Speculative decoding | n-gram LOOKUP from the document being read (K up to 10) **plus the models' own MTP layers as first-party drafters** (dense: EAGLE chain + full-vocab draft head; MoE: K=4 chain, 0.875 depth-1 acceptance) |
-| Prefill speed (dense) | **569.2 tok/s @2k · 510.1 @8k · 342.0 @100k** (Tier-2 default; bit-identical Tier-1 path one env away); MoE grouped-expert prefill **494.8 @2k · 409.7 @8k · 339.8 @16k** (**2.43x cumulative @2k**; Session C's trunk mma M-GEMM is a cross-entropy-gated Tier-2 move; was 181-204) |
+| Prefill speed (dense) | **569.2 tok/s @2k · 510.1 @8k · 342.0 @100k** (Tier-2 default; bit-identical Tier-1 path one env away); MoE grouped-expert prefill **708.9 @2k · 623.6 @8k · 544.4 @16k · 227.6 @96k feed** (**3.48x cumulative @2k**; Sessions C+D ship cross-entropy-gated Tier-2 mma/attention moves — every knob kill-switchable; was 181-204) |
 | Multi-model serving | A model registry (`model_registry.json`), per-model env files + caches, `enginectl switch` — one resident at a time, 409 `model_not_resident` with a switch hint |
 | Batch mode (opt-in) | B=2 concurrent streams, per-stream bit-exact; 81.33 tok/s engine-class harness aggregate / honest 1.20x service-measured — see honesty section |
 | Prompt cache | A 100k context restores in **~6.5 s** vs ~13 min fresh; survives restarts; per-model roots + quotas |
@@ -92,8 +92,8 @@ bit-exact (see FAQ). Full context and the complete ladders:
 | Decode, novel prose (first-party MTP K=4 chain) | **40.1 tok/s** prose-0 / 39.1 prose-1 / 29.9 prose-9 (was 19.1 T1-only) |
 | MTP acceptance (depth-1 / E[acc]@K=4) | **0.875** / 2.58-3.08 accepted drafts per cycle |
 | T=1 decode @64k-96k | 17.2-17.3 tok/s (57.8 ms/cycle) |
-| Prefill, chunked (grouped-expert + seat-loop + PF64 tail + trunk mma M-GEMM) | **494.8 tok/s @2k · 409.7 @8k · 339.8 @16k** (pre-campaign stock 203.9 / 187.9 / 171.7 — **2.43x cumulative @2k**); full 96k feed 92.4 -> **125.4 tok/s**. Sessions A+B bit-exact; Session C's mma pair is the one Tier-2 move, gated by the new per-seat cross-entropy instrument (dCE +0.046%, within SEM) |
-| GSM8K-class TTFT | **~3.2 s** on a 1,216-token fresh generation (3.18 s x2; was ~15.5 s pre-campaign, ~5.5 s after Session B) |
+| Prefill, chunked (grouped-expert + seat-loop + PF64 tail + trunk mma M-GEMM + k=2048 mma ports + wide dyn-smem attention) | **708.9 tok/s @2k · 623.6 @8k · 544.4 @16k** (pre-campaign stock 203.9 / 187.9 / 171.7 — **3.48x cumulative @2k**); full 96k feed 92.4 -> **227.6 tok/s** (+82% over Session C's 125.4). Sessions A+B bit-exact; Sessions C+D ship three Tier-2 moves, each gated by the per-seat cross-entropy instrument (Session D combined dCE −0.369%, i.e. improved, within SEM; top-1 248/256) |
+| GSM8K-class TTFT | **~2.3 s** on a 1,216-token fresh generation (2.27 s cold x2; **0.74 s** with the prefix cached — was ~15.5 s pre-campaign, ~3.2 s after Session C) |
 | Tier-1 gate through the daemon | 60/60 mtp == t1 bit-exact, x2 deterministic (60-prompt bank, re-gated on the Session-C numerics; the one cold-start mismatch was a non-reproducible pre-existing near-tie transient, adjudicated with the tieprobe) |
 | Prompt-cache hit | continuation EXACT vs the FRESH arm (G4); ~76 MB per 1k-token node |
 | Quality: GSM8K (4-shot, greedy, through the API) | **93.0%** (first 100 test problems; 36.7 tok/s median decode; TTFT ~5.5 s on the GSM8K-class battery after the prefill campaign — was the MoE's weak spot at ~66 tok/s effective FRESH prefill) |
@@ -444,9 +444,10 @@ dense Qwen3.8-27B (K=10 decode finished at 75.81; the full-vocab EAGLE
 draft head doubled novel-prose to 43.7 tok/s through the API; the K=4
 chain is built, Tier-1-gated, and honestly falsified at -25% until a
 deeper drafter exists), the MoE Qwen3.6-35B-A3B (K=8 quote at 97.6-104 tok/s;
-first-party MTP K=4 prose at 40.1; prefill 494.8 @2k with a ~3.2 s
-GSM8K-class TTFT — the multi-model campaign MM P0-P10 plus the prefill
-Sessions A-C,
+first-party MTP K=4 prose at 40.1; prefill 708.9 @2k (227.6 @96k feed)
+with a ~2.3 s GSM8K-class TTFT — the multi-model campaign MM P0-P10 plus
+the prefill
+Sessions A-D,
 including its honestly-falsified fusion, is
 [docs/history/MM_PLAN.md](docs/history/MM_PLAN.md) + the MM_P* journals),
 and the abliterated dense variant (a third registry entry proving the

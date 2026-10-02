@@ -1,0 +1,56 @@
+{
+ "ce": {
+  "stock": {
+   "mean_ce": 0.9018145608875469,
+   "ce_sem": 0.1012021067779326
+  },
+  "new": {
+   "mean_ce": 0.9036375841325416,
+   "ce_sem": 0.10115672472366144
+  },
+  "dce_rel": 0.0020215056665314262,
+  "top1_agree": 253,
+  "top1_agree_excl_last": 252
+ },
+ "fbank": {
+  "hA_relerr": 0.038748361170248026,
+  "hA_maxabs": 0.5122933387756348
+ },
+ "ladder": {
+  "2048": {
+   "stock_ms": 516.776,
+   "new_ms": 495.533,
+   "speedup": 1.043,
+   "feed_tps": 516.6,
+   "feed_tps_stock": 495.4
+  },
+  "8192": {
+   "stock_ms": 621.725,
+   "new_ms": 544.865,
+   "speedup": 1.141,
+   "feed_tps": 469.8,
+   "feed_tps_stock": 411.8
+  },
+  "16384": {
+   "stock_ms": 750.036,
+   "new_ms": 609.978,
+   "speedup": 1.23,
+   "feed_tps": 419.7,
+   "feed_tps_stock": 341.3
+  },
+  "49152": {
+   "stock_ms": 1267.067,
+   "new_ms": 867.153,
+   "speedup": 1.461,
+   "feed_tps": 295.2,
+   "feed_tps_stock": 202.0
+  },
+  "98304": {
+   "stock_ms": 2039.738,
+   "new_ms": 1258.613,
+   "speedup": 1.621,
+   "feed_tps": 203.4,
+   "feed_tps_stock": 125.5
+  }
+ }
+}

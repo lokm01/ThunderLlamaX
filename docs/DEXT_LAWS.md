@@ -1213,3 +1213,90 @@ heads — delta within one SEM of the per-arm SEM, with top-1 agreement as
 the co-metric (252/256 here), adjudicates the drift quality-neutral.
 Numerics-class changes now ship under this gate in addition to the
 F-metric bank, determinism, and the spec==T1 battery.
+
+## PE. MoE-prefill Session D laws (the 495.4 -> 708.9 @2k campaign)
+
+Journals: the pinned rig commits 446e71a (L4 POC) -> fc95408 (MM_PFW
+wired + battery) -> 949cd68 (MM_PFK ports + combined battery) -> d2fb46c
+(daemon live + soak + env); the kernels, instruments and gate records
+live in `engine/mm/` (`MM_D_spkqw.cu`, `MM_D_pgmq8k2.cu`,
+`mm_l4_poc.py`/`mm_l4_poc.json`, `mm_p2_poc_d.py`/`mm_p2_poc_d.json`,
+`mm_bat_d.py`/`mm_bat_d.json`/`mm_bat_d2.json`, `mm_wire_d.py`,
+`mm_wire_d2.py`, `mm_build_d.zsh`). (Section letter PE — PD was taken by
+the P10-dense prose campaign.)
+
+**PE1. THE QMD-SNAPSHOT-AT-RECORD-TIME LAW.** Graph capture on this
+dext snapshots each program's QMD WHEN THE GRAPH IS RECORDED — later
+`qmd.write(...)` calls on the program object do NOT propagate into
+existing graphs. Corollary (the good half): a dynamic-smem sizing
+written at program-load time, BEFORE any graph records the program, is
+exec-time-stable IN-GRAPH — `spkqw4`'s 33,792 B dyn-smem union plus the
+min/target carveout fields ride the captured QMD through every replay.
+Order is load-bearing: patch the QMD first (program load), build graphs
+second; a graph captured before the patch runs at the stale smem size
+and faults or silently degrades. This is the production promotion of
+Session A's dyn-smem probe (the "banked structural branch" — now
+shipped).
+
+**PE2. THE ANCHOR-MAXDEV-NOT-BITWISE GATING LAW.** A numpy mirror of a
+hand kernel is a NEAR-MODEL, not a bit-model — gate it by MAX DEVIATION
+against a banked tolerance, never by bitwise equality. Session D's
+`spkqw_ref` anchor run produced maxdev 2.27e-01 for BOTH the new kernel
+AND — the load-bearing control — the STOCK kernel run against a stock
+anchor (`stock_vs_stock_anchor`, 12 rows): when stock and new deviate
+from the anchor IDENTICALLY (matched to 8 digits here), the deviation is
+a SNAPSHOT ARTIFACT of the anchor itself (the anchor's inputs were
+reconstructed from a downloaded buffer snapshot, not the live kernel
+inputs), not a kernel defect. The stock-vs-stock sanity arm is what
+turns a scary-looking 0.227 maxdev into a PASS; without it the anchor
+gate is uninterpretable. The real numerics gate remains
+kernel-vs-kernel on identical live inputs (relerr 1.998e-07, exact-word
+count, det x2, sentinel).
+
+**PE3. THE TWO-BUGS-BEFORE-E2E CASE STUDY (what the anchor discipline is
+for).** The anchor arm caught TWO spkqw bugs before any end-to-end run:
+(1) a **vsc/vsm alias** — the K/V tile staging pointers for the scale
+and quant arrays were computed to overlap, so the V-scale rows read
+K-quant bytes (scores plausible, outputs wrong — the class of bug that
+survives a timing gate and dies only in a numerics gate); (2) a
+**row-space mismatch** — the partials were written in a different
+(row, split) slot space than the combine read, so `spkc256` merged the
+wrong rows. Both were caught at the POC bench where a fix costs minutes;
+the fixed layout (`ksm/ksc/vsm/vsc` at explicit disjoint offsets, the
+NP=S partial slot `(t*16+h)*S+s`) is what shipped in `MM_D_spkqw.cu`.
+Lesson: wire the kernel-order anchor INTO the POC harness (arm 2 before
+arm 3, numerics before timing) — an anchorless POC that only times
+ships both bugs to the battery.
+
+**PE4. THE CE-COMPOUNDING-OF-TIER-2-DRIFTS NOTE.** Two Tier-2 numerics
+moves that each pass the per-seat CE gate WITHIN SEM do not compose
+for free: Session D's PFW arm measured dCE +0.202% (top-1 253/256) and
+the combined PFW+PFK stack measured dCE −0.369% (top-1 248/256) — the
+top-1 agreement moved 5 seats further even though the MEAN drift went
+the other way. Mean-CE-within-SEM is necessary, not sufficient, once
+drifts stack: always read the TOP-1 co-metric alongside dCE, and gate
+every NEW COMBINATION of numerics knobs with a fresh combined CE run —
+never the union of the individual gates. (Both Session D gates were run
+this way; the marginal-compounding behavior is documented, not
+hand-waved.)
+
+**PE5. THE NEXT_TIMELINE-BEFORE-RAISING-SUBMIT LAW (the phantom-wedge
+class).** When a submit appears stuck, take `next_timeline` / wait on
+the EXISTING timeline BEFORE raising any new submit or fence — a raised
+submit against a channel the GPU has not drained can wedge the device
+in a way that looks exactly like a kernel fault (and burns a reboot on
+this box). The tell: the "stuck" kernel completes fine once you wait
+properly; the wedge was the recovery attempt, not the work. Harness
+discipline: every graph runner waits on ITS OWN timeline handle, and
+recovery paths (timeouts, retries) must wait-before-act.
+
+**PE6. THE ~9900-TIMELINE-OPS WEDGE + FENCES-BETWEEN-PHASES
+MITIGATION.** The GPU wedges (silent, reboot-class) when a single
+un-fenced session accumulates on the order of ~9,900 timeline ops —
+Session D hit it mid-battery when arm after arm reused one long-lived
+graph/timeline chain. The mitigation that held through the rest of the
+campaign: FENCE BETWEEN PHASES — every POC/battery arm ends with an
+explicit fence (the `fence_every=48` graph wrapper + `gr.fence()` at arm
+end), so each phase starts a fresh timeline chain. Same family as the
+~950-cycle dext budget (M1C) but counted in timeline ops, not cycles;
+the two limits stack, and both reset on a fence/quiescent point.
