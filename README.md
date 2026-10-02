@@ -124,7 +124,12 @@ Two later closures: the dense-PPL scorer fault was a one-line harness bug
 (a 2x-oversized logits download — fixed, the full dense perplexity battery
 now runs clean), and `sudo enginectl switch` state files are now always
 written daemon-readable, so mixed sudo/non-sudo invocation can't silently
-skip model promotion.
+skip model promotion. A drafter-retraining research program that followed
+(the offline simulator + trainer now in `engine/chain_sim.py` and
+`engine/ttt/`) concluded the same way it ran — honestly: the shipped
+drafter validated at near-ceiling on representative prose, the EAGLE-3
+retraining recipe was falsified with measurements, and the instruments
+were kept (verdicts in [docs/history/](docs/history/)).
 
 ## Can you use an eGPU with Apple Silicon?
 

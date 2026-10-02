@@ -1041,3 +1041,41 @@ identity break (Z4) and a class-B target off-by-one (proposal_i compares
 vs target(t+i), not target(t+i+1) — a one-token-lookahead definition
 error that inflates acceptance and fits no symptom until the diff harness
 runs).
+
+**Z8. THE QUANT-PATH LAW (draft packs).** The shipped GGUF draft pack is
+NOT bitwise RTN(bf16) of the first-party checkpoint: 53% packed-byte
+equality, dequant cos 0.9978-0.9991 — same source weights, a different
+upstream quant path (imatrix/rounding-class). The novel-prose canary class
+is INSENSITIVE to the quant path (all three packs within ±0.017 E[m]k2);
+every cross class is HIGHLY sensitive (the shipped pack beats pristine
+bf16 AND fresh RTN by +0.10-0.14 on gsm8k, +0.03-0.09 on prose16k/code8k;
+r8 swings ±0.08). Corollary: pack A/B comparisons and no-regression bars
+are meaningless unless the quant path is pinned or the deltas dominate it.
+
+**Z9. THE SCORER-CONCURRENCY CLOBBER.** Four chain_sim scorers appending
+to ONE shared score JSON corrupted it (concurrent read-modify-write on a
+single results file). The [v3score] summary lines each scorer prints to
+its own log were the ground truth for reconciliation. One writer per
+results file (or per-scorer shards + a merge step) — cheap insurance the
+v3 battery paid for retroactively.
+
+**Z10. THE PINNED-CPU SESSION-KV STREAMING PATTERN (24GB-class training).**
+The v3 anchor set (7,361 train cycles, 10.2GB of int8 session KV) trains
+on a 24GB 4090 by keeping each session's kv on PINNED CPU memory and
+streaming it to the GPU per chain step (fp16 source, fp32 cast at the
+kernel boundary) — identical math, host transfer fully hidden under the
+chain step. For anchor-scale trainer runs, "the anchors don't fit" is a
+placement assumption, not a wall.
+
+**Z11. THE EXPANDABLE_SEGMENTS ALLOC CONF.** The first anchor training
+step OOM'd with 5.8GB CUDA-reserved-unallocated — allocator fragmentation
+under the streaming step's mixed allocation sizes, not a real memory
+shortfall. `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` removed it
+entirely. Rent-by-the-hour 24GB instances running variable-shape training
+should set it from the start.
+
+*(Healing note, vast.ai: the ssh-proxy aggregate upload cap measured in
+the anchor phase (~1.5-2Mbps regardless of stream count — relay or
+compress anything >1GB) was HEALED by the v3 run: the same 1.74GB zstd
+payload uploaded in ~3.5 min. Compression stays worth it — zstd -6 on
+int8 kvd = 3.26x.)*

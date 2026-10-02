@@ -633,15 +633,20 @@ numbers in [PERFORMANCE.md](PERFORMANCE.md). The shape of it:
   attention/o-proj/FFN are dead code during fill (alpha after prefill
   2.67 -> 2.68).
 
-## The drafter-quality program instruments (chain_sim + ttt/; in flight)
+## The drafter-quality program instruments (chain_sim + ttt/; concluded)
 
-*Plain language: the next performance axis is the DRAFTER itself — the
+*Plain language: the next performance axis was the DRAFTER itself — the
 1-layer EAGLE draft block saturates at ~2 accepted tokens, so K=4 measured
--25% prose and ships off. Raising that means retraining the checkpoint's
-own draft layer (blk.64) and scoring candidate packs OFFLINE against real
-engine traces before anything touches the GPU. Two pieces of permanent
-infrastructure landed for that program — nothing from it has shipped into
-the serving defaults yet.*
+-25% prose and ships off. The program built the offline-scoring instruments,
+retrained the checkpoint's own draft layer (blk.64) three times on rented
+GPUs, and concluded: **the training recipe is honestly falsified, the
+instruments are permanent infrastructure, and the shipped drafter is
+near this method's ceiling on representative prose** (the canary reframe:
+E[m]|k2 0.979 / k4 1.197 on held-out fresh-novel sessions at 64k-99.4k vs
+0.549 on the old hard anchor — [history/TLX_P2B3_VERDICT.md](history/TLX_P2B3_VERDICT.md)).
+Nothing changed in the serving defaults; the one preserved asset is a
+GSM8K/battery-class opt-in pack (+0.22-0.49 E[m]|k2 on battery workloads)
+selectable via `TLX_DRAFT_PACK`, never the default.*
 
 - **`engine/chain_sim.py` — the ENGINE-CALIBRATED offline acceptance
   simulator.** The engine dumps a full cycle trace (`TLX_TRACE_DUMP` in
@@ -669,3 +674,16 @@ the serving defaults yet.*
   training is the big one; data distribution/ctx second; precision a
   distant third) are in [history/TLX_P0_LEVER_RANKING.md](history/TLX_P0_LEVER_RANKING.md);
   the program plan lives with the driver-seat workspace, not this repo.
+- **The outcome (three iterations, ~$59 cloud total).** Stage A
+  (corpus-scale) falsified — greedy-vs-corpus agreement 0.625-0.645 means
+  human text trains the wrong target ([history/TLX_P1_RESULTS.md](history/TLX_P1_RESULTS.md));
+  anchor-scale Stage B v2 (8,829 engine decode anchors at true serve
+  positions, `engine/anchor_scale_dump.py` + `engine/ttt/prep_anchor_sessions.py`)
+  reframed the bar (the canary battery) and falsified the Stage-A lineage
+  for prose ([history/TLX_P2_ANCHORS.md](history/TLX_P2_ANCHORS.md)); clean-slate v3
+  (pristine bf16 init, bracketed LRs, held-out selection) falsified the
+  recipe itself — the trainer's own-chain objective anti-correlates with
+  engine-conditioned acceptance ([history/TLX_P2B3_VERDICT.md](history/TLX_P2B3_VERDICT.md)).
+  Scoring drivers `engine/score_v2.py` / `engine/ttt/score_v3.py`, the
+  runbooks, and the v3 result metadata (`engine/ttt/results_v3/`) are in the
+  repo with them.

@@ -29,18 +29,60 @@ tok/s, prefill @100k fill 452 vs 440-447 s — see
 [DEPLOY_OBLITERATED.md](DEPLOY_OBLITERATED.md)). It is a
 serving-capability demonstration, not a new performance class.
 
-**In flight — the drafter-quality program (NOT shipped; no numbers from it
-count yet).** The next prose lever is retraining the checkpoint's own
-1-layer draft block (the shipped one saturates at ~2 accepted tokens; the
-K=4 chain built on it measured -25% and ships off). The program's
-instruments are in the repo: `engine/chain_sim.py` (the
-engine-calibrated offline acceptance simulator — candidate draft packs
-score against real traces without a GPU boot) and `engine/ttt/` (the
-external EAGLE-3 trainer + pack writer). Phase-0 measurements and the
-lever ranking (exposure bias > data distribution > precision) are
-recorded in [history/TLX_P0_LEVER_RANKING.md](history/TLX_P0_LEVER_RANKING.md) —
-read them as lab results, not shipped performance. Nothing from this
-program has changed a serving default yet.
+**Concluded — the drafter-quality program (verdict: instruments kept, training
+recipe honestly falsified, the shipped drafter validated).** The program set
+out to retrain the checkpoint's own 1-layer draft block (the shipped one
+saturates at ~2 accepted tokens; the K=4 chain built on it measured -25% and
+ships off). Three rental-GPU iterations later (~$59 total cloud spend), the
+verdict is in: **the shipped pack stays — now better-understood — and the
+instruments are permanent.**
+
+- **The canary reframe (the headline).** The old r8 evaluation anchor was a
+  hard outlier: an idiosyncratic model-voice continuation trace. Scored on a
+  held-out battery of fresh-novel sessions at true serve positions, the
+  SHIPPED drafter is already near this method's ceiling:
+
+  | control = shipped pack | E[m]|k2 | E[m]|k4 | first-token acc |
+  |---|---|---|---|
+  | r8_prose @97.9k (the old hard anchor) | 0.549 | 0.549 | 0.412 |
+  | fresh-novel canary @64k-99.4k (36 held-out sessions) | **0.979** | **1.197** | **0.634** |
+
+  The r8 trace understated the engine's novel-prose acceptance by ~0.43 k2;
+  on representative prose the shipped pack sits at the door of the
+  E[m]k2 1.0-1.3 ship band. **No published benchmark changes** (43.7 tok/s
+  daemon GSM8K stays the shipped prose figure) — the canary numbers are
+  evidence the real-world prose class is stronger than the hard-anchor
+  in-harness figure (22.9 @100k), not a new shipped number.
+- **Three falsifications, three sentences each.**
+  1. *Corpus-scale Stage A* (26.5M tokens, 8 classes, rented H100): training
+     on human text teaches "plausible human continuations", not THIS model's
+     greedy stream — greedy-vs-corpus agreement measured 0.625-0.645, and
+     every checkpoint stayed below the 0.549 control on r8 prose.
+  2. *Anchor-scale Stage B v2* (8,829 engine decode anchors at 64k-99.4k from
+     36 fresh-novel sessions, protective mix, clean held-out generalization
+     with zero memorization): the Stage-A lineage still trades prose down for
+     battery up (canary 0.979 -> 0.741, prose16k -0.14, gsm8k +0.49) —
+     falsified for prose a third time.
+  3. *Clean-slate v3* (pristine first-party bf16 init, LR 2-3e-6 bracketed,
+     held-out canary-CE selection): the packed canary k2 lands BELOW its own
+     no-training init at every LR and step count (0.943/0.913 vs 0.970-0.987)
+     while canary CE improves 2.41 -> 1.25 — the trainer's own-chain
+     objective anti-correlates with engine-conditioned acceptance under this
+     recipe. Init, LR, data-scale, and selection are all exonerated; the
+     recipe itself is falsified.
+- **The preserved asset**: a GSM8K/battery-class opt-in draft pack
+  (+0.22-0.49 E[m]|k2 on battery workloads, reproduced across two
+  independent training runs while every prose class pays) — selectable per
+  deployment via `TLX_DRAFT_PACK`, never the default.
+- **What shipped: nothing.** The instruments are permanent infrastructure:
+  `engine/chain_sim.py` (the G0-calibrated offline acceptance simulator),
+  the 36-session canary battery + anchor-dump harness
+  (`engine/anchor_scale_dump.py`), and the TTT trainer pipeline
+  (`engine/ttt/`, validated bit-identical to the engine chain). Verdicts:
+  [history/TLX_P1_RESULTS.md](history/TLX_P1_RESULTS.md) (Stage A),
+  [history/TLX_P2_ANCHORS.md](history/TLX_P2_ANCHORS.md) (the canary
+  reframe + v2), [history/TLX_P2B3_VERDICT.md](history/TLX_P2B3_VERDICT.md)
+  (the final verdict + runbook).
 
 Reference rig: RTX 3090 24 GB (sm_86) in a TB4 enclosure on a MacBook Air
 M2, driven through the DriverKit dext. Decode context = the model's full KV
@@ -447,8 +489,12 @@ end; the fix downloads FP16, the engine-native head output, and the full
   not from lookup).
 - **What is still honestly open on prose**: the dense K=4 chain is built and
   Tier-1-gated, but its 1-layer drafter saturates at m=2 — K=4 measured -25%
-  prose (break-even needs E[m] >= 1.17), so a DFlash2-class or trained
-  nextn drafter is the unlock; the MoE's long-ctx (96k) MTP
+  prose (break-even needs E[m] >= 1.17), so a deeper drafter is the unlock;
+  the drafter-quality program then honestly falsified the EAGLE-3 TTT
+  retraining recipe on these weights (verdict section above — the shipped
+  drafter is near this method's ceiling on representative prose), so the
+  remaining route is a different drafter class, not more of this recipe;
+  the MoE's long-ctx (96k) MTP
   alpha is unmeasured; prose-9 decay (29.9) is real and unsolved.
 
 **The measured walls (why prefill stops where it stops):**

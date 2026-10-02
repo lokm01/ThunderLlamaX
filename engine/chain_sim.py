@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 # TLX DRAFTER Phase 0 (S1) — chain_sim.py: the ENGINE-CALIBRATED draft-chain simulator.
 # ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
 # SPDX-License-Identifier: MIT
@@ -290,7 +287,7 @@ class KV8:
         self._txn = None
 
     @classmethod
-    def from_dump(cls, kvd_path, scd_path, upto=None):
+    def from_dump(cls, kvd_path, scd_path, upto=None, pad=0):
         q = np.load(kvd_path, mmap_mode="r")
         sc = np.load(scd_path, mmap_mode="r")
         if upto is not None:
@@ -303,6 +300,12 @@ class KV8:
             s = np.repeat(sc[half].astype(F32), 32, axis=-1)      # [4,CAP,256]
             return (q8 * s).astype(F16)
         K = dq(0); V = dq(1)
+        if pad > 0:
+            # TLX P2: dumps trimmed to decode-start rows need append headroom
+            # for the replay's own chain rows (the r8 dump carried full-CTXK).
+            # Zero scratch: append() overwrites a row before any causal read.
+            K = np.concatenate([K, np.zeros((4, pad, 256), F16)], axis=1)
+            V = np.concatenate([V, np.zeros((4, pad, 256), F16)], axis=1)
         return cls(K, V)
 
     @classmethod
@@ -552,8 +555,11 @@ def m_stats(ms, K=4):
 def run_class_a(trace_dir, weights, tdir_globals, kvd=None, verbose=True, max_cycles=None,
                 chain_len=4, only_k4=True, cond="engine"):
     tr = TraceA(trace_dir)
+    _rows_pre = tr.cycles if max_cycles is None else tr.cycles[:max_cycles]
+    _qrows = np.load(tr.kvd if kvd is None else kvd, mmap_mode="r").shape[2]
+    _pmax = max((int(r["pos"]) for r in _rows_pre), default=0) + 8
     kv = KV8.from_dump(tr.kvd if kvd is None else kvd, tr.scd if kvd is None else kvd.replace("kvd_", "scd_"),
-                      upto=None)
+                      upto=None, pad=max(0, _pmax - _qrows))
     g = load_globals(tdir_globals)
     fh = FullHead(FullHead.build(tdir_globals))
     sim = ChainSim(weights, kv, emb_raw=g["emb_raw"], grid512=g["grid512"],

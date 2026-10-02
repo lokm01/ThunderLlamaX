@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 # TLX DRAFTER Phase 1 — prompt pool builder (runs on the rental).
 # ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
 # SPDX-License-Identifier: MIT
@@ -67,12 +64,15 @@ def main():
         idx = rng.sample(range(len(ds)), min(a.n_code, len(ds)))
         for i in idx:
             t = ds[i]
-            if "prompt" in t and "test" in t:
+            if "prompt" in t and ("test" in t or "test_list" in t):
+                tests = t.get("test_list", t.get("test"))
                 add(f"Write a Python function for the following task.\n\nTask: {t['prompt']}\n\n"
-                    f"Test examples: {str(t['test'])[:400]}\n\nProvide the function implementation:", "mbpp", 512)
-            else:
+                    f"Test examples: {str(tests)[:400]}\n\nProvide the function implementation:", "mbpp", 512)
+            elif "instruction" in t:
                 add(f"Write Python code for the following task.\n\n{t['instruction']}\n\n"
                     + (f"Input: {t['input'][:400]}\n\n" if t.get("input") else "") + "Solution:", "code", 512)
+            else:
+                add(f"Write Python code for the following task.\n\n{str(t)[:800]}\n\nSolution:", "code", 512)
         print(f"[prompts] mbpp {min(a.n_code, len(ds))}")
     except Exception as e:
         print(f"[prompts] mbpp FAILED: {e}")
@@ -88,33 +88,36 @@ def main():
         print(f"[prompts] ultrachat {min(a.n_chat, len(ds))}")
     except Exception as e:
         print(f"[prompts] ultrachat FAILED: {e}")
-    # ---- prose: PG19 (parquet branch) -> wikitext-103 -> TinyStories ----
+    # ---- prose: book prompts come from longcorpus.py (books, not classics);
+    # this block only runs if n_prose/n_long > 0 (fallback corpora) ----
     prose_ds = None
-    for spec in (("deepmind/pg19", "refs/convert/parquet"), ("Salesforce/wikitext", "wikitext-103-raw-v1", None), ("roneneldan/TinyStories", None)):
-        try:
-            prose_ds = load_dataset(spec[0], spec[1] if len(spec) > 1 and spec[1] != "refs/convert/parquet" else None,
-                                    revision=spec[1] if spec[1] == "refs/convert/parquet" else None, split="train",
-                                    trust_remote_code=False)
-            print(f"[prompts] prose corpus: {spec[0]}")
-            break
-        except Exception as e:
-            print(f"[prompts] {spec[0]} failed: {str(e)[:120]}")
+    if a.n_prose + a.n_long > 0:
+        for spec in (("deepmind/pg19", "refs/convert/parquet"), ("Salesforce/wikitext", "wikitext-103-raw-v1", None), ("roneneldan/TinyStories", None)):
+            try:
+                prose_ds = load_dataset(spec[0], spec[1] if len(spec) > 1 and spec[1] != "refs/convert/parquet" else None,
+                                        revision=spec[1] if spec[1] == "refs/convert/parquet" else None, split="train",
+                                        trust_remote_code=False)
+                print(f"[prompts] prose corpus: {spec[0]}")
+                break
+            except Exception as e:
+                print(f"[prompts] {spec[0]} failed: {str(e)[:120]}")
     try:
         assert prose_ds is not None
         ds = prose_ds
         idx = rng.sample(range(len(ds)), min(a.n_prose + a.n_long, len(ds)))
-        for j, i in enumerate(idx):
-            txt = ds[i].get("text") or ds[i].get("story") or ""
-            cut = rng.randint(600, 4000)
-            if j < a.n_prose:
-                add(f"Continue the following passage of a novel in the same style:\n\n{txt[:cut]}\n\n",
-                    "prose", 512)
-            else:
-                # long-context: ~8-16k chars prefix -> 2-4k tokens
-                cut2 = rng.randint(9000, 26000)
-                add(f"Continue the following passage of a novel in the same style.\n\n{txt[:cut2]}",
-                    "prose_long", 768)
-        print(f"[prompts] prose {a.n_prose + a.n_long}")
+        if idx:
+            for j, i in enumerate(idx):
+                txt = ds[i].get("text") or ds[i].get("story") or ""
+                cut = rng.randint(600, 4000)
+                if j < a.n_prose:
+                    add(f"Continue the following passage of a novel in the same style:\n\n{txt[:cut]}\n\n",
+                        "prose", 512)
+                else:
+                    # long-context: ~8-16k chars prefix -> 2-4k tokens
+                    cut2 = rng.randint(9000, 26000)
+                    add(f"Continue the following passage of a novel in the same style.\n\n{txt[:cut2]}",
+                        "prose_long", 768)
+            print(f"[prompts] prose {a.n_prose + a.n_long}")
     except Exception as e:
         print(f"[prompts] prose FAILED: {e}")
     # ---- doc-QA: SQuAD contexts ----

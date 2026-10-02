@@ -1,6 +1,3 @@
-# ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
-# SPDX-License-Identifier: MIT
-# Copyright (c) 2026 lokm01
 # TLX DRAFTER Phase 1 — teacher generation (vLLM on the rental; HF fallback).
 # ThunderLlamaX — LLM inference on an eGPU, hitched to a Mac.
 # SPDX-License-Identifier: MIT
@@ -21,23 +18,26 @@ def main():
     ap.add_argument("--engine", default="vllm", choices=["vllm", "hf"])
     ap.add_argument("--gpu-mem", type=float, default=0.92)
     ap.add_argument("--max-model-len", type=int, default=8192)
+    ap.add_argument("--max-num-seqs", type=int, default=512)
+    ap.add_argument("--batch", type=int, default=512)
     a = ap.parse_args()
     rows = [json.loads(l) for l in open(a.prompts)]
     print(f"[gen] {len(rows)} prompts, engine={a.engine}")
     if a.engine == "vllm":
         from vllm import LLM, SamplingParams
         llm = LLM(model=a.model, dtype="bfloat16", gpu_memory_utilization=a.gpu_mem,
-                  max_model_len=a.max_model_len, enforce_eager=False, max_num_seqs=512)
-        sp_greedy = SamplingParams(temperature=0.0, max_tokens=600)
+                  max_model_len=a.max_model_len, enforce_eager=False, max_num_seqs=a.max_num_seqs)
         outs = []
-        B = 512
+        B = a.batch
         for i in range(0, len(rows), B):
             chunk = rows[i:i + B]
             prompts = [r["text"] for r in chunk]
+            mx = max(int(r.get("max_new", 600)) for r in chunk)
             # one greedy pass then a temp pass on 30%: batch separately for speed
+            sp_greedy = SamplingParams(temperature=0.0, max_tokens=mx)
             res1 = llm.generate(prompts, sp_greedy)
             idx_t = [j for j, r in enumerate(chunk) if (i + j) % 10 < 3]
-            sp_t = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=600, seed=1234 + i)
+            sp_t = SamplingParams(temperature=0.7, top_p=0.95, max_tokens=mx, seed=1234 + i)
             res2map = {}
             if idx_t:
                 res2 = llm.generate([prompts[j] for j in idx_t], sp_t)

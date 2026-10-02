@@ -25,6 +25,13 @@ ZERO new serving CUDA). Serving chain semantics are ported EXACTLY from
 | `pack_trained.py` | torch -> draft_pack (RTN / GPTQ-calibrated; +Q8_0 variant) |
 | `replay_eval.py` | chained-replay acceptance (a_cond, E[m]|K2/K4) on held-out shards |
 | `gguf_probe.py` | standalone GGUF metadata reader (proved the norm law) |
+| `longcorpus.py` | long-context corpus builder (bookcorpusopen split-windows, abs RoPE offsets) |
+| `stageb_build.py` / `stageb2_build.py` | Stage-B shard builders (engine-trace + anchor-scale sets; `--skip-r8`) |
+| `train_stageb.py` / `train_stageb2.py` / `train_stageb3.py` | the Stage-B trainer lineage: engine-anchor adaptation -> ckpt_6000 lineage -> v3 first-party bf16 init (LR bracket, canary-CE early-stop, pinned-CPU session-KV streaming for 24GB) |
+| `prep_anchor_sessions.py` | fresh-novel session prompt prep (36 sessions, 6 ctx slots, deterministic crops) |
+| `score_v3.py` | the v3 Mac scoring driver (curve \| full; zero GPU) |
+| `run_stagea.sh`, `run_stageb*.sh`, `anchor_dump_runner.sh` | the rental/rig orchestration scripts (stagea s1-s6; stageb b1/b2/b3; v3 arm) |
+| `results_v3/` | the v3 run's result metadata (canary training curves, score tables) |
 
 ## THE TWO LAWS DISCOVERED (2026-09-30, law-grade)
 1. **NORM LAW**: the HF qwen3_5 checkpoint stores ALL RMSNorm weights
@@ -87,3 +94,19 @@ r8_prose anchor trace through G0-calibrated chain_sim — packed, never bf16.
 Also score the CURRENT pack as the second calibration point, and
 `hf_init`-style bf16 weights for the G1 precision ladder. The packs swap in
 via `TLX_DRAFT_PACK=<dir>` after the pcache draft_pack fingerprint fix.
+
+## Program verdict (CONCLUDED 2026-10-02 — read this before retraining)
+This trainer ran to completion three times (Stage A corpus-scale on a
+rented H100; Stage-B v2 anchor-scale on an A100; Stage-B v3 clean-slate
+bf16-init on a 4090) and the recipe was FALSIFIED each time — the trainer's
+own-chain objective anti-correlates with engine-conditioned acceptance
+under this recipe, and the SHIPPED pack was measured near this method's
+ceiling on representative prose (the canary reframe: 0.979 k2 / 1.197 k4 on
+held-out fresh-novel sessions vs 0.549 on the old r8 hard anchor). The
+instruments (chain_sim + the canary battery + this pipeline, all validated
+bit-identical to the engine chain) are permanent; the one preserved asset
+is the GSM8K-class opt-in pack (+0.22-0.49 E[m]k2 on battery workloads,
+`TLX_DRAFT_PACK`-selectable). Full verdicts:
+[../../docs/history/TLX_P1_RESULTS.md](../../docs/history/TLX_P1_RESULTS.md),
+[../../docs/history/TLX_P2_ANCHORS.md](../../docs/history/TLX_P2_ANCHORS.md),
+[../../docs/history/TLX_P2B3_VERDICT.md](../../docs/history/TLX_P2B3_VERDICT.md).
