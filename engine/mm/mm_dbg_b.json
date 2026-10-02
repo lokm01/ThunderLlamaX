@@ -1,0 +1,25 @@
+{
+ "stock_vs_stock": {
+  "bit_exact": true
+ },
+ "pfm_only": {
+  "mismatched": 524288,
+  "first_word": 0,
+  "first_seat": 0
+ },
+ "pfg_only": {
+  "mismatched": 0,
+  "first_word": -1,
+  "first_seat": -1
+ },
+ "both": {
+  "mismatched": 524288,
+  "first_word": 0,
+  "first_seat": 0
+ },
+ "pfg_eids_divergent_layers": [],
+ "pfg_eids_n_bad_layers": 0,
+ "f1b_t1s8_vs_stockchunk": {
+  "mismatched": 0
+ }
+}

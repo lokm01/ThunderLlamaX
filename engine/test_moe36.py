@@ -58,6 +58,16 @@ class MoeServeEngine:
         seqpf = build_seq7(rig, 256, "gconv36_256", "k2s36_256", with_head=False,
                            spk=spk, S=PF_S, pf=True)
         self.gr_pf = mkgraph(rig, seqpf, "sv_pf")
+        # ---- SESSION B (L5): the PF-64 tail graph -- the len%256 tail at
+        # chunk rate instead of ~52ms/token T1 cycles (the GSM8K-class TTFT
+        # is ~70% tail). MM_PF64 kill-switch; needs the _64 scan cubins.
+        self.pf64_on = os.getenv("MM_PF64", "0") == "1" and "gconv36_64" in rig.K
+        self.gr_pf64 = None
+        if self.pf64_on:
+            seqpf64 = build_seq7(rig, 64, "gconv36_64", "k2s36_64", with_head=False,
+                                 spk=spk, S=PF_S, pf=True)
+            self.gr_pf64 = mkgraph(rig, seqpf64, "sv_pf64")
+            print("[moe36] PF-64 tail graph built (len%256 tail at chunk rate)", flush=True)
         self.dev = rig.dev
         # ---- P10: THE MTP K=4 CHAIN (MM_P9_mtp.MtpRig + the P=5 probe) ----
         # All late-built graphs use GraphRunnerUnc (dedicated uncached ka --
@@ -97,6 +107,16 @@ class MoeServeEngine:
             self.np.ascontiguousarray(self.np.asarray(chunk, dtype=self.np.int32)).data)
         self.rig.pos_view[0] = int(pos0)
         self.gr_pf.step()
+
+    def pf64_feed_chunk(self, chunk, pos0):
+        """One 64-seat PF tail chunk (same cpu-fold control; seats 0..63 of
+        the 256-seat PFB buffers). Zeros beyond seat 63 are never read."""
+        assert len(chunk) == 64, f"pf64 chunk must be 64 (got {len(chunk)})"
+        a = self.np.zeros(256, dtype=self.np.int32)
+        a[:64] = self.np.asarray(chunk, dtype=self.np.int32)
+        self.rig.pf_ids_view[:] = memoryview(self.np.ascontiguousarray(a).data)
+        self.rig.pos_view[0] = int(pos0)
+        self.gr_pf64.step()
 
     def eager_head_cur(self, seat=None, pf=False):
         """Top-1 after the boundary hidden: the eager rmsz+h6k pair. seat+pf:
@@ -148,6 +168,8 @@ class MoeServeEngine:
         quiescent point (the E.build_graphs() equivalent). P10: the P5 probe
         + the three MTP chain runners fence WITH the trunk set."""
         runners = [self.gr1, self.gr2, self.gr8, self.gr_pf]
+        if getattr(self, "pf64_on", False) and self.gr_pf64 is not None:
+            runners.append(self.gr_pf64)
         if self.mtp_on:
             runners += [self.gr5, self.M.r_seed, self.M.r_a, self.M.r_b]
         for gr in runners:

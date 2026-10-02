@@ -372,6 +372,7 @@ def run_daemon_moe(eng, CTXK):
   def _feed(delta, pos0, full_toks, conn=None, rid=None):
     prog = _mk_prog(conn, rid) if conn is not None else None
     n = len(delta); i = 0; chunks = 0
+    last_seat = PF_CHUNK - 1
     t0 = time.perf_counter()
     while i + PF_CHUNK <= n:
       cancel_checkpoint("prefill_pf_chunk")
@@ -381,6 +382,20 @@ def run_daemon_moe(eng, CTXK):
       if prog is not None and chunks % 2 == 0:
         prog(i, n, "prefill_pf")
       _pc_maybe_ingest(pos0 + i, full_toks)
+      last_seat = PF_CHUNK - 1
+    # SESSION B (L5): the 1..255 tail runs 64-seat PF chunks at chunk rate
+    # (bit-exact vs the per-token T1 tail by the chunk-256 construction)
+    # before the final <64 per-token tail.
+    if getattr(eng, "pf64_on", False) and getattr(eng, "gr_pf64", None) is not None:
+      while n - i >= 64:
+        cancel_checkpoint("prefill_pf64_chunk")
+        eng.pf64_feed_chunk([int(x) for x in delta[i:i + 64]], pos0 + i)
+        i += 64; last_seat = 63
+        _beat()
+        if prog is not None:
+          prog(i, n, "prefill_pf")
+        if (pos0 + i) % PF_CHUNK == 0:
+          _pc_maybe_ingest(pos0 + i, full_toks)
     pf_ms = (time.perf_counter() - t0) * 1e3
     for q in range(i, n):
       if (q - i) % 16 == 0:
@@ -392,7 +407,9 @@ def run_daemon_moe(eng, CTXK):
     if n > 0:
       # P10: where the LAST fed token's hidden lives (the bit-exact
       # chunk-256 class: PF seat 255 == the T1 hidden by construction).
-      feed_hidden[0] = ("hA", 0) if i < n else ("pf", PF_CHUNK - 1)
+      # SESSION B: the final chunk may be a 64 (seat 63) -- last_seat tracks
+      # the final chunk's last seat; the T1 tail (i < n) anchors at hA[0].
+      feed_hidden[0] = ("hA", 0) if i < n else ("pf", last_seat)
     return chunks, pf_ms
 
   def _mk_prog(conn, rid):

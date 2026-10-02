@@ -1,0 +1,59 @@
+{
+ "f1b_stock_new": {
+  "hA_bit_exact": true,
+  "mismatched_words": 0,
+  "eids_bit_exact": true
+ },
+ "f1b_chunk_t1": {
+  "seats_bit_exact": false,
+  "mismatched_words": 393213
+ },
+ "pf64": {
+  "f64_vs_t1": {
+   "bit_exact": true,
+   "mismatched_words": 0
+  },
+  "mixed_256_64_vs_t1": {
+   "bit_exact": false,
+   "mismatched_words": 131072
+  }
+ },
+ "ladder": {
+  "stock": {
+   "2048": {
+    "min_ms": 1271.18,
+    "tok_s": 201.4
+   },
+   "8192": {
+    "min_ms": 1366.42,
+    "tok_s": 187.4
+   },
+   "16384": {
+    "min_ms": 1488.77,
+    "tok_s": 172.0
+   },
+   "98304": {
+    "min_ms": 2772.33,
+    "tok_s": 92.3
+   }
+  },
+  "new": {
+   "2048": {
+    "min_ms": 666.21,
+    "tok_s": 384.3
+   },
+   "8192": {
+    "min_ms": 772.18,
+    "tok_s": 331.5
+   },
+   "16384": {
+    "min_ms": 900.9,
+    "tok_s": 284.2
+   },
+   "98304": {
+    "min_ms": 2188.14,
+    "tok_s": 117.0
+   }
+  }
+ }
+}

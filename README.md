@@ -17,7 +17,8 @@ service** — Qwen3.8-27B dense at **75.81 tokens per second** decode
 (bit-exact against greedy decoding, 100k-token context, 569/510/342 tok/s
 prefill; **43.7 tok/s** on novel prose via its own EAGLE draft layer),
 Qwen3.6-35B-A3B MoE at **97.6-104 tok/s** quote-class /
-**40.1 tok/s** prose-class, and an abliterated (uncensored) weight-variant
+**40.1 tok/s** prose-class with a **384 tok/s @2k** prefill (+91%, bit-exact),
+and an abliterated (uncensored) weight-variant
 of the dense checkpoint served as a first-class registry model — the same
 pipeline turns any Qwen3.8-architecture checkpoint into a swappable model —
 with a durable prompt cache that restores a
@@ -45,7 +46,7 @@ dext, `pcache`.
 | Decode speed, quote-class @100k | **75.81 tok/s** dense (K=10 LOOKUP) · **97.6-104.0 tok/s** MoE (K=8 LOOKUP) — bit-exact in both |
 | Decode speed, prose-class | **43.7 tok/s** dense (the checkpoint's own EAGLE draft layer behind a full-vocab draft head, GSM8K median through the API) · **40.1 tok/s** MoE (first-party MTP K=4) |
 | Speculative decoding | n-gram LOOKUP from the document being read (K up to 10) **plus the models' own MTP layers as first-party drafters** (dense: EAGLE chain + full-vocab draft head; MoE: K=4 chain, 0.875 depth-1 acceptance) |
-| Prefill speed (dense) | **569.2 tok/s @2k · 510.1 @8k · 342.0 @100k** (Tier-2 default; bit-identical Tier-1 path one env away); MoE chunk-256 prefill 181-204 tok/s @2k-16k |
+| Prefill speed (dense) | **569.2 tok/s @2k · 510.1 @8k · 342.0 @100k** (Tier-2 default; bit-identical Tier-1 path one env away); MoE grouped-expert prefill **384 @2k · 284 @16k** (+91% @2k, bit-exact; was 181-204) |
 | Multi-model serving | A model registry (`model_registry.json`), per-model env files + caches, `enginectl switch` — one resident at a time, 409 `model_not_resident` with a switch hint |
 | Batch mode (opt-in) | B=2 concurrent streams, per-stream bit-exact; 81.33 tok/s engine-class harness aggregate / honest 1.20x service-measured — see honesty section |
 | Prompt cache | A 100k context restores in **~6.5 s** vs ~13 min fresh; survives restarts; per-model roots + quotas |
@@ -89,10 +90,11 @@ bit-exact (see FAQ). Full context and the complete ladders:
 | Decode, novel prose (first-party MTP K=4 chain) | **40.1 tok/s** prose-0 / 39.1 prose-1 / 29.9 prose-9 (was 19.1 T1-only) |
 | MTP acceptance (depth-1 / E[acc]@K=4) | **0.875** / 2.58-3.08 accepted drafts per cycle |
 | T=1 decode @64k-96k | 17.2-17.3 tok/s (57.8 ms/cycle) |
-| Prefill, chunk-256 (bit-exact class) | 181-204 tok/s @2k-16k; full 96k feed ~800 s end-to-end |
+| Prefill, chunked (grouped-expert + seat-loop + PF64 tail — bit-exact class) | **384.3 tok/s @2k · 331.5 @8k · 284.2 @16k** (ladder 201.4 / 187.4 / 172.0 — **+91% @2k**); full 96k feed 92.3 -> **117.0 tok/s** |
+| GSM8K-class TTFT (n=1000 battery) | **~5.5 s** (was ~15.5 s — the 1..255-token tail ran per-token; it is now 64-seat chunk graphs, and the tail was ~70% of TTFT) |
 | Tier-1 gate through the daemon | 60/60 mtp == t1 bit-exact, x2 deterministic (60-prompt bank) |
 | Prompt-cache hit | continuation EXACT vs the FRESH arm (G4); ~76 MB per 1k-token node |
-| Quality: GSM8K (4-shot, greedy, through the API) | **93.0%** (first 100 test problems; 36.7 tok/s median decode, 9.5 s TTFT — TTFT is the MoE's weak spot, ~66 tok/s effective FRESH prefill) |
+| Quality: GSM8K (4-shot, greedy, through the API) | **93.0%** (first 100 test problems; 36.7 tok/s median decode; TTFT ~5.5 s on the GSM8K-class battery after the prefill campaign — was the MoE's weak spot at ~66 tok/s effective FRESH prefill) |
 
 **Audited, not just benchmarked.** Before this snapshot was published, the
 whole stack went through repeated external-model review: a 10-review audit

@@ -47,6 +47,12 @@ _ENV_KEYS = (
     # behavior, not prefill numerics). CAche-invalidation event: one cold
     # pcache rebuild per model on the first boot after this (slogged).
     "TLX_EAGLE_K",
+    # MM SESSION B (MoE prefill): the grouped-expert / seat-loop / PF64-tail
+    # graph knobs -- they change the PF graph KERNEL SET (outputs bit-exact
+    # by the G2/F1b gates, but pcache nodes must never cross kernel-set
+    # boundaries). Cache-invalidation event: ONE cold MoE pcache rebuild on
+    # the first boot after this ships (slogged).
+    "MM_PFG", "MM_PFM", "MM_PF64",
 )
 
 # R3-19: the cubin set the batch scheduler loads BY PATH (r6_serve.r6_boot).
@@ -91,6 +97,34 @@ def set_mm_pack_extra(env):
     except Exception:
         _EXTRA_FP["mm_pack"] = "missing"
         return "missing"
+
+def set_draft_pack_extra(pack_dir=None):
+    """TLX P0-S2 (qwen finding): the draft pack is NOT hashed in config_fp yet
+    pcache persists drafter-conditioned state (kvd/dhd in pcache._ART). A pack
+    swap with no env change must invalidate the cache. Hash = sha256 over the
+    sorted (name, size, content) of the pack dir the ENGINE loads (mtp.DPACK:
+    TLX_DRAFT_PACK env or engine0/draft_pack). Stdlib-only (the API process
+    derives the SAME extra)."""
+    import os as _os
+    if pack_dir is None:
+        base = _os.path.dirname(_os.path.abspath(__file__))
+        pack_dir = _os.environ.get("TLX_DRAFT_PACK") or _os.path.join(base, "draft_pack")
+    h = hashlib.sha256()
+    try:
+        for fn in sorted(_os.listdir(pack_dir)):
+            if not fn.endswith(".npy"):
+                continue
+            p = _os.path.join(pack_dir, fn)
+            st = _os.stat(p)
+            fh = hashlib.sha256()
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 22), b""):
+                    fh.update(chunk)
+            h.update(f"{fn}:{st.st_size}:{fh.hexdigest()[:16]}\n".encode())
+        _EXTRA_FP["draft_pack"] = h.hexdigest()[:16]
+    except Exception:
+        _EXTRA_FP["draft_pack"] = "missing"
+    return _EXTRA_FP["draft_pack"]
 
 def extra_fp():
     return dict(_EXTRA_FP)

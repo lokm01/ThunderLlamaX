@@ -1079,3 +1079,84 @@ the anchor phase (~1.5-2Mbps regardless of stream count — relay or
 compress anything >1GB) was HEALED by the v3 run: the same 1.74GB zstd
 payload uploaded in ~3.5 min. Compression stays worth it — zstd -6 on
 int8 kvd = 3.26x.)*
+
+## PB. MoE-prefill campaign laws (Session A+B — the 203 -> 384 @2k campaign)
+
+Journals: the pinned rig commits 6c47abc (Session A instruments) and
+eb47535 (Session B ship); the instruments and gate records live in
+`engine/mm/` (`mm_pf_bisect.py`, `mm_l1_poc.py`, `mm_probes.py`,
+`mm_session_a.py`, `mm_g2_l2.py`/`mm_g2_l2.json`, `mm_f1b_b.py`/
+`mm_f1b_b.json`, `mm_dbg_b.*`, `mm_wire_b.py`). The campaign's headline
+method law is PB1 — it killed the plan's central premise before anything
+shipped.
+
+**PB1. THE LATENCY-BOUND-VS-DRAM-BOUND LAW.** Traffic reduction buys
+NOTHING on a latency-bound class — and a bandwidth wall cannot be diagnosed
+from in-graph numbers. The routed expert pair-walk measured 212.5 GB/s
+effective in-graph (119.45 GB/chunk) and the five-analyst plan built a
+25-30x DRAM amplification model on top of it; isolated (lone-graph) benches
+showed the SAME stock kernels streaming ~750 GB/s — L2 absorbs the expert
+re-reads, the in-graph number was contention, and the class is bound by the
+dequant+dot DEPENDENCE CHAIN, not bytes. Corollaries: (a) MEASURE EFFECTIVE
+GB/s IN ISOLATION before designing around a bandwidth wall; (b) the winning
+kernel shape reduces DEQUANT EXECUTIONS, not traffic — the register-decode
+grouped GEMMs (decode each row's weights once, FMA across the bin) measured
+2.0-3.6x where the traffic-reduction-only v1 measured 0.86x; (c) when a
+rewired path diverges, a PER-CLASS BISECT (truncated-graph family ablation)
+isolates the culprit class in one run — it caught Session B's
+dropped-`gvf32ab` wiring (abb garbage -> all-seat divergence) immediately.
+
+**PB2. THE EXPERT-LOAD HISTOGRAM LAW.** Real router load is FAT-TAILED,
+not Poisson: a 256-token chunk puts up to 253/212/217 tokens (prose/code/
+gsm8k) on a SINGLE expert — 8x the plan's Poisson-30 — while the top-16
+experts carry only 11.6-14.4% of the mass (weak Zipf, fat tail). Bin
+tables, smem token staging, and grid sizing must come from the MEASURED
+in-graph routing histogram (`mm_probes.py`'s eids-capture probe), never
+from an analytic occupancy model.
+
+**PB3. THE 16.4KB-SMEM DEFAULT-CARVEOUT TRAP (PF4 sharpened).** A 16.4 KB
+static-smem kernel boots, runs CORRECTLY and BIT-EXACTLY under the dext's
+DEFAULT 32 KB carveout config — at 1 CTA/SM, i.e. a third of its speed,
+with no warning anywhere. Adding the kernel family to
+`NV_SMEM_CFG_AUTO_NAMES` (AUTO picks the 64 KB config = 3 CTAs/SM) was the
+measured 2.0-3.6x lever on the grouped up-GEMMs. Never accept a
+grouped/smem-kernel speedup verdict without recording WHICH carveout
+config booted.
+
+**PB4. THE S=32-T1-VS-S=8-PF HARNESS LAW (MM13 extended).** The valid
+exactness compare for chunked-PF tails is T=1-at-S=8 vs the chunk path
+(bit-exact, gate-green); an S=32-vs-S=8 comparison across the split
+boundary is INVALID by the split-S numerics class and will "fail" a green
+kernel. Related gate hygiene: run batch-order-sensitive gates ISOLATED —
+a G3-run-immediately-after-G2 showed a batch-order artifact that
+reproduced neither isolated nor standalone (pre-existing class, not
+adjudicated as a real divergence).
+
+**PB5. THE MGUnc-FOR-LATE-GRAPHS LAW (MM9 sharpened).** EVERY graph built
+after the GPU has already run traffic — instruments, bisect phases, PF64
+tails — needs the dedicated uncached-ka GraphRunnerUnc; pooled-ka late
+graphs fault (the KAPool slab coherence class). Live-proven across the
+entire Session A instrument set, which builds graphs per phase on a warm
+GPU by design.
+
+**PB6. THE GRIDDIM-STRIDE WEDGE + 1-TUPLE NO-LAUNCH, LIVE AGAIN
+(L1/MM7/MM11 corroborated).** The same instrument batch hit BOTH classics:
+`MM_A_bwread` v1 walked `i += gridDim.x * BS` (reads 0 in SASS -> stride-0
+infinite loop -> the dext WEDGED, a reboot window), and the `cp4k` eids
+probe in its 1-tuple grid form silently never launched. Every new probe
+kernel needs the two-line guard — hardcoded strides AND normalized
+(scalar) grids — plus a bit-check before any timing is interpreted.
+
+**PB7. THE NVCC-SHIM PATH LAW.** The containerized nvcc build shim needs
+ABSOLUTE source/output paths (it cannot see the caller's cwd through the
+container mount) and `DOCKER_HOST` in URL form `unix:///...` (three
+slashes — scheme + absolute path); relative-path builds compile the wrong
+thing or nothing. Encode the build root once at the top of every build
+script (`mm_build_a.zsh`/`mm_build_b.zsh` are the reference shape).
+
+**PB8. THE DYNAMIC-SMEM UNLOCK, MEASURED (positive).** Static smem >48 KB
+is refused by ptxas, but the QMD-patch DYNAMIC-smem route PASSES at BOTH
+64 KB and 96 KB per CTA — the structural branch (staged weight slabs,
+deeper bins, the future mma/L1b class) is real and measured, not
+hypothetical. The DRAM read path re-confirmed at 820.6 GB/s through the
+dext.

@@ -1,0 +1,136 @@
+{
+ "sort": {
+  "det_x2": true,
+  "exact_vs_numpy": true,
+  "worst_layer": null,
+  "layers": 12,
+  "ms": 0.1607
+ },
+ "grouped": {
+  "L0": {
+   "up": {
+    "bit_exact": true,
+    "stock_ms": 8.2138,
+    "grouped_ms": 4.8455,
+    "speedup": 1.7,
+    "co64_ms": 2.9932,
+    "co64_speedup": 1.18,
+    "co64_bit_exact": true
+   },
+   "dn": {
+    "bit_exact": true,
+    "stock_ms": 3.5441,
+    "grouped_ms": 3.9242,
+    "speedup": 0.9,
+    "co64_ms": 2.5154,
+    "co64_speedup": 1.41
+   }
+  },
+  "L34": {
+   "up": {
+    "bit_exact": true,
+    "stock_ms": 10.125,
+    "grouped_ms": 4.6591,
+    "speedup": 2.17,
+    "co64_ms": 2.8338,
+    "co64_speedup": 1.11,
+    "co64_bit_exact": true
+   },
+   "dn": {
+    "bit_exact": true,
+    "stock_ms": 3.1556,
+    "grouped_ms": 3.4709,
+    "speedup": 0.91,
+    "co64_ms": 2.4018,
+    "co64_speedup": 1.31
+   }
+  },
+  "L39": {
+   "up": {
+    "bit_exact": true,
+    "stock_ms": 5.5683,
+    "grouped_ms": 5.3108,
+    "speedup": 1.05,
+    "co64_ms": 2.7483,
+    "co64_speedup": 1.12,
+    "co64_bit_exact": true
+   },
+   "dn": {
+    "bit_exact": true,
+    "stock_ms": 3.0887,
+    "grouped_ms": 3.516,
+    "speedup": 0.88,
+    "co64_ms": 2.4316,
+    "co64_speedup": 1.27
+   }
+  }
+ },
+ "shexp": {
+  "bit_exact": true,
+  "stock_ms": 1.2512,
+  "new_ms": 0.8065,
+  "speedup": 1.55
+ },
+ "gvs": {
+  "qkv": {
+   "bit_exact": true,
+   "stock_ms": 6.3972,
+   "new_ms": 4.0281,
+   "speedup": 1.59
+  },
+  "z": {
+   "bit_exact": true,
+   "stock_ms": 3.2325,
+   "new_ms": 2.3357,
+   "speedup": 1.38
+  },
+  "k": {
+   "bit_exact": true,
+   "stock_ms": 0.4442,
+   "new_ms": 0.3611,
+   "speedup": 1.23
+  },
+  "v": {
+   "bit_exact": true,
+   "stock_ms": 0.426,
+   "new_ms": 0.3455,
+   "speedup": 1.23
+  },
+  "q": {
+   "bit_exact": true,
+   "stock_ms": 6.479,
+   "new_ms": 4.1338,
+   "speedup": 1.57
+  },
+  "out": {
+   "bit_exact": true,
+   "stock_ms": 3.0628,
+   "new_ms": 3.1441,
+   "speedup": 0.97
+  },
+  "o": {
+   "bit_exact": true,
+   "stock_ms": 3.0671,
+   "new_ms": 3.0348,
+   "speedup": 1.01
+  },
+  "ab": {
+   "bit_exact": true,
+   "stock_ms": 0.1022,
+   "new_ms": 0.1112,
+   "speedup": 0.92
+  }
+ },
+ "g2_verdict": {
+  "all_bit_exact": true,
+  "grouped_speedups": [
+   1.7,
+   0.9,
+   2.17,
+   0.91,
+   1.05,
+   0.88
+  ],
+  "kill_lt_2x": true
+ }
+}

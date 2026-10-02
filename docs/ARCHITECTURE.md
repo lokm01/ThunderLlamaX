@@ -290,7 +290,71 @@ kernel fusion (P10-B — bit-exactness diverged at token 27; `MM_FUSE2` stays
 off, and its launch-count arm corrected the launch-serialization law — see
 [DEXT_LAWS.md](DEXT_LAWS.md)); the K=8-variant graph budget at 96k (the
 <=8-variants-per-model law from the plan held); the 96k CPU anchor (the
-16 GB host RAM wall — anchors stream now).
+16 GB host RAM wall — anchors stream now); and, in the prefill campaign,
+the plan's central premise itself — the 25-30x DRAM amplification wall —
+falsified by measurement before anything shipped (the stock pair-walk
+streams ~750 GB/s in isolation; L2 absorbs the re-reads), taking the
+raster-swap lever with it (1.03x, killed) and the traffic-reduction-only
+grouped-experts v1 (0.86x, killed — the class is latency-bound on the
+dequant+dot chain, not DRAM-bound). The campaign story is in
+[PERFORMANCE.md](PERFORMANCE.md).
+
+**The MoE prefill graph (Session A+B)** — the chunked-prefill counterpart,
+behind three kill-switch env knobs (`MM_PFG` grouped experts, `MM_PFM`
+seat-loop trunk, `MM_PF64` the 64-seat tail; all default-on, all
+config_fp-keyed, any knob off restores the stock sequence
+byte-identically):
+
+- **`mmsort8.cu`** — the deterministic counting sort that turns the
+  router's per-token expert ids into bin tables for the grouped GEMMs:
+  `eoff[257]` expert offsets, `plist[2048]` sorted pair ids, item
+  descriptors `(e|rs|m0)`, via an ATOMIC-FREE rank-count scatter (each
+  (token, rank) counts its expert's earlier draws in a fixed O(8) loop).
+  Deterministic by construction — det x2 and exact vs the numpy
+  simulation on real routing. The gold router `rt8e256` itself is
+  untouched; the combine `cmbz2048` is untouched too (the grouped
+  kernels' plist scatter writes the same [pair] slots the pair-walk
+  wrote).
+- **`gxm_up`/`gxm_up4`/`gxm_dn`/`gxm_dn6`** — the grouped
+  REGISTER-DECODE expert GEMMs: instead of walking (token, expert) pairs
+  and re-dequantizing the weights for every token, each warp decodes its
+  row's weights ONCE per (row, block) into registers (TS-times less
+  dequant), the CTA stages the bin's <=TS tokens x block into smem, and
+  the m-loop is pure unrolled+masked FMA across the bin (TS=16/RS=4, a
+  GN=1024-item grid-stride — one of the few legal grid-stride users,
+  sized by name). The per-(pair, row) operation order is kept VERBATIM,
+  which is what makes every expert lane bit-exact vs the pair-walk across
+  all four quant lanes. Measured 2.0-3.6x (up) / 1.27-1.41x (dn) — the
+  up side's remaining cost is the down kernel's per-row-block act
+  restaging.
+- **`gvs32k2048`/`gvs32k4096r`/`gvsab`** — seat-loop trunk GEMVs for the
+  PREFILL trunk (the winning L1 classes only: qkv/z/q/k/v; `out`/`o`/`ab`
+  stay stock — the k=4096 pair already streams ~750 GB/s): one weight
+  read serves the whole chunk's seats from a smem-staged loop instead of
+  re-walking per seat.
+- **`shgu32`/`shdn32`** — the shared expert M-batched (its weights are
+  read once per chunk instead of once per seat), writing a [seats][512]
+  act slab the stock combine consumes unchanged.
+- **The PF64 tail graph** — `gconv36_64`/`k2s36_64` (the GDN scan built
+  at -DTMAX=64) let `serve_moe` run the len%256 tail as 64-seat chunks
+  at chunk rate instead of ~52 ms/token per-token cycles, bit-exact vs
+  the per-token tail by the chunk construction; the feed-hidden anchor
+  tracks the final chunk's seat (255 or 63). This is the TTFT lever
+  (GSM8K-class TTFT ~15.5 s -> ~5.5 s).
+- **The carveout-AUTO dependency** — the new kernels carry 16.4 KB smem,
+  and the dext's default 32 KB smem config yields 1 CTA/SM;
+  `NV_SMEM_CFG_AUTO_NAMES` includes `gxm`/`gvs32`/`shgu`/`shdn` so the
+  boot picks the 64 KB config (3 CTAs/SM) — without it the grouped GEMMs
+  run at a third of their measured speed. Session A's dynamic-smem probe
+  (QMD-patch route) additionally passed 64 KB and 96 KB dynamic — the
+  banked structural branch for deeper weight staging.
+
+The Session A instruments that measured all of this first (the G0
+truncated-graph bisect, the L1 POC ladder, the in-graph router-capture
+probes) live in `engine/mm/` (`mm_pf_bisect.py`, `mm_l1_poc.py`,
+`mm_probes.py`, `mm_session_a.py`); the Session B gates and wiring are
+`mm_g2_l2.py`/`mm_f1b_b.py`/`mm_dbg_b.py`/`mm_wire_b.py` +
+[MM_P7_lib.py](../engine/mm/MM_P7_lib.py) (`build_seq7`).
 
 ## Kernel inventory (engine/*.cu, the load-bearing families)
 
@@ -329,6 +393,11 @@ off, and its launch-count arm corrected the launch-serialization law — see
 | **MoE: `spkq256`/`spka256`/`spkc256` (+`m`/`s` variants)** | split-KV attention at head_dim 256, GQA 16:2, output sigmoid-gate fused | warp-per-position score loop (the O(L)-wall fix, 4x @16k) |
 | **MoE: `k2s36`/`gconv36`/`h6kam`/`embg248`/`rmsz2048`** | GDN scan + gated conv at 2048-hidden, fused head-argmax, 248k-vocab embedding gather, (1+w) norms | the dense families rescaled; `h6kam` folds head GEMV + argmax |
 | **MoE: `acc36`/`selc36`/`rowcp2048`** | on-device accept, in-graph commit, MTP-chain hidden carry | the host fold (~0.2 ms/cycle host residue) |
+| **MoE prefill: `mmsort8.cu`** | router ids -> `eoff`/`plist`/items bin tables for the grouped GEMMs | atomic-free rank-count scatter (fixed O(8) earlier-draw count) = deterministic by construction; det x2 + numpy-exact |
+| **MoE prefill: `gxm_up`/`up4`/`dn`/`dn6`** | grouped expert GEMMs over the sorted bins (up = gate+up w/ SiLU·gate; dn = down w/ fp16 partials) | REGISTER-DECODE: weights decoded once per (row, block) into registers, bin tokens staged in smem, pure-FMA m-loop; per-(pair,row) op order verbatim = bit-exact vs the pair-walk on all quant lanes; 2.0-3.6x |
+| **MoE prefill: `gvs32k2048`/`gvs32k4096r`/`gvsab`** | seat-loop trunk GEMVs (qkv/z/q/k/v only — the measured winners) | one weight read serves the chunk's seats; out/o/ab stay stock (k=4096 already ~750 GB/s) |
+| **MoE prefill: `shgu32`/`shdn32`** | shared-expert gate+up / down, M-batched over the chunk | weights once per chunk instead of per seat; [seats][512] act slab feeds the unchanged combine |
+| **MoE prefill: `gconv36_64`/`k2s36_64` + the PF64 tail graph** | the 64-seat chunk graph for the len%256 tail (was per-token T=1 cycles) | -DTMAX=64 builds; feed-hidden tracks the final chunk's seat (255/63); the TTFT lever (~15.5 -> ~5.5 s) |
 
 ## Graph & submit model
 
@@ -632,6 +701,11 @@ numbers in [PERFORMANCE.md](PERFORMANCE.md). The shape of it:
   the chunks as a recorded-trunk-hiddens replay — the draft's own
   attention/o-proj/FFN are dead code during fill (alpha after prefill
   2.67 -> 2.68).
+- **The MoE counterpart (Session A+B)**: the MoE model's chunked prefill
+  (203 -> 384 tok/s @2k, +91%, bit-exact) uses its own kernel set — the
+  `mmsort8` counting sort, the `gxm_*` grouped register-decode expert
+  GEMMs, `gvs32*` seat-loop trunk GEMVs, `shgu32`/`shdn32` shared-expert
+  M-batch, and the PF64 tail graph — documented in the MoE section above.
 
 ## The drafter-quality program instruments (chain_sim + ttt/; concluded)
 

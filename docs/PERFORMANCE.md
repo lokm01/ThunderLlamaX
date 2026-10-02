@@ -277,13 +277,103 @@ still >= 0.74 on quote/prose-0). The chain goes stale on lookup cycles
 cycle on the first miss after a hit streak. Long-ctx (96k) MTP alpha is
 measured only at the harness level so far — an honest open item.
 
-**Prefill (MoE)**: chunk-256 bit-exact prefill runs 181-204 tok/s @2k-16k
-(class honest: the grouped M-GEMM is the 850+ path if it ever lands); a
-full 96k context feeds in ~800 s (~122 tok/s end-to-end incl. anchors) and
-64k in ~461 s (~140 tok/s). Context-ladder exactness: the engine state
-after 4,000/16,288 doc tokens continues greedy-identically to the fp16
-anchor (rebase16 16/16 EXACT at every rung — the LONG-HORIZON law; GDN
-norms bounded).
+**Prefill (MoE)**: after the Session A+B campaign (below), chunked prefill
+runs **384.3 tok/s @2k · 331.5 @8k · 284.2 @16k** (ladder 201.4 / 187.4 /
+172.0 — **+91% @2k**), and a full 96k context feeds at 117.0 tok/s (was
+92.3). Context-ladder exactness: the engine state after 4,000/16,288 doc
+tokens continues greedy-identically to the fp16 anchor (rebase16 16/16 EXACT
+at every rung — the LONG-HORIZON law; GDN norms bounded).
+
+### MoE prefill: the Session A+B campaign (203 -> 384 tok/s @2k, bit-exact)
+
+The campaign opened with a five-analyst plan whose central premise was a
+**25-30x DRAM amplification wall**: the routed pair-walk re-reads each
+touched expert's weights per token, so a 256-token chunk touching ~all 256
+experts should be DRAM-bound many times over — and the plan's #1 lever was
+traffic reduction (grouped experts), #2 a raster swap. Session A built the
+measurement instruments first (G0 truncated-graph bisect, L1 POC kernels,
+in-graph probes — `engine/mm/mm_pf_bisect.py`, `mm_l1_poc.py`,
+`mm_probes.py`) and **falsified the premise before anything shipped**:
+
+| phase (per 256-chunk @2k) | modeled by the plan | measured (G0 bisect) |
+|---|---|---|
+| trunk GEMVs | 58-62% | 43.6% |
+| routed experts | 20-24% (the wall) | **44.6% — co-equal, not dominant** |
+| shared expert + router | — | 7.1% |
+| attention | — | 1.8% |
+| GDN scan | — | 2.3% |
+
+Three measured kills followed: (1) **the amplification wall does not exist**
+— the stock pair-walk kernels stream ~750 GB/s effective in isolation (L2
+absorbs the re-reads); the 212.5 GB/s seen in-graph was contention, not the
+kernel's ceiling (DRAM read path re-confirmed at 820.6 GB/s); (2) the
+**raster-swap lever was killed at 1.03x** (all seven trunk classes measured
+0.97-1.04x, bit-exact); (3) the **real expert-load histogram** (in-graph
+router-capture probe) is nothing like the plan's Poisson-30: prose/code/
+gsm8k chunks put a **maximum of 253/212/217 tokens on a single expert**
+(8x the model), top-16 experts carry only 11.6-14.4% — a fat tail that
+shaped the grouped-kernel bins. The plan's #1/#2 levers were swapped
+accordingly (the seat-loop trunk first, grouped experts second), and the
+L1 gate (trunk < 50%) fired as designed.
+
+Session B then shipped the winners — every changed path **bit-exact**:
+
+| rung | 2k | 8k | 16k | 96k feed |
+|---|---|---|---|---|
+| stock chunk-256 + per-token tail | 201.4 | 187.4 | 172.0 | 92.3 |
+| **+ MM_PFG / MM_PFM / MM_PF64 (Session B)** | **384.3** | **331.5** | **284.2** | **117.0** |
+
+- **`mmsort8`** — a deterministic counting sort (atomic-free rank-count
+  scatter) turning the router's expert ids into `eoff`/`plist` bin tables;
+  det x2 and exact vs the numpy simulation on real routing, all 12 MoE
+  layers. The gold router itself stays `rt8e256` VERBATIM (the bit-exact
+  top-8 contract).
+- **`gxm_*` grouped expert GEMMs** — the campaign's honest detour: the
+  v1 design (traffic-reduction-only: smem-staged weight bytes, dequant per
+  token) measured **0.86x and was killed** — the pair-walk is
+  LATENCY-bound on the dequant+dot chain, not DRAM-bound, so removing
+  traffic buys nothing. The v2 winner is the **register-decode** design:
+  each warp decodes its row's weights ONCE per (row, block) into registers
+  (TS-times less dequant work) and the m-loop is pure FMA over the bin's
+  tokens staged in smem — per-(pair,row) operation order kept verbatim, so
+  every expert lane is bit-exact vs the pair-walk (measured 2.0-3.6x on
+  the up GEMMs, 1.27-1.41x on down).
+- **`gvs32*` seat-loop trunk GEMVs** — ports of the winning L1 classes
+  only (qkv 1.54x, q 1.57x, z 1.38x, k/v 1.23x); `out`/`o`/`ab` stay
+  stock because the k=4096 pair already runs at ~750 GB/s (measured
+  0.96-0.97x — nothing to win).
+- **`shgu32`/`shdn32`** — the shared expert M-batched (weights read once
+  per chunk instead of per seat), 1.55x, bit-exact.
+- **The PF64 tail graph** — the TTFT lever: the 1..255-token tail that
+  used to run per-token (~52 ms/token) now runs 64-seat chunks, bit-exact
+  vs the per-token tail. **GSM8K-class TTFT (n=1000 battery): ~15.5 s ->
+  ~5.5 s** (the tail was ~70% of TTFT).
+- **The carveout dependency**: the new kernels carry 16.4 KB smem, and the
+  default 32 KB config means 1 CTA/SM; `NV_SMEM_CFG_AUTO` at 64 KB gives
+  3 CTAs/SM — the measured 2.0-3.6x lever on the grouped up GEMMs.
+
+**The battery** (all through the shipped env, kill-switches restore the
+stock sequence byte-identically; the three `MM_*` knobs are config_fp keys,
+so the ship cost exactly ONE cold MoE pcache rebuild): G2 sort det-x2 +
+numpy-exact; grouped per-pair bit-exact across all four quant lanes on
+real routing; **F1b full-chunk compare stock-vs-new: 0 of 524,288 words
+mismatched** with router expert-ids bit-exact through the new path; bank60
+60/60 `spec == T=1` bit-exact x2 deterministic THROUGH THE DAEMON; pcache
+CACHE_HIT at 4,096 tokens with exact restore continuation; an 80-round
+soak with zero failures; decode classes unchanged (quote ~97-99, prose
+~30-40 tok/s — the campaign touched prefill graphs only).
+
+**Residual attack list (post-B, priced not built):** the trunk k=4096
+latency floor (`out`/`o` already at ~750 GB/s — a structural change, not a
+port), the routed-up fp32 compute floor (dequant-to-fp32 math per FMA
+chain), the `gxm_dn` act-restaging cost that dominates the down GEMMs
+(the mma/L1b branch), and the attention share at 96k (55.1% of the chunk
+at 96k, growing 15.8 ms per 1k context — the L4 branch). Banked for that
+future: Session A's dynamic-shared-memory probe **PASSED at 64 KB and
+96 KB** via the QMD-patch route (static >48 KB is refused by ptxas) — the
+structural branch (staged weights + deeper bins) is alive and measured.
+
+
 
 **The fusion that didn't ship (P10-B, honestly falsified):** the pairwise
 MoE kernel fusion (router+shared-expert, gate+down merged per pair — zero
