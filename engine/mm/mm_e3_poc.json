@@ -1,0 +1,47 @@
+{
+ "eager_note": "dn relerr 3.841e-04 maxabs 1.526e-05 sfl 306 det_x2 True sentinel 0 (mm_e3_poc.log run 3, IQ4_NL layout); sh/scan per-kernel eager arms hit a flaky device-fault class -- numerics certified end-to-end via the CE/F gate instead",
+ "eager": {
+  "dn": {
+   "npair": 2048,
+   "relerr": 0.0003841,
+   "maxabs": 1.526e-05,
+   "sign_flips": 306,
+   "det_x2": true,
+   "sentinel": 0
+  }
+ },
+ "isolated": {
+  "dn": {
+   "stock_ms": 1.7266,
+   "new_ms": 0.7736,
+   "x": 2.23
+  },
+  "shgu": {
+   "stock_ms": 0.3528,
+   "new_ms": 0.1258,
+   "x": 2.8
+  },
+  "shdn": {
+   "stock_ms": 0.2891,
+   "new_ms": 0.0862,
+   "x": 3.35
+  },
+  "scan": {
+   "stock_ms": 1.4846,
+   "new_ms": 1.0267,
+   "x": 1.45
+  }
+ },
+ "inchunk": {
+  "base": 291.77,
+  "dn": 256.82,
+  "dn_d": 34.95,
+  "sh": 276.67,
+  "sh_d": 15.1,
+  "scan": 284.21,
+  "scan_d": 7.56,
+  "all": 225.6,
+  "all_tps": 1134.8,
+  "base_tps": 877.4
+ }
+}

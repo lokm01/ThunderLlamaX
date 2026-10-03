@@ -277,16 +277,23 @@ still >= 0.74 on quote/prose-0). The chain goes stale on lookup cycles
 cycle on the first miss after a hit streak. Long-ctx (96k) MTP alpha is
 measured only at the harness level so far — an honest open item.
 
-**Prefill (MoE)**: after the Session A+B+C campaign (below), chunked prefill
-runs **494.8 tok/s @2k · 409.7 @8k · 339.8 @16k** (pre-campaign stock
-203.9 / 187.9 / 171.7 — **2.43x cumulative @2k**), and a full 96k context
-feeds at 125.4 tok/s (was 92.4). GSM8K-class TTFT on a 1,216-token fresh
-generation: **3.18 s** (x2). Sessions A+B were bit-exact; Session C's
-trunk mma M-GEMM is a Tier-2 numerics move — the first to ship under the
-new per-seat cross-entropy quality gate (below). Context-ladder exactness:
+**Prefill (MoE)**: after the Session A+B+C+D+E campaign (below), chunked
+prefill runs **982.0 tok/s @2k · 852.9 @8k · 703.8 @16k** (pre-campaign
+stock 203.9 / 187.9 / 171.7 — **4.82x cumulative @2k**), a full 96k
+context feeds at 254.5 tok/s (was 92.4). GSM8K-class TTFT on a
+1,216-token fresh generation: **~2.3 s** class (2.27 s cold measured in
+Session D; Session E's env flip costs one cold pcache rebuild on first
+boot). Sessions A+B were bit-exact; Sessions C/D/E ship six Tier-2
+numerics moves, every one under the per-seat cross-entropy quality gate
+(below — Session E's combined gate measured dCE −0.695%, IMPROVED).
+Context-ladder exactness:
 the engine state after 4,000/16,288 doc
 tokens continues greedy-identically to the fp16 anchor (rebase16 16/16 EXACT
-at every rung — the LONG-HORIZON law; GDN norms bounded).
+at every rung — the LONG-HORIZON law; GDN norms bounded). One honesty
+note on provenance: the Session-E ladder numbers are HARNESS-level (each
+rung gated on independent boots); the daemon-level re-gate battery is
+staged and pending a physical cold-cycle of the rig (see the Session E
+section).
 
 ### MoE prefill: the Session A+B campaign (203 -> 384 tok/s @2k, bit-exact)
 
@@ -591,6 +598,154 @@ and the binding constraint at 2k is now the **routed-expert up-projection
 mma port** — the honest miss above. The measured ~900 @2k ceiling needs
 that port first; beyond it, the 2k residual is shared-router + scan +
 trunk-remains, each a smaller family than the routed share was.
+
+### MoE prefill: the Session E campaign — the finale (708.9 -> 982.0 tok/s @2k, the ~900 ceiling crossed)
+
+Session E executed the post-D queue to the end of the campaign. Both
+gathered-row-list expert mma ports shipped, the split-row scan shipped,
+the shared-expert mma pair was measured — numerically clean in isolation
+— and **held out honestly** when the end-to-end CE gate failed
+unexplained; the router M-batch was measured, missed its bit-exact
+contract, and was dropped for a 2.5 ms pool. Every number below is
+harness-level, min-of-9, on independent boots (see the battery note at
+the end for the daemon-level status):
+
+| rung | 2k | 8k | 16k | 49k | 96k feed |
+|---|---|---|---|---|---|
+| Session D (published) | 708.1 | 625.4 | 545.5 | 354.8 | 230.4 |
+| **+ MM_PFU gathered-row gate+up mma (item 1)** | 831.7 | 721.7 | 615.8 | 382.3 | 241.8 |
+| **+ MM_PFU + MM_PFD + MM_PFS (Session E, shipped)** | **982.0** | **852.9** | **703.8** | **415.9** | **254.5** |
+
+(**+38.7% @2k this session; 4.82x cumulative** over the 203.9
+pre-campaign stock. The ~900 @2k ceiling priced at the end of Session D
+was crossed. The shipped stack: MM_PFG/PFM/PF64/PFT/PFW/PFK/PFU/PFD/PFS
+on, MM_PFR off.)
+
+- **`gxu_gm` — the gathered-row-list routed gate+up mma (item 1,
+  `MM_PFU=1`).** The design Session D priced at ~half a day: the M
+  dimension is per-expert ragged, so the port makes M **the expert's 512
+  W-rows as dense 64-row mma tiles** and gathers the ragged N side — the
+  bin's activations walked via `plist` into 16-token tiles, pad rows
+  zero-filled (deterministic by construction). A = dequantized IQ3_S
+  gate/up weights in smem `[Wrow][k]`; B = the gathered activations in
+  smem `[token][k]` — the proven `pgmq8k2` fragment-load code with the
+  operand roles swapped. Epilogue scatters `silu(g)*u` to
+  `ys[pair*512+row]`, the combine's expected layout untouched. Decode
+  volume identical to the stock kernel (multi-tile bins re-decode W per
+  tile — the same waste class as stock). Two bugs were found and killed
+  with an indicator-x k-sweep (`mm_e1_dbg.py`): both lived in the odd
+  128-k half of every IQ3_S block (`kc&127` -> `kc&255` in the q-byte and
+  sign bases) — the sweep's `-1` control (all k bad) against per-k arms
+  localized them in one run. Gates: relerr **4.13e-4**, maxabs 1.26e-3,
+  det x2, sentinel 0; isolated 1.43x; **in-chunk −49.1 ms** (implied
+  per-kernel ×1.86 on the up family).
+- **`gxd_gm` — the routed-down twin (item 1b, a data-driven addition,
+  `MM_PFD=1`).** The post-PFU family table (`mm_e2_poc.json`) showed the
+  dn fold family (64.5 ms/chunk) was now the same magnitude as the up
+  win — so the same gathered-row-list design ran at K=512, M=2048 dn
+  W-rows (16 × 128-row tiles), epilogue writing raw fp16 accumulators
+  straight into the combine's `parts[pair*2048+row]` contract. Shipping
+  it required nailing the **IQ4_NL nibble-split-by-16 decode law**
+  (see [DEXT_LAWS.md](DEXT_LAWS.md) PG3): within each 32-k group, k 0..15
+  are the LOW nibbles of bytes 0..15 and k 16..31 the HIGH nibbles of the
+  SAME bytes — not sequential byte pairs. With the decode verbatim from
+  the stock kernel, relerr **3.84e-4**, det x2, sentinel 0; isolated
+  **2.20-2.23x**; **in-chunk −35.0 ms**. The 3 Q6_K layers keep the
+  stock path (a different weight layout, not worth a third lane).
+- **`k2s36h_{256,64}` + `k2nz36` — the split-row GDN scan (item 3,
+  `MM_PFS=1`).** The stock scan is one CTA per head — 32 CTAs on an
+  82-SM part, ~60% of the GPU idle, and the t-chain is serial so rows
+  are the only legal parallel dimension short of the full WY-C32
+  reformulation. The port splits the 128 v-rows across 2 CTAs/head (64
+  CTAs, 8 rows/warp) with the per-row math VERBATIM stock — **S is
+  bit-exact**; the only numerics change is the output-norm sum regroup
+  (`yss = half0 + half1` in fixed order instead of the serial 8-warp
+  sum), Tier-2 reassociation of the F-bank/rebase16 class. The
+  gated-RMSNorm apply moves to a cross-CTA epilogue (`k2nz36`, same
+  formula and op order). Isolated 1.45x, **in-chunk −7.6 ms**; the CE
+  bisect arm clean (0.8899, top-1 249/256).
+- **The shared-expert mma pair — measured, clean, HELD OUT (item 2,
+  `MM_PFR=0`).** `shgm512`/`sdm2048` port the `pgmq8k2` Q8_0 mma
+  template onto the two biggest shared-router members (shgu32 15.6 +
+  shdn32 13.4 ms/chunk in the family table). Per-layer eager gates on
+  **all 40 layers: max relerr 5.1e-4, both deterministic x2**
+  (`mm_sh_dbg.json` — zero bad layers); isolated **2.80x / 3.35x**;
+  in-chunk **−15.1 ms**. And the end-to-end CE gate fails
+  **catastrophically: mean CE 8.47, top-1 5/256** (`mm_ce_bisect.json`).
+  The control matrix could not close it: both arms deterministic, the
+  pair's own outputs read identical between arms while `hA`/`hnb`/`gates`
+  diverge downstream (0.16/0.21/0.11 relerr in the divergence matrix,
+  `mm_sh_layer.json`); with no mechanism identified, the pair was **held
+  out of the ship** — kernels + full evidence committed, the **top known
+  2k lever at −15.1 ms/chunk**, re-open question for the next session
+  (the dump-path question is the open lead). This is the discipline the
+  CE gate exists to enforce: a kernel that is clean at every measured
+  layer can still be wrong at the system level, and the gate wins the
+  argument.
+- **The router M-batch — measured, contract missed, dropped honestly.**
+  `rt8e_m{2,4}` batch 2-4 seats per CTA (the 2 MB router weights read
+  once per group instead of per seat). Expert **ids came out bit-exact**
+  — but gates/sg ULP-drift, so the GOLD-ROUTER bit-exact contract
+  (never mma, never reordered) was not met, and the pool is only
+  **2.5 ms/chunk**: dropped, kernels + evidence committed
+  (`mm_e2_poc.json`).
+- **THE ONE-SYMBOL-PER-CUBIN LOADER LAW** (the session's law-grade
+  discovery, ~6 boot cycles to isolate — see
+  [DEXT_LAWS.md](DEXT_LAWS.md) PG1): a 2-symbol cubin makes the loader
+  mispick program metadata (regs/smem of the FIRST symbol) -> wrong QMD
+  -> Out-Of-Range-Register warp faults masquerading as flaky sequencing
+  faults. All Session-E kernels are built as per-symbol cubins
+  (`mm_build_e.zsh`); the pre-split combined sources
+  (`MM_E_shm.cu`, `MM_E_k2sh.cu`) are kept for the record.
+
+**The Session E battery (all three shipped moves combined,
+`mm_bat_e2.json`):**
+
+- **CE gate: dCE −0.695% — IMPROVED** (stock 0.8985 vs new 0.8922, SEM
+  ~0.100 both arms), **top-1 agreement 249/256**. The per-move bisect
+  (`mm_ce_bisect.json`): PFD 0.8925 / top-1 250, PFS 0.8899 / 249 — both
+  clean alone and the shipped combination composes clean (the PE4
+  compounding discipline: fresh combined gate, never the union).
+- **F bank**: hA relerr 7.40e-2 after one chunk — the Session-D class
+  (7.27e-2); determinism x2; zero spill on every shipped kernel
+  (build-time audit); sentinel 0.
+- **Decode untouched by construction** — all Session-E kernels are
+  prefill-graph members only; the decode classes carry their
+  Session-D numbers.
+- **Kill-switches**: every knob off restores the stock sequence
+  byte-identically; the battery's stock arm reproduced the published
+  Session-D ladder (2k: 708.1 vs 708.9) within noise.
+- **pcache namespace**: MM_PFU/MM_PFD/MM_PFS are config_fp keys — the
+  first daemon boot after the flip takes ONE cold MoE pcache rebuild
+  (announced in the env file).
+
+**THE HONEST BLOCKER — the daemon-level battery is pending a physical
+cold-cycle.** At session close the machine entered the spontaneous-reset
+regime under GPU load (~10 resets over ~2.5 h, cadence tightening to
+~5 min; idle + /health fine between; launchd self-healed every time) —
+the R7-class silent reset, this time dock/GPU-class, and every
+battery-length launch reset the box before completing. What IS verified:
+the daemon **boots clean on the full E env** — daemon_attached,
+heartbeats, and /health green, observed across 4+ reset-heal cycles.
+What is STAGED, not run: bank60 ×2 through the daemon, pcache CACHE_HIT
+under the new config_fp, decode-class spot checks, and the 15-min soak —
+`engine/mm/mm_daemon_e.py` runs the full battery and is the first thing
+to execute after the cold-cycle. All ladder/CE/F gates above ran at the
+harness level on independent boots. (Also banked from the session: the
+first real request on the new config_fp takes the announced one-cold
+pcache rebuild.)
+
+**Post-E residual (the honest ceiling path):** the 2k chunk is now
+260.7 ms. The named levers, in order: the **held-out PFR pair
+(−15.1 ms)** once its CE divergence is explained; a **full WY-C32
+chunked-scan reformulation (~15-20 ms** — the split-row port took the
+cheap rows; the t-chain itself needs the dense engine's WY reformulation)
+plus the trunk remains; and at long context the wall is now
+**trunk + attention together** (attention 19% of the 96k chunk after
+Session D, trunk co-dominant) — further long-ctx gains are
+trunk-port and attention-depth work, not expert work. The routed-expert
+family, the campaign's starting 44.6%, is spent down to parity with the
+trunk: the campaign is closed at **4.82x**.
 
 
 

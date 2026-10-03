@@ -1,0 +1,53 @@
+{
+ "family": {
+  "rt8e256": {
+   "ms": 0.063,
+   "launches": 40,
+   "chunk_ms": 2.52
+  },
+  "mmsort8": {
+   "ms": 0.1746,
+   "launches": 40,
+   "chunk_ms": 6.98
+  },
+  "shgu32": {
+   "ms": 0.3895,
+   "launches": 40,
+   "chunk_ms": 15.58
+  },
+  "shdn32": {
+   "ms": 0.3342,
+   "launches": 40,
+   "chunk_ms": 13.37
+  },
+  "cmbz2048": {
+   "ms": 0.055,
+   "launches": 40,
+   "chunk_ms": 2.2
+  },
+  "gxm_dnf": {
+   "ms": 1.7436,
+   "launches": 37,
+   "chunk_ms": 64.51
+  },
+  "gxu_gm": {
+   "ms": 1.7567,
+   "launches": 39,
+   "chunk_ms": 68.51
+  }
+ },
+ "router_bitexact": {
+  "rt8e_m2": {
+   "eids": true,
+   "gates": false,
+   "sg": false,
+   "det_x2": true
+  },
+  "rt8e_m4": {
+   "eids": true,
+   "gates": false,
+   "sg": false,
+   "det_x2": true
+  }
+ }
+}

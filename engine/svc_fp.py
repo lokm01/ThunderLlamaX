@@ -56,10 +56,14 @@ _ENV_KEYS = (
     # MM SESSION C: the out/o mma M-GEMM (NUMERICS MOVE -- F~1.5e-4 bank,
     # the dense-M32 precedent class). config_fp key -> pcache namespace
     # flip: ONE cold MoE pcache rebuild on first boot (slogged).
-    # MM SESSION D: the wide dyn-smem PF attention (MM_PFW, relerr 2.0e-7)
-    # + the k=2048 trunk mma ports (MM_PFK, F~2.9e-4) -- same Tier-2 class,
-    # one more cold rebuild on first boot.
     "MM_PFT", "MM_PFW", "MM_PFK",
+    # MM SESSION E: the gathered-row-list routed gate+up mma (Tier-2
+    # numerics move, F~4e-4 class). config_fp key -> pcache namespace
+    # flip: ONE cold MoE pcache rebuild on first boot (slogged).
+    "MM_PFU",
+    # MM SESSION E port 2: the gathered dn mma, the shared-expert mma pair,
+    # the split-row scan (all Tier-2; pcache namespace flip on first boot)
+    "MM_PFD", "MM_PFR", "MM_PFS",
 )
 
 # R3-19: the cubin set the batch scheduler loads BY PATH (r6_serve.r6_boot).

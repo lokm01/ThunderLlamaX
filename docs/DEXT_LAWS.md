@@ -1300,3 +1300,74 @@ explicit fence (the `fence_every=48` graph wrapper + `gr.fence()` at arm
 end), so each phase starts a fresh timeline chain. Same family as the
 ~950-cycle dext budget (M1C) but counted in timeline ops, not cycles;
 the two limits stack, and both reset on a fence/quiescent point.
+
+## PG. MoE-prefill Session E laws (the 708.9 -> 982.0 @2k campaign — the finale)
+
+Journals: the pinned rig commits 55f0b37 (the gathered-row gate+up mma)
+-> 0ac9a43 (the dn twin + the split-row scan + the PFR evidence + the
+loader law) -> dde9487 (env flip + the staged daemon battery); the
+kernels, instruments and gate records live in `engine/mm/`
+(`MM_E_gxu_gm.cu`, `MM_E_gxd_gm.cu`, `MM_E_k2s36h.cu`, `MM_E_k2nz36.cu`,
+the held-out `MM_E_shgm512.cu`/`MM_E_sdm2048.cu`, `mm_e1_poc.py`/
+`mm_e1_dbg.py`, `mm_e2_poc.py`, `mm_e3_poc.py`, `mm_sh_dbg*.py`,
+`mm_ce_bisect.py`, `mm_bat_e.py`, `mm_daemon_e.py`, `mm_wire_e.py`,
+`mm_wire_e2.py`, `mm_build_e.zsh`). (Section letter PG — PF is the
+dense prefill campaign P1-P18, and PD/PE were taken by the P10-dense
+prose and Session-D campaigns.)
+
+**PG1. THE ONE-SYMBOL-PER-CUBIN LOADER LAW (law-grade; ~6 boot cycles to
+isolate).** A cubin carrying TWO kernel symbols makes the loader mispick
+program metadata — it reads the register/smem footprint of the FIRST
+symbol for every launch, so the second symbol launches under a WRONG QMD
+and faults as **Out-Of-Range-Register warp faults that masquerade as
+flaky sequencing faults** (same kernel, same inputs, faults on some
+launches only — the signature that wasted the boot cycles). The tell:
+the fault follows the CUBIN, not the call site, and disappears when the
+second symbol is built into its own cubin. The law: **one kernel symbol
+per cubin** on this dext, always — Session E rebuilt every kernel as
+per-symbol cubins (`mm_build_e.zsh`; the pre-split combined sources
+`MM_E_shm.cu`/`MM_E_k2sh.cu` are kept for the record). When a new
+kernel's fault pattern looks nondeterministic, check the symbol count of
+its cubin BEFORE bisecting the sequence.
+
+**PG2. THE IQ4_NL NIBBLE-SPLIT-BY-16 DECODE LAW.** The MoE model's
+IQ4_NL weight rows are nibble-packed in a layout that is easy to get
+subtly wrong: within each 32-k group, **k 0..15 are the LOW nibbles of
+bytes 0..15 and k 16..31 are the HIGH nibbles of the SAME bytes** — a
+split-by-16 across the byte range, NOT sequential byte pairs (k0/k1 from
+byte 0, k2/k3 from byte 1, ...). Found empirically while porting the
+routed-down mma (`gxd_gm`): the stock `gxm_dnf` decode is nibble at byte
+`8+(g>>1)`, low when g is even — which IS the split-by-16 once you read
+it as two half-ranges of g. With the decode math verbatim (`w =
+d*(ls-32)*iq4nl[nib]`, the 8x6-bit level scales), the mma port measures
+relerr 3.84e-4, det x2, sentinel 0.
+
+**PG3. THE MEGA-BIN LATENT EDGE (documented, NOT fixed).** Synthetic
+sort tables with a huge single bin (>>~200 tokens on one expert) FAULT
+the STOCK `gxm_up` itself — a latent edge in the shipped kernel,
+presumably in the TS=16 tile masking at bin sizes the real router never
+produces. Production routing puts a MAXIMUM of 161 tokens on one expert
+per 256-chunk (the Session-A histogram), so the edge is unreachable in
+production and was documented rather than fixed. The discipline note:
+when a synthetic probe faults a STOCK kernel, verify the probe's shape
+is production-reachable before treating it as a regression — and record
+the edge either way.
+
+**PG4. THE HELD-OUT-WHEN-CE-UNEXPLAINED DISCIPLINE.** A kernel pair can
+pass EVERY per-layer numerics gate — all 40 layers clean, max relerr
+5.1e-4, deterministic x2, isolated 2.80-3.35x, −15.1 ms in-chunk — and
+still be catastrophically wrong at the system level: Session E's
+shared-expert mma pair measured **e2e mean CE 8.47, top-1 5/256** (the
+per-move bisect `mm_ce_bisect.py`). The control matrix (both arms
+deterministic; the pair's own outputs reading identical between arms
+while hA/hnb/gates diverge downstream) could not close the mechanism in
+session. The rule: when the e2e quality gate fails and the mechanism is
+unexplained, you HOLD OUT — kernels and evidence committed, knob
+registered but off (MM_PFR=0), re-open question documented — you do not
+ship a measured speedup with an unexplained quality break, and you do
+not delete the work either. The e2e gate outranks every isolated gate;
+that is the entire reason it exists. (Sibling law: the router M-batch
+was dropped from the other side of the same discipline — its expert ids
+came out bit-exact but gates/sg ULP-drifted, so the GOLD-ROUTER
+never-reorder contract was not met, and a 2.5 ms pool does not buy the
+contract's erosion.)

@@ -1,0 +1,11 @@
+{
+ "shgu_perlayer": {
+  "bad_layers": [],
+  "max_relerr": 0.000509013538248837,
+  "relerr_l0": 0.000362981139915064
+ },
+ "shdn_perlayer": {
+  "bad_layers": [],
+  "max_relerr": 0.0002997743431478739
+ }
+}

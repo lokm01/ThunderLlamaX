@@ -245,6 +245,32 @@ class Rig7(L56.Rig):
         dev.synchronize()
         print(f"[rig7] session-D: {_nd}/1 wide-PF-attn programs", flush=True)
 
+        # ---- SESSION E (routed-up mma): the gathered-row-list gate+up
+        # (gxu_gm -- M=W-rows dense mma tiles, N=gathered 16-token tiles
+        # from the mmsort8 bins; POC 1.43x isolated / x1.86 implied
+        # in-chunk, F 4.1e-4, det x2; gate MM_PFU). Static 39KB smem.
+        E_LSZ = {"gxu_gm": (256, 1, 1), "gxd_gm": (256, 1, 1),
+                 "shgm512": (256, 1, 1), "sdm2048": (256, 1, 1),
+                 "k2s36h_256": (256, 1, 1), "k2s36h_64": (256, 1, 1),
+                 "k2nz36": (128, 1, 1)}
+        _ne = 0
+        for _sym, _lsz in E_LSZ.items():
+            _cb = f"{BASE}/MM_E_{_sym}.cubin"
+            if not os.path.exists(_cb):
+                continue
+            _lib = open(_cb, "rb").read()
+            self.K[_sym] = NVProgram(dev, TinyELF(lib=_lib, name=_sym,
+                                                  target=dev.renderer.target,
+                                                  signature=()))
+            L56.LSZ[_sym] = _lsz; _ne += 1
+        self.LSZ7 = dict(L56.LSZ)
+        # SESSION E scratch: the split-row scan's YQB/YSSB (+4MB)
+        if "k2s36h_256" in self.K:
+            self.YQB = self.alloc(256 * 4096 * 4); self.keep.append(self.YQB)
+            self.YSSB = self.alloc(256 * 64 * 4); self.keep.append(self.YSSB)
+        dev.synchronize()
+        print(f"[rig7] session-E: {_ne} routed-up/dn/shared/scan programs", flush=True)
+
     # ---------- feed helpers (zero-GPU-command) ----------
     def feed(self, tid, pos):
         self.ids_view[0] = int(tid)
@@ -279,11 +305,26 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
     # SESSION D (port 2): the k=2048 trunk mma ports (qkv/z/q/k/v)
     PFK = (pf and os.getenv("MM_PFK", "0") == "1" and P in (256, 64)
            and "pgmq8k2_r8192" in rig.K)
-    if PFG or PFM or PFT:
+    # SESSION E: the gathered-row-list routed gate+up mma
+    PFU = (pf and os.getenv("MM_PFU", "0") == "1" and P in (256, 64)
+           and "gxu_gm" in rig.K)
+    # SESSION E port 2: the gathered dn mma (PFD), the shared-expert mma
+    # pair (PFR), the split-row scan (PFS)
+    PFD = (pf and os.getenv("MM_PFD", "0") == "1" and P in (256, 64)
+           and "gxd_gm" in rig.K)
+    PFR = (pf and os.getenv("MM_PFR", "0") == "1" and P in (256, 64)
+           and "shgm512" in rig.K and "sdm2048" in rig.K)
+    PFS = (pf and os.getenv("MM_PFS", "0") == "1" and P in (256, 64)
+           and f"k2s36h_{P}" in rig.K and "k2nz36" in rig.K)
+    if PFG or PFM or PFT or PFU or PFD or PFR or PFS:
         _need = ["mmsort8", "gxm_up", "gxm_up4", "gxm_dn", "gxm_dn6",
                  "gvs32k2048", "shgu32", "shdn32"] + (
                 ["gconv36_64", "k2s36_64"] if tg == "gconv36_64" else []) + (
-                ["pgmq8m32"] if PFT else [])
+                ["pgmq8m32"] if PFT else []) + (
+                ["gxu_gm"] if PFU else []) + (
+                ["gxd_gm"] if PFD else []) + (
+                ["shgm512", "sdm2048"] if PFR else []) + (
+                [f"k2s36h_{P}", "k2nz36"] if PFS else [])
         _miss = [s for s in _need if s not in rig.K]
         if _miss:
             raise RuntimeError(f"MM_PFG/MM_PFM=1 but session-B programs missing: {_miss} "
@@ -317,7 +358,20 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
                 seq.append((tk, (B["qkvsb"], B["abb"], w["adt"], w["sn"], B["zb"], rig.SV[gi], B["gyb"], rig.SLOTV[gi]), (32,), ()))
             else:
                 seq.append((tg, (w["cw"], B["qkvb"], rig.CSV[gi], B["qkvsb"]), (32,), ()))
-                seq.append((tk, (B["qkvsb"], B["abb"], w["al"], w["dt"], w["sn"], B["zb"], rig.SV[gi], B["gyb"]), (32,), ()))
+                # SESSION E (MM_PFS): the split-row scan (2 CTAs/head, the
+                # norm apply split out; yss regroup only -- S bit-exact)
+                if PFS and tk == "k2s36_256":
+                    seq.append(("k2s36h_256", (B["qkvsb"], B["abb"], w["al"], w["dt"],
+                                               rig.SV[gi], rig.YQB, rig.YSSB), 64, ()))
+                    seq.append(("k2nz36", (rig.YQB, rig.YSSB, w["sn"], B["zb"],
+                                           B["gyb"]), P * 32, (P,)))
+                elif PFS and tk == "k2s36_64":
+                    seq.append(("k2s36h_64", (B["qkvsb"], B["abb"], w["al"], w["dt"],
+                                              rig.SV[gi], rig.YQB, rig.YSSB), 64, ()))
+                    seq.append(("k2nz36", (rig.YQB, rig.YSSB, w["sn"], B["zb"],
+                                           B["gyb"]), P * 32, (P,)))
+                else:
+                    seq.append((tk, (B["qkvsb"], B["abb"], w["al"], w["dt"], w["sn"], B["zb"], rig.SV[gi], B["gyb"]), (32,), ()))
             # SESSION C (L1b): the out k=4096 pair -> the pgmq8m32 mma
             # M-GEMM when MM_PFT=1 (POC 7.4-8.2x isolated; the stock runs
             # ~212 GB/s IN-GRAPH = the latency floor the tile amortization
@@ -403,20 +457,47 @@ def build_seq7(rig, P, tg, tk, with_head=True, head_mode="full", spk=None,
                 # same [pair] slots the pair-walk wrote).
                 seq.append(("rt8e256", (w["rt"], w["wsh"], B["hnb"], B["eidsb"], B["gatesb"], B["sgb"]), (P,), ()))
                 seq.append(("mmsort8", (B["eidsb"], rig.EOFFB, rig.PLISTB, rig.ITEMSB, rig.NITB), 1, (P * 8,)))
-                seq.append(("shgu32", (w["sg"], w["su"], B["hnb"], rig.ACTSHB), 512 // 8, (P,)))
-                seq.append(("shdn32", (w["sd"], rig.ACTSHB, B["shb"]), 2048 // 8, (P,)))
+                # SESSION E (MM_PFR): the shared-expert mma pair (isolated
+                # 2.8x/3.3x, in-chunk -15.1ms; Tier-2 F class)
+                if PFR:
+                    seq.append(("shgm512", (w["sg"], w["su"], B["hnb"], rig.ACTSHB),
+                                (P // 32) * (512 // 64), (P,)))
+                    seq.append(("sdm2048", (w["sd"], rig.ACTSHB, B["shb"]),
+                                (P // 32) * (2048 // 64), (P,)))
+                else:
+                    seq.append(("shgu32", (w["sg"], w["su"], B["hnb"], rig.ACTSHB), 512 // 8, (P,)))
+                    seq.append(("shdn32", (w["sd"], rig.ACTSHB, B["shb"]), 2048 // 8, (P,)))
                 gup = "gxm_up4" if upk == "gx8e256up4" else "gxm_up"
                 gex = (rig.iq4nl,) if gup == "gxm_up4" else (rig.gridf,)
-                seq.append((gup, (rig.PTB_UP[L], rig.ITEMSB, rig.NITB, rig.EOFFB,
-                                  rig.PLISTB, B["hnb"]) + gex + (B["actb"],), 1024, ()))
+                # SESSION E (MM_PFU): the IQ3_S routed gate+up becomes the
+                # gathered-row-list mma (gxu_gm) -- grid 2048 = 256 experts
+                # x 8 W-row-tiles, token-tiles looped in-kernel; eoff/plist
+                # drive everything (items/nit UNUSED by the mma path).
+                # Tier-2: F 4.1e-4 + CE-gated. The 1 IQ4_XS layer keeps
+                # gxm_up4. Kill-switch MM_PFU=0 = gxm_up verbatim.
+                if PFU and gup == "gxm_up":
+                    seq.append(("gxu_gm", (rig.PTB_UP[L], rig.EOFFB, rig.PLISTB,
+                                           B["hnb"], rig.gridf, B["actb"]), 2048, ()))
+                else:
+                    seq.append((gup, (rig.PTB_UP[L], rig.ITEMSB, rig.NITB, rig.EOFFB,
+                                      rig.PLISTB, B["hnb"]) + gex + (B["actb"],), 1024, ()))
                 # SESSION C: the dn act-restaging fold (BIT-EXACT, 1.32-1.36x
                 # POC) preferred when its cubin is loaded; no env key (same
                 # outputs bit-for-bit -> pcache nodes stay valid).
                 gdn = "gxm_dn6" if dnk == "gx8e256dn6" else (
                     "gxm_dnf" if "gxm_dnf" in rig.K else "gxm_dn")
-                dex = () if gdn == "gxm_dn6" else (rig.iq4nl,)
-                seq.append((gdn, (rig.PTB_DN[L], rig.ITEMSB, rig.NITB, rig.EOFFB,
-                                  rig.PLISTB, B["actb"]) + dex + (B["partsb"],), 1024, ()))
+                # SESSION E (MM_PFD): the IQ4_NL dn lane -> the gathered
+                # mma (grid 4096 = 256 experts x 16 W-row-tiles). Tier-2
+                # (F 3.8e-4 class); Q6_K layers keep gxm_dn6.
+                if PFD and gdn == "gxm_dnf":
+                    gdn = "gxd_gm"
+                if gdn == "gxd_gm":
+                    seq.append((gdn, (rig.PTB_DN[L], rig.EOFFB, rig.PLISTB,
+                                      B["actb"], rig.iq4nl, B["partsb"]), 4096, ()))
+                else:
+                    dex = () if gdn == "gxm_dn6" else (rig.iq4nl,)
+                    seq.append((gdn, (rig.PTB_DN[L], rig.ITEMSB, rig.NITB, rig.EOFFB,
+                                      rig.PLISTB, B["actb"]) + dex + (B["partsb"],), 1024, ()))
             else:
                 seq.append(("rt8e256", (w["rt"], w["wsh"], B["hnb"], B["eidsb"], B["gatesb"], B["sgb"]), (P,), ()))
                 seq.append(("shexp8", (w["sg"], w["su"], w["sd"], B["hnb"], B["shb"]), (P,), ()))

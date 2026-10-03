@@ -299,12 +299,18 @@ grouped-experts v1 (0.86x, killed — the class is latency-bound on the
 dequant+dot chain, not DRAM-bound). The campaign story is in
 [PERFORMANCE.md](PERFORMANCE.md).
 
-**The MoE prefill graph (Sessions A+B+C+D)** — the chunked-prefill counterpart,
-behind six kill-switch env knobs (`MM_PFG` grouped experts, `MM_PFM`
+**The MoE prefill graph (Sessions A+B+C+D+E)** — the chunked-prefill counterpart,
+behind nine kill-switch env knobs (`MM_PFG` grouped experts, `MM_PFM`
 seat-loop trunk, `MM_PF64` the 64-seat tail, `MM_PFT` the trunk mma pair,
-`MM_PFW` the wide dyn-smem attention, `MM_PFK` the k=2048 trunk mma ports;
-all default-on, all config_fp-keyed, any knob off restores the stock
-sequence byte-identically):
+`MM_PFW` the wide dyn-smem attention, `MM_PFK` the k=2048 trunk mma ports,
+`MM_PFU` the gathered-row routed gate+up mma, `MM_PFD` the gathered-row
+routed down mma, `MM_PFS` the split-row GDN scan; all default-on, all
+config_fp-keyed, any knob off restores the stock
+sequence byte-identically. A tenth knob, `MM_PFR` — the shared-expert
+mma pair — is registered but ships OFF: its kernels are clean in
+isolation on all 40 layers yet fail the e2e cross-entropy gate through an
+unexplained mechanism, so the pair is held out with kernels and evidence
+committed):
 
 - **`mmsort8.cu`** — the deterministic counting sort that turns the
   router's per-token expert ids into bin tables for the grouped GEMMs:
@@ -377,8 +383,65 @@ sequence byte-identically):
   stock), CE-gated; 2.01x on the attention pair @96k. The dynamic-smem
   sizing rides the QMD patch (`qmd.write(shared_memory_size=...)`), not
   the static carveout — the exec-snapshots-QMD-at-record-time law.
+- **`gxu_gm.cu` — the gathered-row-list routed gate+up mma (Session E,
+  `MM_PFU`)** — the design that finally ported the mma template onto the
+  ROUTED experts, whose M dimension is per-expert ragged (the stock
+  grouped kernels' item space is (expert, row-stripe)). The swap: M
+  becomes the expert's 512 W-rows as DENSE 64-row mma tiles, and the
+  ragged side moves to N — the bin's activations are GATHERED via the
+  sort's `plist` into 16-token tiles, pad rows zero-filled so every
+  tile is deterministic. A = the dequantized IQ3_S gate/up weights in
+  smem `[Wrow][k]`, B = the gathered activations in smem `[token][k]` —
+  the proven `pgmq8k2` fragment-load code with the operand roles
+  swapped (both slots consume row-major `[row][k]` smem). Items
+  (expert, rowtile) are a fixed 2048 static grid; token tiles loop
+  in-kernel; decode volume is identical to the stock kernel. The
+  epilogue scatters `silu(g)*u` to `ys[pair*512+row]` — the combine's
+  layout untouched. Tier-2 (relerr 4.13e-4, F/CE-gated), in-chunk
+  −49.1 ms; 125 regs / zero spill, 39,232 B smem.
+- **`gxd_gm.cu` — the gathered-row routed DOWN mma (Session E,
+  `MM_PFD`)** — the twin of `gxu_gm` at K=512 with M=2048 dn W-rows
+  (16 × 128-row tiles, a 4096 static grid, the `pgmq8k2` MRG=2 warp
+  partition). The load-bearing detail is the **IQ4_NL
+  nibble-split-by-16 decode** (found empirically; see
+  [DEXT_LAWS.md](DEXT_LAWS.md) PG3): within each 32-k group the LOW
+  nibbles of bytes 0..15 serve k 0..15 and the HIGH nibbles of the same
+  bytes serve k 16..31. With the stock kernel's decode math verbatim
+  (`d*(ls-32)*iq4nl[nib]`, the 6-bit level scales), the epilogue writes
+  raw fp16 accumulators straight into the combine's
+  `parts[pair*2048+row]` contract. Tier-2 (relerr 3.84e-4), isolated
+  2.20-2.23x, in-chunk −35.0 ms; the 3 Q6_K layers keep the stock
+  `gxm_dn6` (a third lane did not pay).
+- **`k2s36h_{256,64}.cu` + `k2nz36.cu` — the split-row GDN scan
+  (Session E, `MM_PFS`)** — the stock `k2s36` runs ONE CTA per head (32
+  CTAs on an 82-SM part, ~60% of the GPU idle; the t-chain is serial,
+  so rows are the only legal parallel dimension short of the full WY
+  chunked reformulation). The port splits the 128 v-rows across 2
+  CTAs/head (grid 64, 8 rows/warp) with the per-row math VERBATIM stock
+  — **S bit-exact**; the only numerics change is the output-norm sum
+  regroup (`yss = half0 + half1`, fixed order) instead of the stock
+  serial 8-warp sum — Tier-2 reassociation of the F-bank class. The
+  gated-RMSNorm apply becomes a cross-CTA epilogue (`k2nz36`, one CTA
+  per (t, head), same formula/op order), fed from dedicated `YQB`/`YSSB`
+  scratch. Isolated 1.45x, in-chunk −7.6 ms.
+- **`shgm512.cu` + `sdm2048.cu` — the shared-expert mma pair (Session E,
+  `MM_PFR` — registered, HELD OUT)** — the `pgmq8k2` Q8_0 template on
+  the two biggest shared-router members (gate+up [512][2176] with the
+  `silu(g)*u` epilogue, then down [2048][2176] at KDIM=512). Per-layer
+  eager gates clean on all 40 layers (max relerr 5.1e-4, det x2),
+  isolated 2.80x/3.35x, in-chunk −15.1 ms — and the e2e per-seat CE
+  gate fails catastrophically (8.47, top-1 5/256) through a mechanism
+  the control matrix could not close. HELD OUT of the ship (MM_PFR=0);
+  kernels + evidence committed as the top known 2k lever. Also kept for
+  the record: `MM_E_rt8e_m.cu` (the M-batched router — expert ids
+  bit-exact but gates/sg ULP-drift, so the GOLD-ROUTER bit-exact
+  contract was not met; its 2.5 ms pool did not justify Tier-2 erosion)
+  and the pre-split 2-symbol sources (`MM_E_shm.cu`, `MM_E_k2sh.cu`)
+  that motivated the ONE-SYMBOL-PER-CUBIN loader law
+  ([DEXT_LAWS.md](DEXT_LAWS.md) PG1).
 - **`gxm_dnf.cu` — the routed-down act-restaging fold (Session C, rides
-  `MM_PFG`)** — `gxm_dn` restaged its 16 KB activation block per
+  `MM_PFG`; the IQ4_NL lane superseded by `gxd_gm` in Session E)** —
+  `gxm_dn` restaged its 16 KB activation block per
   (row-block, b); the fold stages the FULL 512-wide activation ONCE per
   item into `xsm2[TS][512]` (32 KB smem -> the 100 KB AUTO carveout =
   3 CTAs/SM) and the row-block loop becomes pure dequant+FMA with zero
@@ -421,7 +484,19 @@ row-grouped attention POC + the kernel-order anchor `spkqw_ref`),
 `mm_p2_poc_d.py` (the k=2048 mma POC, per class), `mm_bat_d.py` (the
 ship battery — CE/F/ladder in one, both the PFW-only and combined arms),
 `mm_wire_d.py`/`mm_wire_d2.py` (the two wiring patches) and
-`mm_build_d.zsh` (the cubin build + zero-spill audit).
+`mm_build_d.zsh` (the cubin build + zero-spill audit). Session E's are
+`mm_e1_poc.py`/`mm_e1_dbg.py` (the gathered-row up-mma POC + the
+indicator-x k-sweep that localized the odd-128-k bugs),
+`mm_e2_poc.py` (the post-PFU family table + the router M-batch
+bit-exact check), `mm_e3_poc.py` (the dn/shared/scan POCs + the
+per-move in-chunk deltas), `mm_sh_dbg.py`/`mm_sh_dbg2.py`/
+`mm_sh_layer.json` (the shared-pair per-layer gates + the divergence
+matrix that could not close), `mm_ce_bisect.py` (the per-move CE
+bisect — the instrument that caught the shared-pair e2e failure),
+`mm_bat_e.py`/`mm_bat_e2.json` (the PFU-only and combined ship
+batteries), `mm_daemon_e.py` (the staged daemon battery — run after the
+pending physical cold-cycle), `mm_wire_e.py`/`mm_wire_e2.py` (the wiring
+patches) and `mm_build_e.zsh` (the PER-SYMBOL cubin builds).
 
 ## Kernel inventory (engine/*.cu, the load-bearing families)
 

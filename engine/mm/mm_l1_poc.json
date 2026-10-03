@@ -1,0 +1,149 @@
+{
+ "l1_swap": {
+  "qkv": {
+   "rows": 8192,
+   "bit_exact": true,
+   "stock_ms": 6.5695,
+   "swap_ms": 6.3882,
+   "speedup": 1.03,
+   "w_mb": 17.8,
+   "stock_gbs": 694.6,
+   "swap_gbs": 714.3
+  },
+  "z": {
+   "rows": 4096,
+   "bit_exact": true,
+   "stock_ms": 3.2747,
+   "swap_ms": 3.3813,
+   "speedup": 0.97,
+   "w_mb": 8.9,
+   "stock_gbs": 696.8,
+   "swap_gbs": 674.8
+  },
+  "k": {
+   "rows": 512,
+   "bit_exact": true,
+   "stock_ms": 0.4543,
+   "swap_ms": 0.4365,
+   "speedup": 1.04,
+   "w_mb": 1.1,
+   "stock_gbs": 627.8,
+   "swap_gbs": 653.3
+  },
+  "v": {
+   "rows": 512,
+   "bit_exact": true,
+   "stock_ms": 0.4369,
+   "swap_ms": 0.4342,
+   "speedup": 1.01,
+   "w_mb": 1.1,
+   "stock_gbs": 652.8,
+   "swap_gbs": 656.8
+  },
+  "q": {
+   "rows": 8192,
+   "bit_exact": true,
+   "stock_ms": 6.5956,
+   "swap_ms": 6.4661,
+   "speedup": 1.02,
+   "w_mb": 17.8,
+   "stock_gbs": 691.9,
+   "swap_gbs": 705.7
+  },
+  "out": {
+   "rows": 2048,
+   "bit_exact": true,
+   "stock_ms": 3.116,
+   "swap_ms": 3.26,
+   "speedup": 0.96,
+   "w_mb": 8.9,
+   "stock_gbs": 732.2,
+   "swap_gbs": 699.9
+  },
+  "o": {
+   "rows": 2048,
+   "bit_exact": true,
+   "stock_ms": 3.1376,
+   "swap_ms": 3.2774,
+   "speedup": 0.96,
+   "w_mb": 8.9,
+   "stock_gbs": 727.2,
+   "swap_gbs": 696.2
+  }
+ },
+ "raster_verdict": {
+  "ratio_qkv": 1.03,
+  "verdict": "FLAT: read cta_raster QMD fields (ops_nv.py) before proceeding"
+ },
+ "l1_seatloop": {
+  "stock_ms": 6.5526,
+  "gvsl_8_8": {
+   "bit_exact": true,
+   "ms": 4.8755,
+   "speedup_vs_stock": 1.34,
+   "smem_kb": 8
+  },
+  "gvsl_16_8": {
+   "bit_exact": true,
+   "ms": 4.9276,
+   "speedup_vs_stock": 1.33,
+   "smem_kb": 16
+  },
+  "gvsl_32_8": {
+   "bit_exact": true,
+   "ms": 3.9451,
+   "speedup_vs_stock": 1.66,
+   "smem_kb": 32
+  },
+  "gvsl_64_4": {
+   "bit_exact": true,
+   "ms": 6.1222,
+   "speedup_vs_stock": 1.07,
+   "smem_kb": 32
+  },
+  "gvsl_8_8_t256": {
+   "bit_exact": true,
+   "ms": 4.8072,
+   "speedup_vs_stock": 1.33,
+   "smem_kb": 8,
+   "tpb": 256
+  },
+  "gvsl_16_8_t256": {
+   "bit_exact": true,
+   "ms": 4.815,
+   "speedup_vs_stock": 1.33,
+   "smem_kb": 16,
+   "tpb": 256
+  },
+  "gvsl_32_8_t256": {
+   "bit_exact": true,
+   "ms": 3.95,
+   "speedup_vs_stock": 1.62,
+   "smem_kb": 32,
+   "tpb": 256
+  },
+  "gvsl_64_4_t256": {
+   "bit_exact": true,
+   "ms": 6.059,
+   "speedup_vs_stock": 1.05,
+   "smem_kb": 32,
+   "tpb": 256
+  },
+  "gvsl_32_8_t512": {
+   "bit_exact": true,
+   "ms": 4.5047,
+   "speedup_vs_stock": 1.42,
+   "smem_kb": 32,
+   "tpb": 512
+  }
+ },
+ "l1_winner": {
+  "seatloop_best": {
+   "variant": "gvsl_32_8",
+   "ms": 3.9451
+  },
+  "swap_qkv_ms": 6.3882,
+  "winner": "seatloop",
+  "note": "qkv-class comparison; Session B ports the winner across all trunk classes"
+ }
+}

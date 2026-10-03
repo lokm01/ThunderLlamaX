@@ -27,4 +27,8 @@ build() {  # build <out.cubin> <src.cu> [extra flags...]  (ABSOLUTE paths --
 # L4: the row-grouped wide PF attention (the 96k lever) -- RW variants
 build MM_D_spkqw4_98304.cubin MM_D_spkqw.cu -DCTXS=98304 -DRW=4
 build MM_D_spkqw8_98304.cubin MM_D_spkqw.cu -DCTXS=98304 -DRW=8
+# port 2: the k=2048 trunk Q8_0 M-GEMM mma (qkv/z/q/k/v) -- ROWS variants
+build MM_D_pgmq8k2_r8192.cubin MM_D_pgmq8k2.cu -DROWS=8192
+build MM_D_pgmq8k2_r4096.cubin MM_D_pgmq8k2.cu -DROWS=4096
+build MM_D_pgmq8k2_r512.cubin  MM_D_pgmq8k2.cu -DROWS=512
 echo "[build-d] done"

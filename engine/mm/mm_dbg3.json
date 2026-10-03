@@ -1,0 +1,23 @@
+{
+ "ref_selfcheck": true,
+ "qkv": {
+  "swapped_sites": 30,
+  "mismatched": 0
+ },
+ "z": {
+  "swapped_sites": 30,
+  "mismatched": 0
+ },
+ "q": {
+  "swapped_sites": 10,
+  "mismatched": 0
+ },
+ "k": {
+  "swapped_sites": 10,
+  "mismatched": 0
+ },
+ "v": {
+  "swapped_sites": 10,
+  "mismatched": 0
+ }
+}

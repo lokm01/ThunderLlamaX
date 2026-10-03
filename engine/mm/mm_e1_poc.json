@@ -1,0 +1,27 @@
+{
+ "eager": {
+  "npair": 2048,
+  "live_bins": 186,
+  "bin_mean": 8.0,
+  "bin_max": 161,
+  "relerr": 0.0004126780790120851,
+  "maxabs": 0.0012639760971069336,
+  "sign_flips": 111,
+  "det_x2": true,
+  "sentinel": 0
+ },
+ "isolated": {
+  "gxm_up_ms": 2.717,
+  "gxu_gm_ms": 1.905,
+  "x": 1.43
+ },
+ "inchunk": {
+  "stock_ms": 345.315,
+  "gxu_ms": 296.232,
+  "delta_ms": 49.082,
+  "stock_tps": 741.4,
+  "gxu_tps": 864.2,
+  "implied_gxmup_total_ms": 106.0,
+  "implied_perkernel_x": 1.86
+ }
+}

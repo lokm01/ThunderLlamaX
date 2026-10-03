@@ -1,0 +1,31 @@
+{
+ "eager_bit_exact": true,
+ "graph_bit_exact": true,
+ "graph_mismatch": 0,
+ "ka_dump_words": [
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  29332,
+  0,
+  29331,
+  16776640,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0,
+  0
+ ]
+}
